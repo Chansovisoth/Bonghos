@@ -1,0 +1,25 @@
+# Build artifacts
+/source/bin/
+/source/bonghos
+/source/bonghos-linux-*
+
+# Embedded frontend is generated from web/src by `make web` / setup.sh
+/source/cmd/bonghos/webdist/*.html
+/source/cmd/bonghos/webdist/*.css
+/source/cmd/bonghos/webdist/*.js
+
+# Local development runtime
+/source/devhome/
+
+# Editors and OS
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# Never commit secrets or runtime data
+secret.key
+*.db
+*.db-wal
+*.db-shm

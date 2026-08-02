@@ -1,0 +1,1606 @@
+===============================================================================
+ BONGHOS — COMPLETE TUTORIAL
+===============================================================================
+
+ Official repository: https://github.com/Chansovisoth/Bonghos
+ Bonghos version:     0.1.0
+ Tutorial format:     1
+ Last updated:        2026-08-02
+ License:             AGPL-3.0-only
+
+-------------------------------------------------------------------------------
+ IMPORTANT WARNINGS — READ FIRST
+-------------------------------------------------------------------------------
+
+ * Do NOT run Bonghos or Minecraft as root. Everything runs as your normal
+   Linux user. The installer refuses to run as root on purpose.
+
+ * NEVER delete or lose this file:
+       <BONGHOS_HOME>/system/config/secret.key
+   It encrypts your two-factor (TOTP) secrets. Without it, accounts cannot be
+   recovered and encrypted data is permanently unreadable. It is included when
+   you copy the whole Bonghos directory to another machine.
+
+ * Bonghos does NOT configure public networking. It never touches your router,
+   firewall, port forwarding or tunnels. Making a server reachable from the
+   internet is entirely your responsibility. See section 13 and section 51.
+
+ * The Web UI listens on 127.0.0.1 (this machine only) by default.
+
+
+===============================================================================
+ TABLE OF CONTENTS
+===============================================================================
+
+  1. What Bonghos is and what version 1 supports
+  2. Source directory versus installed runtime directory
+  3. System requirements
+  4. Installing Git
+  5. Installing from Git (recommended)
+  6. Installing from an extracted source archive
+  7. Running ./setup.sh
+  8. Choosing an installation location
+  9. Creating the first Owner account
+ 10. Setting up an authenticator application
+ 11. Saving your recovery codes
+ 12. Opening the Web UI
+ 13. Remote access with an SSH tunnel
+ 14. Creating a server project
+ 15. Uploading a server-pack archive
+ 16. Using drag-and-drop
+ 17. Downloading a server pack from a URL
+ 18. Importing a local server archive
+ 19. Importing an existing server directory
+ 20. Selecting a startup script
+ 21. Selecting Java
+ 22. Configuring RAM and JVM arguments
+ 23. Accepting the Minecraft EULA
+ 24. Starting the server
+ 25. Stopping, restarting and force-stopping
+ 26. What actually keeps Minecraft running (systemd, not tmux)
+ 27. Opening the console with `bonghos console`
+ 28. Detaching from tmux without stopping Minecraft
+ 29. Recreating the tmux console after closing or killing it
+ 30. Direct console mode
+ 31. Starting Bonghos automatically at boot
+ 32. Autostarting a Minecraft project after reboot
+ 33. Creating additional Bonghos accounts
+ 34. Understanding roles
+ 35. Creating schedules
+ 36. Scheduling backups
+ 37. Restoring backups
+ 38. Moving Bonghos to another directory
+ 39. Transferring Bonghos to another computer
+ 40. Updating from a Git clone with ./setup.sh --update --pull
+ 41. Updating manually with git pull --ff-only
+ 42. Updating from a newly extracted source archive
+ 43. Updating a custom BONGHOS_HOME
+ 44. Handling local Git changes
+ 45. Handling diverged Git history
+ 46. Verifying an update
+ 47. Repairing Bonghos
+ 48. Uninstalling Bonghos
+ 49. Troubleshooting
+ 50. Command quick reference
+
+
+===============================================================================
+ 1. WHAT BONGHOS IS AND WHAT VERSION 1 SUPPORTS
+===============================================================================
+
+ Bonghos is a free-forever, open-source, self-hosted web control panel for
+ running modded Minecraft Java Edition servers on Linux.
+
+ "Bonghos" comes from the Khmer word បង្ហោះ, meaning "hosting".
+
+ Version 1 supports:
+
+   * Linux (Ubuntu 24.04 LTS is the primary supported system)
+   * Minecraft Java Edition, modded server packs
+   * Multiple stored server projects, ONE running at a time
+   * Adding server packs by archive upload, drag-and-drop, direct URL
+     download, local archive, or importing an existing directory
+   * Start, graceful stop, restart and force stop
+   * Console access via the Web UI, the CLI, or an optional tmux session
+   * Java selection, RAM and JVM argument editing
+   * Server and host monitoring, online and historical player lists
+   * Player management (kick, ban, whitelist, operators)
+   * Persistent schedules that run without a browser open
+   * Manual and scheduled backups, verification, retention and restore
+   * Multiple user accounts with mandatory two-factor authentication
+   * Owner / Admin / Member / Viewer roles
+   * Portable installation you can move between directories and computers
+   * Automatic startup after reboot
+   * Safe, source-driven updates
+
+ Version 1 deliberately does NOT include:
+
+   * CurseForge browsing, search, API keys or project-link resolution
+   * Modrinth browsing
+   * Vanilla Java or Bedrock servers
+   * Multiple servers running simultaneously
+   * Billing, subscriptions or public account registration
+   * Shell access in the browser
+   * Automatic port forwarding, firewall or tunnel configuration
+   * Docker or any container runtime
+
+
+===============================================================================
+ 2. SOURCE DIRECTORY VERSUS INSTALLED RUNTIME DIRECTORY
+===============================================================================
+
+ These are two SEPARATE directories. Do not confuse them.
+
+   Cloned or extracted source package:
+       ~/bonghos-source/
+
+     Contains setup.sh, Tutorial.txt, README.md, LICENSE and source/.
+     This is the code. You can delete it after installing (though keeping it
+     makes updates easier).
+
+   Installed runtime:
+       ~/bonghos/
+
+     Contains your actual data:
+
+       ~/bonghos/
+       |-- servers/     real Minecraft server files (worlds, mods, configs)
+       |-- backups/     portable backup archives
+       `-- system/      Bonghos internals
+           |-- bin/bonghos            the executable
+           |-- config/bonghos.toml    configuration
+           |-- config/secret.key      encryption key — NEVER LOSE THIS
+           |-- data/bonghos.db        accounts, schedules, metadata
+           |-- logs/                  Bonghos and audit logs
+           |-- runtime/               live process state
+           `-- temp/                  uploads and staging
+
+ Minecraft files stay normal files. You can edit them over SSH, SFTP, with
+ nano, or with any file manager. Bonghos never hides them in a database.
+
+
+===============================================================================
+ 3. SYSTEM REQUIREMENTS
+===============================================================================
+
+   * Linux, 64-bit (x86_64 or ARM64). Ubuntu 24.04 LTS recommended.
+   * A normal user account (not root).
+   * Go 1.22 or newer          — to build Bonghos
+   * Git                       — to clone and update
+   * Java 17 or 21             — to run Minecraft (depends on the modpack)
+   * tar, gzip                 — required
+   * tmux                      — optional, for the console session
+   * unzip, xz-utils, zstd     — optional, for archive formats
+   * p7zip-full                — optional, for .7z packs
+   * unrar                     — optional, for .rar packs (proprietary)
+   * RAM: enough for your modpack plus ~1 GB for Linux and Bonghos
+   * Disk: the modpack size, plus room for backups
+
+ Install the common ones on Ubuntu or Debian:
+
+     sudo apt update
+     sudo apt install golang-go git tar gzip tmux unzip xz-utils zstd \
+                      openjdk-21-jre-headless
+
+ The installer checks all of these and offers to install missing packages.
+
+
+===============================================================================
+ 4. INSTALLING GIT
+===============================================================================
+
+     sudo apt update
+     sudo apt install git
+     git --version
+
+
+===============================================================================
+ 5. INSTALLING FROM GIT (RECOMMENDED)
+===============================================================================
+
+     git clone https://github.com/Chansovisoth/Bonghos.git ~/bonghos-source
+     cd ~/bonghos-source
+     ./setup.sh
+
+ That is the whole installation. Continue at section 7.
+
+
+===============================================================================
+ 6. INSTALLING FROM AN EXTRACTED SOURCE ARCHIVE
+===============================================================================
+
+ If you downloaded a source ZIP or tar archive instead of using Git:
+
+     cd ~/Downloads
+     unzip Bonghos-0.1.0.zip          # or: tar -xf Bonghos-0.1.0.tar.gz
+     cd Bonghos-0.1.0
+     chmod +x setup.sh
+     ./setup.sh
+
+ setup.sh and Tutorial.txt are at the top level of the archive.
+
+ NOTE: an extracted archive has no Git metadata, so `--pull` will not work.
+ Updating uses `./setup.sh --update` instead. See section 42.
+
+
+===============================================================================
+ 7. RUNNING ./setup.sh
+===============================================================================
+
+     cd ~/bonghos-source
+     ./setup.sh
+
+ The guided installer will:
+
+    1. Detect your Linux distribution and CPU architecture
+    2. Refuse to run as root
+    3. Verify the source/ directory is complete
+    4. Check build dependencies and offer to install missing packages
+    5. Detect installed Java versions
+    6. Check archive and compression tools
+    7. Check systemd user-service support
+    8. Build the Web UI and the Go executable
+    9. Run the test suite (it will NOT install a version that fails tests)
+   10. Ask where to install the runtime
+   11. Create the runtime directory, configuration, encryption key and database
+   12. Walk you through creating the first Owner account and two-factor setup
+   13. Offer to install the two systemd user services
+   14. Print the Web UI address and next steps
+
+ It never starts Minecraft during installation.
+
+ All available options:
+
+     ./setup.sh                  Guided production install
+     ./setup.sh --dev            Verify development dependencies
+     ./setup.sh --build          Build and test without installing
+     ./setup.sh --update         Build and install the source present here
+     ./setup.sh --update --pull  Fast-forward Git first, then update
+     ./setup.sh --pull --update  Same thing; order does not matter
+     ./setup.sh --repair         Repair the installation and services
+     ./setup.sh --uninstall      Remove services and executable, keep data
+     ./setup.sh --home DIR       Use a custom runtime location
+     ./setup.sh --help           Show all options
+
+
+===============================================================================
+ 8. CHOOSING AN INSTALLATION LOCATION
+===============================================================================
+
+ The default runtime location is:
+
+     ~/bonghos
+
+ To use a different location, for example a large storage drive:
+
+     ./setup.sh --home /mnt/storage/bonghos
+
+ Or set an environment variable:
+
+     export BONGHOS_HOME=/mnt/storage/bonghos
+     ./setup.sh
+
+ Bonghos resolves its root in this order:
+     1. the --home option
+     2. the BONGHOS_HOME environment variable
+     3. $HOME/bonghos
+
+ Whichever you choose, ALL Bonghos commands afterwards need the same location:
+
+     ~/bonghos/system/bin/bonghos --home /mnt/storage/bonghos doctor
+
+
+===============================================================================
+ 9. CREATING THE FIRST OWNER ACCOUNT
+===============================================================================
+
+ The installer does this for you. To do it manually later:
+
+     ~/bonghos/system/bin/bonghos setup
+
+ You will be asked for:
+
+     Username:   3-32 characters, letters/numbers/underscore/hyphen/dot
+     Password:   minimum 10 characters
+
+ There is no public registration and no default password. Every additional
+ account is created by invitation from an Owner or Admin (section 33).
+
+
+===============================================================================
+ 10. SETTING UP AN AUTHENTICATOR APPLICATION
+===============================================================================
+
+ Two-factor authentication is MANDATORY for every account. It cannot be
+ disabled.
+
+ During setup you will see something like:
+
+     Secret: FN7UXCXJSFSNIA6QQAOBH2TSPPNASYVL
+     URI:    otpauth://totp/Bonghos:admin?secret=...&issuer=Bonghos
+
+ Install any RFC 6238 authenticator app:
+
+     * Aegis Authenticator (Android, open source — recommended)
+     * Ente Auth (Android, iOS, desktop — open source)
+     * Google Authenticator (Android, iOS)
+     * 1Password, Bitwarden, KeePassXC (also store TOTP)
+
+ Add the account by typing the secret manually, or by scanning the QR code
+ shown in the Web UI when creating accounts there.
+
+ Then enter the 6-digit code to confirm. If it is rejected, your device clock
+ is probably wrong — enable automatic time sync on your phone.
+
+
+===============================================================================
+ 11. SAVING YOUR RECOVERY CODES
+===============================================================================
+
+ After the Owner account is created, eight recovery codes are printed ONCE:
+
+       9ed93-75230
+       923d0-6361d
+       ...
+
+ Each code works exactly once, in place of your authenticator code, if you
+ lose your phone. Save them now:
+
+     * Write them on paper and store it somewhere safe, or
+     * Put them in a password manager
+
+ They are stored hashed. Bonghos cannot show them to you again.
+
+
+===============================================================================
+ 12. OPENING THE WEB UI
+===============================================================================
+
+ Start the control plane:
+
+     systemctl --user start bonghos.service
+
+ or without systemd:
+
+     ~/bonghos/system/bin/bonghos serve
+
+ Then open:
+
+     http://127.0.0.1:8080
+
+ Sign in with your username, password and the current 6-digit code.
+
+ If the login page reports an error, it always says the same thing whether the
+ username, password or code was wrong. This is deliberate: it prevents anyone
+ from discovering which usernames exist.
+
+
+===============================================================================
+ 13. REMOTE ACCESS WITH AN SSH TUNNEL
+===============================================================================
+
+ Bonghos listens on 127.0.0.1 only, so it is not reachable from other
+ machines. This is the safe default.
+
+ To reach it from your laptop, forward the port over SSH. Run this ON YOUR
+ LAPTOP (not on the server):
+
+     ssh -L 8080:127.0.0.1:8080 youruser@your-server
+
+ Leave that terminal open, then browse on your laptop to:
+
+     http://127.0.0.1:8080
+
+ This is encrypted by SSH and exposes nothing to the internet.
+
+ If you really want Bonghos to listen on your local network, edit:
+
+     ~/bonghos/system/config/bonghos.toml
+
+ and change bind_address. Understand the risk first: anyone who can reach that
+ address can attempt to log in. Prefer the SSH tunnel.
+
+
+===============================================================================
+ 14. CREATING A SERVER PROJECT
+===============================================================================
+
+ In the Web UI go to "Servers" and choose "Add Server".
+
+ Step 1 — Project display name:
+
+     Project name:  Dusk Till Dawn
+
+ Step 2 — Bonghos generates a folder slug:
+
+     Slug:          dusk-till-dawn
+
+ The slug becomes the directory name:
+
+     ~/bonghos/servers/minecraft-java/modded/dusk-till-dawn/
+
+ You can edit the slug BEFORE creating the project, but not afterwards. The
+ display name can be changed at any time and does not rename the directory.
+
+ More examples:
+
+     ATM 10               ->  atm-10
+     DeceasedCraft 5      ->  deceasedcraft-5
+     Dungeons & Dragons   ->  dungeons-dragons
+     My Server (2026)     ->  my-server-2026
+
+ Step 3 — optionally upload a server icon (converted to 64x64 PNG).
+
+ Step 4 — choose one of four sources:
+
+     Upload Archive
+     Download from URL
+     Import Local Archive
+     Import Existing Directory
+
+ Note: the Bonghos project name is separate from the Minecraft MOTD.
+
+
+===============================================================================
+ 15. UPLOADING A SERVER-PACK ARCHIVE
+===============================================================================
+
+ Choose "Upload Archive", then "Choose Archive" to pick a file from the
+ computer running your browser.
+
+ Supported formats:
+
+     .zip  .tar  .tar.gz  .tgz  .tar.xz  .7z  .rar
+
+ .7z and .rar only work if a compatible extractor is installed on the server.
+
+ During upload you will see the filename, uploaded and total bytes, the
+ percentage, current and average speed, estimated time remaining, and a
+ Cancel button:
+
+     Uploading ServerPack.zip
+     2.4 GB / 5.1 GB
+     47%
+     21.3 MB/s
+     About 2 minutes remaining
+     [Cancel]
+
+ The file streams to disk on both ends; nothing is held in memory.
+
+ After the upload finishes, Bonghos validates the archive, extracts it into a
+ staging area, finds the real server root, detects the startup script and Java
+ settings, then moves everything into place. You can watch each stage.
+
+
+===============================================================================
+ 16. USING DRAG-AND-DROP
+===============================================================================
+
+ Instead of clicking "Choose Archive", drag the archive file from your file
+ manager onto the upload area:
+
+     Drag a server-pack archive here
+     or
+     [Choose Archive]
+
+ The rest is identical to section 15.
+
+
+===============================================================================
+ 17. DOWNLOADING A SERVER PACK FROM A URL
+===============================================================================
+
+ Choose "Download from URL" and paste a DIRECT link to the archive:
+
+     https://example.com/serverpack.zip
+
+ The Linux server downloads it — not your browser. This means:
+
+     * A slow home connection does not matter
+     * You can close the browser, log out, or switch devices
+     * Another Admin can open Bonghos and watch the same progress
+
+ Progress looks like:
+
+     Downloading ServerPack.zip
+     3.8 GB / 8.1 GB
+     46%
+     18.4 MB/s
+     Estimated time remaining: 4m 02s
+     [Cancel]
+
+ If the remote server does not report a total size, Bonghos shows the bytes
+ downloaded, the speed and the elapsed time, without inventing a percentage.
+
+ Security: URLs must be HTTPS by default. Bonghos blocks links pointing at
+ loopback, private-network, link-local and cloud-metadata addresses, rejects
+ URLs with embedded usernames or passwords, revalidates every redirect, limits
+ the archive size, and stops before filling the disk. An Owner can allow plain
+ HTTP or configure a trusted-domain allowlist in Settings.
+
+ If a download is interrupted in version 1, restart it from the beginning.
+
+
+===============================================================================
+ 18. IMPORTING A LOCAL SERVER ARCHIVE
+===============================================================================
+
+ If the archive is already ON the Linux machine (for example uploaded by SFTP):
+
+ Choose "Import Local Archive" and enter the full path:
+
+     /home/youruser/Downloads/ServerPack.zip
+
+ Bonghos verifies it is a readable regular file, copies it into the safe
+ upload workflow, then continues through the same validation and staging.
+ The original file is not modified or deleted.
+
+
+===============================================================================
+ 19. IMPORTING AN EXISTING SERVER DIRECTORY
+===============================================================================
+
+ If you already run a server manually (like the old tmux setup), import it.
+
+ Choose "Import Existing Directory" and enter the path:
+
+     /home/youruser/minecraft/ATM10
+
+ If the directory is outside BONGHOS_HOME, pick one of:
+
+     Copy into Bonghos    (default, safest — the original is left alone)
+     Move into Bonghos    (relocates the files)
+     Link external        (leave in place, Bonghos manages it where it is)
+
+ Linked directories are marked:
+
+     External project — not included in normal Bonghos migration
+
+ which means moving or exporting Bonghos will NOT carry those files with it.
+ Linking requires explicit confirmation.
+
+ STOP the server before importing it. Bonghos checks for running Java
+ processes and will not adopt or kill a server it did not start.
+
+
+===============================================================================
+ 20. SELECTING A STARTUP SCRIPT
+===============================================================================
+
+ Bonghos looks for the usual names — run.sh, start.sh, startserver.sh,
+ server-start.sh, start-server.sh — but it does not trust names alone. It
+ reads each script looking for Java commands, argument files, and Forge,
+ NeoForge, Fabric or Quilt launch patterns, then ranks the candidates.
+
+ If exactly one obvious candidate exists, it is selected automatically.
+ Otherwise you choose from a list on the Configuration page. You will see the
+ exact final launch command before starting.
+
+ INTERACTIVE SCRIPTS: many modpack scripts end with something like
+
+     read -n 1 -p "Press any key to continue"
+
+ which works in a terminal but blocks an automated server. Bonghos warns you,
+ shows the file and line, and offers to patch it. It shows the exact change,
+ makes a timestamped backup, and requires your confirmation. It never rewrites
+ your scripts silently.
+
+
+===============================================================================
+ 21. SELECTING JAVA
+===============================================================================
+
+ On the Configuration page, choose the Java runtime:
+
+     auto                     let Bonghos pick a suitable installed version
+     java                     the system default
+     java-17                  a specific major version
+     java-21
+     /custom/path/to/java     an exact path
+
+ Prefer "auto" or a version name over a full path — a hardcoded path breaks if
+ you move Bonghos to another computer. After a migration, run
+ `bonghos doctor --repair` and Bonghos re-discovers Java; if the choice is
+ ambiguous, it asks you rather than guessing.
+
+ Most modern modpacks need Java 17 or 21. The pack's own documentation is the
+ authority.
+
+
+===============================================================================
+ 22. CONFIGURING RAM AND JVM ARGUMENTS
+===============================================================================
+
+ On the Configuration page you will see the detected memory settings and,
+ importantly, WHICH FILE controls them. Modpacks store this differently:
+
+     * a dedicated file such as user_jvm_args.txt
+     * a variable in the startup script (JAVA_ARGS, JVM_OPTS, MAX_RAM, ...)
+     * settings.cfg or a similar pack-specific file
+
+ Bonghos edits the correct place. It never blindly injects arguments into a
+ script it does not understand. Before changing a pack-owned file it makes a
+ timestamped backup, writes atomically, and preserves comments and formatting.
+
+ Values are validated:
+
+     Xms must be less than or equal to Xmx
+     Xmx must leave enough RAM for Linux and Bonghos
+     the Java executable must exist and match your CPU architecture
+
+ A rough guide for an 8 GB machine: Xmx of about 6G. For 16 GB: about 10-12G.
+ Giving Java everything leaves nothing for the operating system and makes the
+ whole machine unstable.
+
+ Changing memory requires a server restart to take effect.
+
+ Advanced users can edit the raw JVM argument list on the same page.
+
+
+===============================================================================
+ 23. ACCEPTING THE MINECRAFT EULA
+===============================================================================
+
+ Minecraft servers refuse to start until you accept Mojang's EULA:
+
+     https://aka.ms/MinecraftEULA
+
+ On the Configuration page, read it, then click Accept. Bonghos writes
+ eula=true into eula.txt with a comment noting when and by whom it was
+ accepted. It is never accepted automatically on your behalf.
+
+
+===============================================================================
+ 24. STARTING THE SERVER
+===============================================================================
+
+ Make sure the project is selected as active, then press "Start Server" on the
+ Overview page.
+
+ Or from the command line:
+
+     ~/bonghos/system/bin/bonghos server start
+
+ Watch the Console page. The first start of a modded pack often takes several
+ minutes as it generates the world and loads hundreds of mods. It is ready
+ when you see a line like:
+
+     Done (241.372s)! For help, type "help"
+
+ If it fails, the console shows why. Common causes: EULA not accepted, wrong
+ Java version, not enough RAM, or a port already in use.
+
+
+===============================================================================
+ 25. STOPPING, RESTARTING AND FORCE-STOPPING
+===============================================================================
+
+ Stop Server
+     Sends the Minecraft `stop` command and waits for Java to exit cleanly.
+     This saves the world properly. It can take a minute on a big pack. Be
+     patient — do not force stop just because it is slow.
+
+ Restart Server
+     Optionally warns players, runs `save-all flush`, stops gracefully, waits
+     for full exit, then starts again and confirms it came up.
+
+ Force Stop
+     Lives under a danger menu, requires confirmation, and is recorded in the
+     audit log. It kills the process group immediately. RECENT WORLD CHANGES
+     MAY BE LOST. Only use it when a graceful stop has already failed.
+
+ Members and Viewers cannot force stop.
+
+ Only one lifecycle operation runs at a time. Bonghos will not let you start
+ twice, restore while running, switch the active project while running, or
+ delete a running project.
+
+
+===============================================================================
+ 26. WHAT ACTUALLY KEEPS MINECRAFT RUNNING (systemd, NOT tmux)
+===============================================================================
+
+ This is the most important concept in Bonghos, and the biggest difference
+ from the old tmux script.
+
+ The chain of ownership is:
+
+     systemd user manager
+         `-- bonghos-minecraft.service
+                 `-- Bonghos supervisor
+                         `-- your modpack startup script
+                                 `-- Java / Minecraft
+
+ tmux is NOT in that chain. It is only an optional console viewer:
+
+     you run `bonghos console`
+         -> tmux session named `bonghos` is created if needed
+             -> it runs a console client
+                 -> which connects to the supervisor's local socket
+                     -> which is already attached to the running Minecraft
+
+ Consequences, all of which are tested:
+
+     * Detaching from tmux does NOT affect Minecraft
+     * Closing your SSH session does NOT affect Minecraft
+     * Killing the tmux session does NOT stop or restart Minecraft
+     * Killing the entire tmux server does NOT stop or restart Minecraft
+     * Minecraft runs perfectly with tmux not installed at all
+     * No tmux session is ever created at boot or when starting the server
+
+ The supervisor — not tmux — owns the process, captures the console, applies
+ the restart policy, distinguishes a crash from an intentional stop, and
+ writes the authoritative state.
+
+
+===============================================================================
+ 27. OPENING THE CONSOLE WITH `bonghos console`
+===============================================================================
+
+     ~/bonghos/system/bin/bonghos console
+
+ This checks that a supervisor is running, then creates or attaches a tmux
+ session named exactly `bonghos`.
+
+ If the session already exists, you attach to it. If a session with that name
+ exists but Bonghos does not own it, Bonghos reports the conflict and refuses
+ to take it over — it never kills or renames a session it did not create.
+
+ When you connect you get the recent console history followed by live output.
+ You can type Minecraft commands directly.
+
+ If Minecraft is not running, Bonghos tells you there is no active console
+ instead of dropping you into a misleading empty shell. It will not start the
+ server just because you asked for a console.
+
+ The console is a MINECRAFT console. It is never a Linux shell — not here and
+ not in the Web UI.
+
+
+===============================================================================
+ 28. DETACHING FROM TMUX WITHOUT STOPPING MINECRAFT
+===============================================================================
+
+ Press:
+
+     Ctrl+b   then   d
+
+ (Hold Ctrl, press b, release both, then press d.)
+
+ You return to your normal shell. Minecraft keeps running. You can now log out
+ of SSH entirely and the server continues.
+
+
+===============================================================================
+ 29. RECREATING THE TMUX CONSOLE AFTER CLOSING OR KILLING IT
+===============================================================================
+
+ Suppose you (or a crash, or a reboot of your SSH client) destroy the session:
+
+     tmux kill-session -t bonghos
+
+ Minecraft is unaffected. To get the console back:
+
+     ~/bonghos/system/bin/bonghos console
+
+ A new session is created and reconnects to the SAME already-running Minecraft
+ process, with recent history replayed.
+
+ Once the session exists, plain tmux works too:
+
+     tmux attach -t bonghos
+
+ That only works AFTER `bonghos console` has created it.
+
+
+===============================================================================
+ 30. DIRECT CONSOLE MODE
+===============================================================================
+
+ To skip tmux entirely and connect the current terminal:
+
+     ~/bonghos/system/bin/bonghos console --direct
+
+ Useful when tmux is not installed, inside scripts, or when your terminal
+ program already manages sessions. Press Ctrl+C to disconnect — this
+ disconnects the console only and does not stop Minecraft.
+
+
+===============================================================================
+ 31. STARTING BONGHOS AUTOMATICALLY AT BOOT
+===============================================================================
+
+ Install the two systemd user services (the installer offers this):
+
+     ~/bonghos/system/bin/bonghos service install
+
+ Enable the control plane:
+
+     systemctl --user daemon-reload
+     systemctl --user enable --now bonghos.service
+     systemctl --user status bonghos.service
+
+ IMPORTANT — lingering. By default a user's systemd manager only runs while
+ that user is logged in, so Bonghos would not start after an unattended
+ reboot. To allow it, enable lingering (this needs sudo once, and Bonghos will
+ never do it silently for you):
+
+     sudo loginctl enable-linger yourusername
+
+ Verify:
+
+     loginctl show-user yourusername | grep Linger
+
+ To undo it:
+
+     sudo loginctl disable-linger yourusername
+
+
+===============================================================================
+ 32. AUTOSTARTING A MINECRAFT PROJECT AFTER REBOOT
+===============================================================================
+
+ Starting Bonghos and starting Minecraft are two SEPARATE settings.
+
+ On the Configuration page, per project:
+
+     Autostart this Minecraft project     default: off
+     Boot delay (seconds)                 default: 30
+     Recover after unclean shutdown       default: on
+
+ The boot flow is:
+
+     computer boots
+       -> systemd user manager starts bonghos.service
+         -> Bonghos validates its database, runtime state and services
+           -> Bonghos waits for the boot delay
+             -> Bonghos checks for conflicts, disk space, Java, project validity
+               -> if autostart is on, it starts bonghos-minecraft.service ONCE
+                 -> the supervisor launches the startup script and Java
+
+ The Minecraft service is deliberately NOT enabled to start on its own at
+ boot. The control plane starts it, so it can verify which project is active
+ and guarantee the server is never started twice.
+
+ A boot delay helps when your world lives on a network or external drive that
+ needs a moment to mount.
+
+ No tmux session is created during any of this.
+
+
+===============================================================================
+ 33. CREATING ADDITIONAL BONGHOS ACCOUNTS
+===============================================================================
+
+ There is no public sign-up. Owners and Admins invite people.
+
+ In the Web UI: Administration -> Users -> Invite User. Choose a role, and you
+ get a one-time activation link to send to that person.
+
+ Or from the CLI:
+
+     ~/bonghos/system/bin/bonghos user invite
+
+ The invited person opens the link and chooses their own username and
+ password, scans their own QR code, and receives their own recovery codes.
+
+ Invitation tokens are single-use, expire, and can be revoked. Every account
+ has a separate password, TOTP secret, recovery codes and sessions. Nobody
+ shares a two-factor secret. Disabling one user does not affect the others.
+
+ Other user commands:
+
+     bonghos user list
+     bonghos user disable <username>
+     bonghos user enable <username>
+     bonghos user revoke-sessions <username>
+
+
+===============================================================================
+ 34. UNDERSTANDING ROLES
+===============================================================================
+
+ OWNER — complete control: users, roles, security, servers, console, files,
+ configuration, players, backups, restores, schedules, host settings,
+ portability, exports and imports.
+
+ Only an Owner can promote someone to Owner, or modify, demote or delete
+ another Owner. There must ALWAYS be at least one active Owner — Bonghos
+ refuses to delete or demote the last one.
+
+ ADMIN — everything about running servers: projects, imports and downloads,
+ start/stop/restart/force stop, console, players, files, Java and JVM
+ settings, configuration, icons, backups, restores, schedules, and managing
+ Members and Viewers.
+
+ An Admin cannot modify, delete, demote or create an Owner, and cannot raise
+ their own role.
+
+ MEMBER — exactly five things, nothing more:
+
+     view server status
+     start server
+     stop server
+     restart server
+     view the player list
+
+ A Member cannot use the console, send commands, manage players, view or edit
+ files, change any settings, force stop, touch backups or schedules, manage
+ users, or import anything.
+
+ VIEWER — read-only. Dashboard, status, player list, performance metrics and
+ read-only console logs. Changes nothing.
+
+ These limits are enforced by the backend, not merely hidden in the interface.
+ Nobody can grant themselves extra permissions.
+
+
+===============================================================================
+ 35. CREATING SCHEDULES
+===============================================================================
+
+ Schedules live in the database and run in the backend. They do NOT need a
+ browser open, and they survive reboots.
+
+ Go to Schedules -> New Schedule. Choose:
+
+     Type:      once / daily / weekly / monthly / interval / cron
+     Time:      04:00  |  sun 04:00  |  0 4 * * *  |  21600 (seconds)
+     Timezone:  yours, so daylight-saving changes behave sensibly
+     Action:    start, stop, restart, console command, broadcast,
+                save-all, or create backup
+
+ Only Owners and Admins can manage schedules.
+
+ A typical nightly restart with warnings:
+
+     Daily Restart — 04:00
+       03:50   say Server restarting in 10 minutes
+       03:55   say Server restarting in 5 minutes
+       03:59   say Server restarting in 1 minute
+       04:00   save-all flush
+       04:00   restart server
+
+ Policies you can set:
+
+     When the server is offline:
+         skip_when_offline (default) / wait_until_online / start_then_execute
+
+     When a run was missed (Bonghos was off):
+         skip_missed_run (default) / run_once_after_startup
+
+     When another operation conflicts:
+         skip (default) / retry_later
+
+ Schedules never collide with installs, restores, backups or other lifecycle
+ operations, and cannot run twice at once. Full execution history is recorded.
+
+ Arbitrary Linux shell commands are NOT allowed — only Minecraft commands and
+ the fixed action list.
+
+
+===============================================================================
+ 36. SCHEDULING BACKUPS
+===============================================================================
+
+ Backups -> Schedule Backup. Three editable presets are offered (none is
+ enabled automatically):
+
+     Every 6 hours  — online world backup
+     Every day      — online full backup
+     Every week     — offline full backup
+
+ Backup types:
+
+     full_server              everything except regenerable junk
+     world_and_player_data    the world plus player data
+     configuration_only       settings, JVM config, mod configs, icon
+
+ Consistency modes:
+
+     online   the server keeps running. Bonghos runs `save-all flush`, then
+              `save-off`, copies the files, and ALWAYS runs `save-on`
+              afterwards — even if the copy, compression or verification
+              fails, or you cancel. Slightly less consistent for some packs.
+
+     offline  the server is stopped, backed up, then restarted only if it was
+              running before. The most consistent option. Players are warned
+              first if you configure warnings.
+
+ Every backup is verified after creation: the archive is opened, the file list
+ checked, and a cryptographic checksum calculated. An unverified or failed
+ archive is never presented as a successful backup.
+
+ Retention keeps storage bounded, for example:
+
+     Keep frequent backups for 2 days
+     Keep daily backups for 14 days
+     Keep weekly backups for 8 weeks
+     Keep monthly backups for 6 months
+     Maximum backup storage: 250 GB
+
+ Pruning only happens after a SUCCESSFUL backup, never deletes the last valid
+ backup, never deletes a protected backup, and is audited.
+
+ Backups are stored as portable archives:
+
+     ~/bonghos/backups/minecraft-java/modded/dusk-till-dawn/
+       2026-08-02_04-00-00_full.tar.zst
+       2026-08-02_10-00-00_world.tar.zst
+
+ You can extract them by hand without Bonghos:
+
+     tar --zstd -xf 2026-08-02_04-00-00_full.tar.zst
+
+
+===============================================================================
+ 37. RESTORING BACKUPS
+===============================================================================
+
+ Backups -> pick a backup -> Restore.
+
+ Bonghos never restores over a running server. It will stop it first.
+
+ The process: verify the archive and checksum, show you what is inside, stop
+ the server if needed, create an EMERGENCY pre-restore backup of the current
+ state, extract into staging, validate every path and symlink, then replace
+ files atomically. The server restarts only if it was running before.
+
+ Restore scopes:
+
+     full_server               everything
+     world_only                just the world and player data
+     configuration_only        just settings
+     restore_as_new_instance   creates a SEPARATE new project
+
+ "Restore as new instance" is the safest way to inspect an old backup: it asks
+ for a new display name, generates a new slug, and never overwrites the
+ existing project.
+
+ Only Owners and Admins can restore.
+
+
+===============================================================================
+ 38. MOVING BONGHOS TO ANOTHER DIRECTORY
+===============================================================================
+
+ Stop everything first:
+
+     systemctl --user stop bonghos-minecraft.service
+     systemctl --user stop bonghos.service
+
+ Move the whole directory:
+
+     mv ~/bonghos /mnt/storage/bonghos
+
+ Repair the installation at its new location:
+
+     /mnt/storage/bonghos/system/bin/bonghos \
+       --home /mnt/storage/bonghos \
+       doctor --repair
+
+ Regenerate the systemd services with the new paths:
+
+     /mnt/storage/bonghos/system/bin/bonghos \
+       --home /mnt/storage/bonghos \
+       service repair
+     systemctl --user daemon-reload
+     systemctl --user start bonghos.service
+
+ To avoid typing --home every time:
+
+     echo 'export BONGHOS_HOME=/mnt/storage/bonghos' >> ~/.bashrc
+
+ Bonghos stores its internal paths relative to its root, which is why this
+ works. Externally linked projects (section 19) are the exception — they stay
+ where they are.
+
+
+===============================================================================
+ 39. TRANSFERRING BONGHOS TO ANOTHER COMPUTER
+===============================================================================
+
+ Option A — copy the whole directory (keeps accounts and two-factor setup):
+
+   On the old machine, stop the services, then:
+
+     rsync -a ~/bonghos/ newuser@new-host:~/bonghos/
+
+   The -a flag preserves permissions, which matters for secret.key.
+
+   On the new machine:
+
+     ~/bonghos/system/bin/bonghos doctor --repair
+     ~/bonghos/system/bin/bonghos service install
+     systemctl --user enable --now bonghos.service
+
+   Because secret.key came along, all accounts and authenticator apps keep
+   working. Java paths and services are re-resolved by doctor --repair.
+
+ Option B — portable export and import:
+
+   On the old machine:
+
+     ~/bonghos/system/bin/bonghos export \
+       --output bonghos-export-2026-08-02.tar.zst
+
+   By default the export EXCLUDES secrets, so you will create accounts again
+   on the new machine. To include accounts and encrypted secrets:
+
+     ~/bonghos/system/bin/bonghos export --include-secrets --output ...
+
+   That requires Owner reauthentication and a passphrase, and produces an
+   archive containing your accounts — treat it like a password file.
+
+   Copy the archive over, then on the new machine:
+
+     ~/bonghos/system/bin/bonghos import --force bonghos-export-2026-08-02.tar.zst
+     ~/bonghos/system/bin/bonghos doctor --repair
+
+   Import never extracts over an active installation. It verifies checksums,
+   rejects unsafe paths and symlinks, and makes a safety copy first.
+
+ Either way, the new machine needs its own Java installation and its own
+ network configuration.
+
+
+===============================================================================
+ 40. UPDATING FROM A GIT CLONE WITH ./setup.sh --update --pull
+===============================================================================
+
+ The one-command update, for a clean Git checkout:
+
+     cd ~/bonghos-source
+     ./setup.sh --update --pull
+
+ `./setup.sh --pull --update` is exactly the same; order does not matter.
+
+ Understand the three related commands:
+
+     git pull --ff-only
+         Updates the local SOURCE checkout only. Changes nothing installed.
+
+     ./setup.sh --update
+         Builds and installs the source currently present in this checkout.
+         Does NOT fetch anything new.
+
+     ./setup.sh --update --pull
+         Safely fast-forwards a clean Git checkout, THEN builds and updates
+         the installed runtime.
+
+ Plain `git pull` may merge or rebase depending on your Git configuration.
+ `git pull --ff-only` stops instead of automatically combining diverged
+ history, which is why Bonghos uses it.
+
+ What --update does, in order:
+
+    1. Locates and validates the existing BONGHOS_HOME
+    2. Reads the installed and candidate versions
+    3. Verifies build dependencies and free disk space
+    4. Builds the frontend and executable in a TEMPORARY area
+    5. Runs the tests — a failure stops everything before anything is touched
+    6. Records which services were running
+    7. Warns before disconnecting players if Minecraft must restart
+    8. Makes timestamped safety copies of the database and configuration
+    9. Confirms secret.key exists and preserves it (never logged or copied out)
+   10. Stops only the services that must be replaced
+   11. Installs the new executable atomically (temp file + rename)
+   12. Applies configuration and database migrations
+   13. Repairs both systemd services
+   14. Runs `bonghos doctor` against the updated installation
+   15. Restores whatever was running before
+   16. Rolls the executable back if verification fails, keeping failure logs
+
+ An update ALWAYS preserves:
+
+     <BONGHOS_HOME>/servers/
+     <BONGHOS_HOME>/backups/
+     <BONGHOS_HOME>/system/config/bonghos.toml
+     <BONGHOS_HOME>/system/config/secret.key
+     <BONGHOS_HOME>/system/data/bonghos.db
+     <BONGHOS_HOME>/system/logs/
+
+ An update may replace or migrate the executable, the systemd unit files, the
+ configuration schema, the database schema and the embedded Web UI.
+
+ WILL PLAYERS BE DISCONNECTED? Only if Minecraft is running when you update.
+ The supervisor executable is being replaced, so the server must restart.
+ Bonghos warns you and asks for confirmation before doing it, and restarts the
+ server afterwards. Update while the server is stopped to avoid this entirely.
+
+
+===============================================================================
+ 41. UPDATING MANUALLY WITH git pull --ff-only
+===============================================================================
+
+ If you prefer to see what changed before installing it:
+
+     cd ~/bonghos-source
+     git pull --ff-only
+     git log --oneline -20          # review what arrived
+     ./setup.sh --update
+
+
+===============================================================================
+ 42. UPDATING FROM A NEWLY EXTRACTED SOURCE ARCHIVE
+===============================================================================
+
+ An extracted ZIP or tar archive has no Git metadata, so --pull cannot work
+ and will be rejected with an explanation.
+
+ Download the newer source archive, extract it, then:
+
+     cd ~/Downloads/Bonghos-0.2.0
+     ./setup.sh --update
+
+ It finds your existing runtime and upgrades it in place.
+
+
+===============================================================================
+ 43. UPDATING A CUSTOM BONGHOS_HOME
+===============================================================================
+
+     cd ~/bonghos-source
+     ./setup.sh --update --pull --home /mnt/storage/bonghos
+
+ Or set BONGHOS_HOME in your environment first and omit --home.
+
+
+===============================================================================
+ 44. HANDLING LOCAL GIT CHANGES
+===============================================================================
+
+ If you edited files in the source checkout, --pull stops and tells you.
+ Bonghos NEVER runs `git reset --hard`, `git clean -fd` or `git stash` on your
+ behalf. Your work is yours.
+
+ Inspect what you changed:
+
+     git status
+     git diff
+     git diff --staged
+
+ Then choose one:
+
+   Keep your changes as a commit:
+     git add -A
+     git commit -m "my local changes"
+     ./setup.sh --update --pull
+
+   Throw your changes away (YOU run this, deliberately):
+     git checkout -- .
+     ./setup.sh --update --pull
+
+   Set them aside for later:
+     git stash push -m "my local changes"
+     ./setup.sh --update --pull
+     git stash pop
+
+   Or just build what you have, without fetching:
+     ./setup.sh --update
+
+
+===============================================================================
+ 45. HANDLING DIVERGED GIT HISTORY
+===============================================================================
+
+ If your local commits and upstream commits have both moved on, a
+ fast-forward is impossible. Bonghos stops and does NOT merge or rebase
+ automatically. The installed runtime is left untouched.
+
+ See the situation:
+
+     git status
+     git log --oneline --graph --decorate --all
+
+ Then decide for yourself:
+
+   Rebase your commits on top of upstream:
+     git pull --rebase
+     ./setup.sh --update
+
+   Merge deliberately:
+     git pull --no-rebase
+     ./setup.sh --update
+
+   Abandon local commits and match upstream exactly (DESTRUCTIVE):
+     git fetch origin
+     git reset --hard origin/main
+     ./setup.sh --update
+
+ The last one permanently discards your commits. Be sure.
+
+
+===============================================================================
+ 46. VERIFYING AN UPDATE
+===============================================================================
+
+     ~/bonghos/system/bin/bonghos version
+     ~/bonghos/system/bin/bonghos doctor
+     systemctl --user status bonghos.service
+     systemctl --user status bonghos-minecraft.service
+
+ Then open the Web UI and confirm your servers, backups, schedules and users
+ are all present.
+
+ The update leaves safety copies at:
+
+     <BONGHOS_HOME>/system/temp/update-<timestamp>/
+
+ Delete that directory once you are satisfied the update went well.
+
+
+===============================================================================
+ 47. REPAIRING BONGHOS
+===============================================================================
+
+     cd ~/bonghos-source
+     ./setup.sh --repair
+
+ or directly:
+
+     ~/bonghos/system/bin/bonghos doctor
+     ~/bonghos/system/bin/bonghos doctor --repair
+     ~/bonghos/system/bin/bonghos doctor --fix-permissions
+
+ doctor --repair detects the current root, validates ownership and
+ permissions, clears verified stale process IDs, removes stale locks and
+ socket references, validates and migrates the database, re-resolves relative
+ paths, finds tmux, Java and archive tools, validates startup scripts and JVM
+ configuration, checks the executable architecture and systemd paths, and
+ reports external linked projects and missing dependencies.
+
+ It avoids touching Minecraft files unnecessarily and NEVER starts Minecraft.
+
+ --fix-permissions never modifies anything outside BONGHOS_HOME. If a fix
+ needs elevated privileges, it prints the exact command for you to run instead
+ of escalating silently.
+
+
+===============================================================================
+ 48. UNINSTALLING BONGHOS
+===============================================================================
+
+     cd ~/bonghos-source
+     ./setup.sh --uninstall
+
+ This stops and removes the two systemd user services and deletes the
+ executable. It PRESERVES your servers, backups, database, configuration and
+ secret.key.
+
+ To remove everything permanently, delete the directory yourself:
+
+     rm -rf ~/bonghos
+
+ WARNING: that deletes secret.key too. Every encrypted value, including all
+ two-factor secrets, becomes permanently unrecoverable. Take a backup or an
+ export first if there is any chance you want the data later.
+
+ Removing the source checkout is separate and always safe:
+
+     rm -rf ~/bonghos-source
+
+
+===============================================================================
+ 49. TROUBLESHOOTING
+===============================================================================
+
+ THE WEB UI DOES NOT LOAD
+
+     systemctl --user status bonghos.service
+     ~/bonghos/system/bin/bonghos doctor
+     tail -50 ~/bonghos/system/logs/bonghos.log
+
+   Remember it listens on 127.0.0.1 only. From another machine you need the
+   SSH tunnel in section 13.
+
+ I CANNOT LOG IN
+
+   The error is always generic on purpose. Check in this order:
+     * Is your phone's clock correct? Enable automatic time sync. A wrong
+       clock is by far the most common cause of rejected codes.
+     * Are you using the current code? They expire every 30 seconds.
+     * Try a recovery code instead (each works once).
+   Repeated failures trigger temporary rate limiting; wait a few minutes.
+
+ THE SERVER WILL NOT START
+
+   Read the Console page — the reason is almost always printed there.
+     * "You need to agree to the EULA"  -> section 23
+     * "UnsupportedClassVersionError"   -> wrong Java version, section 21
+     * "Could not reserve enough space" -> Xmx too high, section 22
+     * "Address already in use"         -> another server is on that port
+     * It hangs with no output          -> an interactive prompt in the
+                                           startup script, section 20
+
+ MINECRAFT STOPPED WHEN I CLOSED MY SSH SESSION
+
+   That should be impossible with systemd running it. Check:
+
+     systemctl --user status bonghos-minecraft.service
+     loginctl show-user $USER | grep Linger
+
+   If lingering is disabled, your whole user systemd manager shuts down at
+   logout. Enable it (section 31):
+
+     sudo loginctl enable-linger $USER
+
+ BONGHOS DID NOT START AFTER A REBOOT
+
+   Same cause — enable lingering. Then confirm the service is enabled:
+
+     systemctl --user is-enabled bonghos.service
+     systemctl --user enable bonghos.service
+
+ THE SERVER DID NOT AUTOSTART AFTER A REBOOT
+
+   Autostart is per project and off by default. Turn it on in Configuration
+   (section 32). Also confirm the project is the ACTIVE one.
+
+ `bonghos console` SAYS THERE IS NO SUPERVISOR
+
+   Minecraft is not running. Start it first. The console never starts the
+   server for you.
+
+ A TMUX SESSION NAMED bonghos ALREADY EXISTS BUT IS NOT MINE
+
+   Bonghos will not take over a session it does not own. Either close your
+   session, or use direct mode:
+
+     ~/bonghos/system/bin/bonghos console --direct
+
+ AN UPLOAD OR DOWNLOAD FAILED
+
+   Check the operation's log:
+
+     ls ~/bonghos/system/logs/operations/
+
+   Common causes: not enough disk space, an unsupported archive format, an
+   extractor not installed (7z, unrar), or a URL blocked by the SSRF
+   protections in section 17.
+
+ I EDITED SERVER FILES OVER SSH AND BONGHOS LOOKS OUT OF DATE
+
+   That is supported. Bonghos watches for external changes, refreshes the
+   interface, and marks settings as externally changed. It will not overwrite
+   your manual edits or push stale database values back over the filesystem.
+   If detection seems stuck, run `bonghos doctor --repair`.
+
+ I MOVED THE FOLDER AND NOTHING WORKS
+
+   Section 38. Run doctor --repair and service repair at the new location.
+
+ DISK IS FULL
+
+   Check backup storage on the Backups page, tighten retention (section 36),
+   and clear old operation logs and update safety copies:
+
+     du -sh ~/bonghos/*
+     rm -rf ~/bonghos/system/temp/update-*
+
+ GETTING MORE INFORMATION
+
+     ~/bonghos/system/bin/bonghos doctor
+     tail -100 ~/bonghos/system/logs/bonghos.log
+     tail -100 ~/bonghos/system/logs/audit.log
+     journalctl --user -u bonghos.service -n 100
+     journalctl --user -u bonghos-minecraft.service -n 100
+
+ Report bugs at: https://github.com/Chansovisoth/Bonghos/issues
+ Never paste secret.key, session cookies or recovery codes into an issue.
+
+
+===============================================================================
+ 50. COMMAND QUICK REFERENCE
+===============================================================================
+
+ INSTALL
+
+     git clone https://github.com/Chansovisoth/Bonghos.git ~/bonghos-source
+     cd ~/bonghos-source
+     ./setup.sh
+
+ UPDATE
+
+     # Git clone: retrieve source and update in one command
+     cd ~/bonghos-source
+     ./setup.sh --update --pull
+
+     # Git clone: retrieve source manually, then update
+     cd ~/bonghos-source
+     git pull --ff-only
+     ./setup.sh --update
+
+     # Extracted source archive
+     cd ~/Downloads/Bonghos-<version>
+     ./setup.sh --update
+
+     # Custom runtime
+     cd ~/bonghos-source
+     ./setup.sh --update --pull --home /mnt/storage/bonghos
+
+ SETUP SCRIPT
+
+     ./setup.sh                  guided install
+     ./setup.sh --dev            development dependencies
+     ./setup.sh --build          build and test only
+     ./setup.sh --update         install source present here
+     ./setup.sh --update --pull  fast-forward Git, then update
+     ./setup.sh --repair         repair installation and services
+     ./setup.sh --uninstall      remove services and executable, keep data
+     ./setup.sh --home DIR       custom runtime location
+     ./setup.sh --help           all options
+
+ EVERYDAY
+
+     bonghos version
+     bonghos serve
+     bonghos console
+     bonghos console --direct
+     bonghos doctor
+     bonghos doctor --repair
+     bonghos doctor --fix-permissions
+
+ SERVERS
+
+     bonghos server list
+     bonghos server import <directory> [display name]
+     bonghos server select <slug|id>
+     bonghos server start
+     bonghos server stop
+     bonghos server restart
+     bonghos server force-stop [--yes]
+
+ USERS
+
+     bonghos setup
+     bonghos admin create
+     bonghos user list
+     bonghos user invite [admin|member|viewer]
+     bonghos user disable <username>
+     bonghos user enable <username>
+     bonghos user revoke-sessions <username>
+     bonghos user reset-password <username>
+
+ BACKUPS
+
+     bonghos backup <world|full|configuration>
+     bonghos backup list
+     bonghos backup verify <backup-id>
+     bonghos backup restore <backup-id> [--scope full_server|world_only|configuration_only]
+
+ PORTABILITY
+
+     bonghos export --output <file.tar.zst>
+     bonghos export --include-secrets --output <file.tar.zst>
+     bonghos import [--force] <archive.tar.zst>
+
+ SERVICES
+
+     bonghos service install
+     bonghos service status
+     bonghos service repair
+     bonghos service uninstall
+
+     systemctl --user daemon-reload
+     systemctl --user enable --now bonghos.service
+     systemctl --user status bonghos.service
+     systemctl --user status bonghos-minecraft.service
+     sudo loginctl enable-linger <username>
+
+ TMUX (OPTIONAL CONSOLE ONLY)
+
+     bonghos console             create or attach the `bonghos` session
+     Ctrl+b then d               detach; Minecraft keeps running
+     tmux attach -t bonghos      reattach after the session exists
+     tmux kill-session -t bonghos    does NOT stop Minecraft
+
+ CUSTOM HOME
+
+     bonghos --home /mnt/storage/bonghos <command>
+     BONGHOS_HOME=/mnt/storage/bonghos bonghos <command>
+
+===============================================================================
+ End of Tutorial. Bonghos is free forever and open source (AGPL-3.0-only).
+ https://github.com/Chansovisoth/Bonghos
+===============================================================================
