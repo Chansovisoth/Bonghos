@@ -1,0 +1,35 @@
+# Bonghos control-plane systemd USER service (reference template).
+#
+# Bonghos generates this file automatically with resolved absolute paths:
+#   bonghos service install
+#   bonghos service repair     (after moving BONGHOS_HOME)
+#
+# It is installed to ~/.config/systemd/user/bonghos.service.
+# This copy exists for documentation and manual recovery only; placeholders in
+# angle brackets must be replaced with real absolute paths if used by hand.
+#
+# Never run this as root. Bonghos and Minecraft run as a normal Linux user.
+
+[Unit]
+Description=Bonghos Minecraft Hosting Control Panel
+After=network.target
+
+[Service]
+Type=exec
+Environment=BONGHOS_HOME=<resolved-root>
+WorkingDirectory=<resolved-root>
+ExecStart=<resolved-root>/system/bin/bonghos --home <resolved-root> serve
+Restart=on-failure
+RestartSec=5s
+
+# Conservative hardening. These are compatible with the control plane, which
+# only touches BONGHOS_HOME and spawns the Minecraft user service.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=default.target

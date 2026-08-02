@@ -1,0 +1,43 @@
+# Bonghos Minecraft supervisor systemd USER service (reference template).
+#
+# Generated automatically by `bonghos service install` / `bonghos service repair`
+# and installed to ~/.config/systemd/user/bonghos-minecraft.service.
+#
+# IMPORTANT: this unit has NO [Install] section on purpose. It must never start
+# unconditionally at boot. The Bonghos control plane starts it on demand after
+# validating the active project, checking for a live supervisor, and applying
+# the project's autostart setting and boot delay. That is what prevents
+# duplicate Minecraft processes after an unclean shutdown.
+#
+# Process ownership chain:
+#   systemd user manager -> bonghos supervisor -> startup script -> Java
+# tmux is NOT part of this chain. It is an optional console client only.
+
+[Unit]
+Description=Bonghos Minecraft Supervisor
+After=network.target
+
+[Service]
+Type=exec
+Environment=BONGHOS_HOME=<resolved-root>
+WorkingDirectory=<resolved-root>
+ExecStart=<resolved-root>/system/bin/bonghos --home <resolved-root> supervisor
+Restart=on-failure
+RestartSec=5s
+
+# KillMode=control-group ensures Java and any helper processes spawned by the
+# modpack startup script are cleaned up, preventing orphaned servers.
+KillMode=control-group
+
+# Must exceed the configured graceful stop timeout so the supervisor can send
+# `save-all flush` and `stop`, then wait for Java to exit cleanly, before
+# systemd escalates. Bonghos fills this in from bonghos.toml.
+TimeoutStopSec=<configured-graceful-shutdown-timeout>
+
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+
+# Deliberately NOT applied: ProtectHome, ProtectSystem=strict, PrivateTmp and
+# namespace restrictions. Modpacks legitimately read Java installations outside
+# BONGHOS_HOME, external linked project directories, and system temp. Enabling
+# those without validating each specific installation breaks server startup.
