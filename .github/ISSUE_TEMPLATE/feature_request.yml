@@ -1,0 +1,74 @@
+name: Feature request
+description: Suggest an improvement or new capability
+title: "[Feature]: "
+labels: ["enhancement", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion.
+
+        Please check the README roadmap first — some things are deliberately
+        deferred (CurseForge integration, vanilla and Bedrock servers, multiple
+        simultaneous servers) and some are permanently out of scope (Docker or
+        containers, billing, public registration, browser shell access,
+        automatic network configuration, required telemetry).
+
+  - type: checkboxes
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: I checked the roadmap and out-of-scope list in the README
+          required: true
+
+  - type: textarea
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation you are actually in, not just the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: What would you like to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Alternatives you have considered
+
+  - type: dropdown
+    attributes:
+      label: Which area?
+      options:
+        - Installation / updating
+        - Accounts / roles / security
+        - Server import
+        - Server lifecycle
+        - Console
+        - Configuration / Java
+        - Files
+        - Players
+        - Schedules
+        - Backups / restore
+        - Monitoring
+        - Portability
+        - Web UI / design
+        - CLI
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    attributes:
+      label: Compatibility
+      description: Would this require breaking any project rule?
+      options:
+        - label: This does not require Docker or any container runtime
+        - label: This does not require running as root
+        - label: This does not require shell access from the browser
+        - label: This does not require Bonghos to configure networking

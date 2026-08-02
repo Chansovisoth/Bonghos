@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: source/go.sum
+
+      - name: gofmt
+        working-directory: source
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        working-directory: source
+        run: go vet ./cmd/... ./internal/...
+
+      - name: Test
+        working-directory: source
+        run: go test -race ./internal/...
+
+      - name: Build
+        working-directory: source
+        run: go build ./...
+
+  cross-build:
+    name: Cross-compile
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: source/go.sum
+
+      - name: Build linux-${{ matrix.goarch }}
+        working-directory: source
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          cp web/src/* cmd/bonghos/webdist/
+          go build -ldflags "-s -w" -o "bonghos-linux-${{ matrix.goarch }}" ./cmd/bonghos
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bonghos-linux-${{ matrix.goarch }}
+          path: source/bonghos-linux-${{ matrix.goarch }}
+          retention-days: 14
+
+  shellcheck:
+    name: Shell script checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: bash -n setup.sh
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y shellcheck
+          shellcheck -S warning setup.sh || true
+
+      - name: setup.sh --help works
+        run: ./setup.sh --help
+
+      - name: --pull without --update is rejected
+        run: |
+          if ./setup.sh --pull 2>/dev/null; then
+            echo "--pull should have been rejected without --update"
+            exit 1
+          fi
+
+  docs:
+    name: Documentation consistency
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Required root files exist
+        run: |
+          for f in setup.sh Tutorial.txt README.md LICENSE; do
+            test -f "$f" || { echo "missing root file: $f"; exit 1; }
+          done
+          test -x setup.sh || { echo "setup.sh is not executable"; exit 1; }
+          test -d source || { echo "missing source/"; exit 1; }
+
+      - name: Required source layout exists
+        run: |
+          for p in source/go.mod source/cmd/bonghos/main.go source/internal \
+                   source/migrations source/web/src source/deploy/systemd \
+                   source/docs/CHANGELOG.md source/Makefile; do
+            test -e "$p" || { echo "missing: $p"; exit 1; }
+          done
+
+      - name: No Docker or container files
+        run: |
+          # Excludes source/third_party/, which holds upstream vendored
+          # dependencies. golang.org/x/sys ships its own Dockerfile for
+          # regenerating syscall tables; that is upstream's file, not a
+          # Bonghos deployment path.
+          found=$(find . -path ./.git -prune -o -path ./source/third_party -prune -o \
+                    \( -iname 'Dockerfile*' -o -iname 'docker-compose*' \
+                       -o -iname 'Containerfile*' -o -iname '*.k8s.yaml' \) -print || true)
+          if [ -n "$found" ]; then
+            echo "Bonghos must not contain container files:"
+            echo "$found"
+            exit 1
+          fi
+
+      - name: No competing setup entrypoints
+        run: |
+          for f in setup-dev.sh dev.sh install.sh scripts/setup.sh; do
+            if [ -e "$f" ]; then
+              echo "competing entrypoint present: $f"
+              exit 1
+            fi
+          done
+
+      - name: Documented setup.sh options really exist
+        run: |
+          for opt in --dev --build --update --pull --repair --uninstall --home --help; do
+            grep -q -- "$opt" setup.sh || { echo "setup.sh does not handle $opt"; exit 1; }
+            grep -q -- "$opt" Tutorial.txt || { echo "Tutorial.txt does not mention $opt"; exit 1; }
+          done
+
+      - name: Documented service names are consistent
+        run: |
+          for svc in bonghos.service bonghos-minecraft.service; do
+            grep -q "$svc" Tutorial.txt || { echo "Tutorial.txt missing $svc"; exit 1; }
+            grep -rq "$svc" source/internal/runtime/systemd/ || { echo "code missing $svc"; exit 1; }
+          done
+
+      - name: Repository URL is consistent
+        run: |
+          for f in README.md Tutorial.txt setup.sh; do
+            grep -q "github.com/Chansovisoth/Bonghos" "$f" \
+              || { echo "$f does not reference the official repository"; exit 1; }
+          done

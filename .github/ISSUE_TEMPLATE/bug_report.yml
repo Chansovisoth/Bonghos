@@ -1,0 +1,104 @@
+name: Bug report
+description: Something is not working as documented
+title: "[Bug]: "
+labels: ["bug", "needs triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        **Do not paste `secret.key`, session cookies, recovery codes or
+        passwords into this issue.** For security vulnerabilities, use
+        [private reporting](https://github.com/Chansovisoth/Bonghos/security/advisories/new)
+        instead of this form.
+
+  - type: checkboxes
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: I am running Bonghos as a normal (non-root) user
+          required: true
+        - label: I removed any secrets from the output I am pasting
+          required: true
+
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Bonghos version
+      description: Output of `bonghos version`
+      placeholder: bonghos 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Linux distribution and version
+      placeholder: Ubuntu 24.04 LTS (x86_64)
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Java version
+      description: Output of `java -version` (if relevant)
+      placeholder: openjdk 21.0.2
+
+  - type: dropdown
+    attributes:
+      label: Which area?
+      options:
+        - Installation / setup.sh
+        - Updating
+        - Login / accounts / roles
+        - Server import (upload, URL, directory)
+        - Starting / stopping / restarting
+        - Console or tmux
+        - Java / JVM configuration
+        - Files
+        - Players
+        - Schedules
+        - Backups / restore
+        - Monitoring
+        - systemd / autostart
+        - Portability / migration
+        - Web UI
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Diagnostics
+      description: Output of `bonghos doctor`
+      render: shell
+
+  - type: textarea
+    attributes:
+      label: Relevant logs
+      description: |
+        From `~/bonghos/system/logs/bonghos.log`, the Minecraft console, or
+        `journalctl --user -u bonghos.service -n 100`. Redact anything sensitive.
+      render: shell
+
+  - type: textarea
+    attributes:
+      label: Anything else?

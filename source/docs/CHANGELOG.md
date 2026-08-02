@@ -1,0 +1,174 @@
+# Changelog
+
+All notable changes to Bonghos are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+Nothing yet.
+
+## [0.1.0] — 2026-08-02
+
+First release. Bonghos is a free-forever, open-source, self-hosted web control
+panel for modded Minecraft Java Edition servers on Linux, running natively with
+no Docker or containers.
+
+### Added
+
+**Installation and updates**
+- Root `setup.sh` providing guided install, `--dev`, `--build`, `--update`,
+  `--update --pull`, `--repair`, `--uninstall`, `--home` and `--help`
+- Fast-forward-only Git updates that never reset, clean, stash, merge or rebase
+  local work, and stop safely on diverged history or uncommitted changes
+- Updates that build and test in a temporary area before touching the installed
+  runtime, install the executable atomically, and roll back on failed health
+  verification
+- Safety copies of the database and configuration before every update
+- Root `Tutorial.txt` with complete copyable instructions
+
+**Portable runtime**
+- Runtime root resolved from `--home`, then `BONGHOS_HOME`, then `$HOME/bonghos`
+- Runtime containing only `servers/`, `backups/` and `system/`
+- Internal paths stored relative to the root, so the directory can be moved to
+  another location or copied to another computer
+- `bonghos doctor`, `doctor --repair` and `doctor --fix-permissions`
+- Portable `bonghos export` and `bonghos import`, with optional encrypted
+  secret inclusion behind Owner reauthentication and a passphrase
+- Encryption key at `system/config/secret.key` (mode 0600) used for
+  authenticated encryption of TOTP secrets, never logged or exposed by the API
+
+**Accounts and authorization**
+- Multiple accounts with mandatory RFC 6238 TOTP two-factor authentication
+- Owner, Admin, Member and Viewer roles enforced in the backend
+- Member limited to exactly: view status, start, stop, restart, view players
+- Viewer read-only
+- Final-Owner protection: the last Owner cannot be deleted or demoted
+- Admin-created single-use, expiring invitations; no public registration
+- Argon2id password hashing, encrypted TOTP secrets, hashed one-use recovery codes
+- Anti-enumeration login with dummy verification work, generic errors and rate
+  limiting
+- Server-side sessions with HttpOnly and SameSite cookies, CSRF tokens and
+  session revocation
+- Audit logging of authentication, lifecycle, player, file, configuration,
+  backup, schedule, user and portability events
+
+**Server projects**
+- Display names with generated, validated, permanent directory slugs
+- Import by archive upload (drag-and-drop or file picker), server-side URL
+  download, local archive path, or existing directory (copy, move or link)
+- Streaming uploads and downloads with progress, speed, ETA and cancellation
+- Server-side downloads that continue across browser disconnection
+- Persistent operations in SQLite so the UI can reconnect and show progress,
+  interruptions and failures
+- Safe extraction: traversal, absolute path, Windows path, symlink and
+  hard-link protection, decompression-bomb, size and file-count limits, and
+  free-space checks
+- SSRF protection: HTTPS by default, blocked loopback, private, link-local,
+  multicast, unspecified and cloud-metadata addresses, rejected credentials in
+  URLs, redirect revalidation and re-resolution, redirect limits, timeouts and
+  size caps, with an Owner-managed trusted-domain allowlist
+- Startup-script detection that inspects script contents rather than trusting
+  filenames, ranks candidates, and detects blocking interactive prompts and
+  offers a reviewable patch
+- JVM configuration detection across argument files, shell variables and
+  pack-specific files, with the controlling source file shown per value
+- Safe JVM editing with validation, timestamped backups, atomic writes and
+  comment preservation
+- Server icons converted to exactly 64×64 PNG, served through an authenticated
+  endpoint
+
+**Runtime**
+- systemd user services `bonghos.service` and `bonghos-minecraft.service`
+- Supervisor owning the Minecraft process, pseudo-terminal, console stream,
+  process group and runtime state
+- `bonghos-minecraft.service` deliberately not enabled unconditionally at boot;
+  the control plane starts it after validating the active project
+- Restart policies (`never`, `on-failure`, `always`) with delay, exponential
+  backoff and crash-loop protection, where requested shutdown intent always
+  overrides the restart policy
+- Graceful stop with `save-all flush`, escalation only after timeout, and
+  process-group cleanup
+- Boot autostart per project with configurable delay, unclean-shutdown recovery
+  and duplicate-start prevention
+- Optional on-demand tmux console session named exactly `bonghos`, created
+  lazily by `bonghos console` only, never at boot or server start
+- `bonghos console --direct` for tmux-free console access
+- Killing the tmux session or server never stops, restarts or signals Minecraft
+- Framed local Unix-domain supervisor socket restricted to the Bonghos user
+
+**Operations**
+- Start, graceful stop, restart and force stop, serialized against conflicts
+- Live console in the Web UI, CLI and tmux, all reaching the same supervisor
+- Process and host monitoring with historical metrics, honestly labelling
+  resident memory as RSS rather than Java heap
+- Online and historical player lists from log parsing plus `list` polling only
+  while subscribers are present
+- Player actions (kick, ban, pardon, ban IP, whitelist, op, deop) using fixed
+  command templates with validated parameters
+- Persistent scheduler running without a browser, supporting once, hourly,
+  daily, weekly, monthly, fixed interval and cron, with timezones, multi-step
+  warning sequences, offline and missed-run policies, conflict handling,
+  duplicate-run protection and full execution history
+- Backups: full, world-and-player-data and configuration-only, online or
+  offline, with `save-on` always restored after online backups
+- Backup verification with checksums, retention policies with safety rules, and
+  restore with emergency pre-restore backups and restore-as-new-instance
+- Constrained file manager scoped to the server root
+- Filesystem watching so manual SSH and SFTP edits are respected rather than
+  overwritten
+
+**Interfaces**
+- Embedded Web UI served by the single Go executable, bound to `127.0.0.1` by
+  default
+- Authenticated WebSocket subscriptions per page, with all background work
+  continuing when no browser is connected
+- CLI covering serve, supervisor, console, doctor, setup, users, servers,
+  backups, export, import, service management and version
+
+### Security
+
+- Canonical path containment everywhere, never string-prefix comparison
+- Argument arrays instead of shell string concatenation
+- No arbitrary shell execution anywhere; the Web UI console is never a shell
+- Security headers and a Content Security Policy for the embedded frontend
+- Secrets never written to logs, audit records or API responses
+
+### Notes
+
+- The frontend is dependency-free HTML, CSS and JavaScript rather than the
+  React, TypeScript, Vite and Tailwind stack originally specified, so the
+  project builds reproducibly offline with no JavaScript supply chain. The
+  rationale is documented in `source/web/README.md`.
+- Go dependencies are vendored under `source/third_party/`.
+
+### Known limitations
+
+- Not yet verified against a real modded Minecraft server on real hardware;
+  test fixtures are synthetic
+- Supervisor crash and restart behaviour, boot autostart, unclean-shutdown
+  recovery, tmux console lifecycle, restore and retention pruning are
+  implemented and manually exercised, but not yet covered by automated
+  integration tests
+- systemd integration was validated in an environment without a live user
+  manager
+- ARM64 builds are produced by the toolchain but untested on ARM hardware
+- Interrupted URL downloads restart from zero; range-based resumption is
+  designed for but not implemented
+- One Minecraft server runs at a time
+
+### Deferred
+
+CurseForge browsing, search, API keys and project-link resolution; Modrinth
+browsing; vanilla Java and Bedrock server types; multiple simultaneously
+running servers; multiple physical nodes; in-game metrics such as TPS and MSPT.
+
+### Never planned
+
+Docker or any container runtime; billing or subscriptions; public registration;
+browser shell access; automatic router, firewall, port-forwarding or tunnel
+configuration; required telemetry.
+
+[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Chansovisoth/Bonghos/releases/tag/v0.1.0

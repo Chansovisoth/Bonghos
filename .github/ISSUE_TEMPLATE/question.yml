@@ -1,0 +1,42 @@
+name: Question / help
+description: Ask how to do something
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking, please check `Tutorial.txt` in the project root — it
+        covers installation, server creation, console access, autostart,
+        schedules, backups, migration, updating and troubleshooting in detail.
+
+        **Never paste `secret.key`, session cookies or recovery codes here.**
+
+  - type: checkboxes
+    attributes:
+      label: Preflight
+      options:
+        - label: I checked Tutorial.txt and the README
+          required: true
+        - label: I searched existing issues
+          required: true
+
+  - type: textarea
+    attributes:
+      label: What are you trying to do?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: What have you tried so far?
+
+  - type: input
+    attributes:
+      label: Bonghos version
+      placeholder: bonghos 0.1.0
+
+  - type: input
+    attributes:
+      label: Linux distribution
+      placeholder: Ubuntu 24.04 LTS
