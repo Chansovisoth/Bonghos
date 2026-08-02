@@ -34,8 +34,8 @@ no Docker or containers.
 - Internal paths stored relative to the root, so the directory can be moved to
   another location or copied to another computer
 - `bonghos doctor`, `doctor --repair` and `doctor --fix-permissions`
-- Portable `bonghos export` and `bonghos import`, with optional encrypted
-  secret inclusion behind Owner reauthentication and a passphrase
+- Portable `bonghos export` and `bonghos import`, with optional secret
+  inclusion behind an explicit typed confirmation
 - Encryption key at `system/config/secret.key` (mode 0600) used for
   authenticated encryption of TOTP secrets, never logged or exposed by the API
 
@@ -159,6 +159,8 @@ no Docker or containers.
 - ARM64 builds are produced by the toolchain but untested on ARM hardware
 - Interrupted URL downloads restart from zero; range-based resumption is
   designed for but not implemented
+- `export --include-secrets` is not separately passphrase-encrypted in v0.1.0;
+  protect those archives like password files
 - One Minecraft server runs at a time
 
 ### Deferred

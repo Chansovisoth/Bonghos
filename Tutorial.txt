@@ -1129,8 +1129,9 @@
 
      ~/bonghos/system/bin/bonghos export --include-secrets --output ...
 
-   That requires Owner reauthentication and a passphrase, and produces an
-   archive containing your accounts — treat it like a password file.
+   In v0.1.0 this requires a typed confirmation but is not separately
+   passphrase-encrypted. It produces an archive containing your accounts and
+   local secret key — treat it like a password file.
 
    Copy the archive over, then on the new machine:
 

@@ -61,7 +61,7 @@ func main() {
 	case "setup":
 		err = cmdSetup(*home)
 	case "console":
-		err = cmdConsole(*home)
+		err = cmdConsole(*home, args)
 	case "doctor":
 		err = cmdDoctor(*home, args)
 	case "fix-permissions":
@@ -177,7 +177,7 @@ func cmdServe(home string) error {
 
 	// Refuse to serve before an Owner exists (unless setup was completed).
 	var owners int
-	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE role='Owner' AND disabled=0`).Scan(&owners)
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE role=? AND disabled=0`, authorization.RoleOwner).Scan(&owners)
 	if owners == 0 {
 		fmt.Println("No Owner account exists yet. Run: bonghos setup")
 	}
@@ -280,7 +280,7 @@ func cmdSetup(home string) error {
 	defer a.Close()
 
 	var owners int
-	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE role='Owner' AND disabled=0`).Scan(&owners)
+	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE role=? AND disabled=0`, authorization.RoleOwner).Scan(&owners)
 	if owners > 0 {
 		fmt.Println("An Owner account already exists; setup will not create another.")
 	} else {
@@ -395,7 +395,29 @@ func readSecret() (string, error) {
 // console
 // ---------------------------------------------------------------------------
 
-func cmdConsole(home string) error {
+func cmdConsole(home string, args []string) error {
+	direct := false
+	for _, arg := range args {
+		switch arg {
+		case "--direct":
+			direct = true
+		case "attach":
+			// Internal tmux child invocation: bonghos console attach --direct.
+		default:
+			return fmt.Errorf("usage: bonghos console [--direct]")
+		}
+	}
+	if !direct {
+		self, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		return tmux.Console(self, home)
+	}
+	return cmdConsoleDirect(home)
+}
+
+func cmdConsoleDirect(home string) error {
 	c, err := console.Dial(home)
 	if err != nil {
 		return fmt.Errorf("cannot connect to the supervisor (is the server running?): %w", err)
