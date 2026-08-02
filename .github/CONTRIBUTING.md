@@ -30,6 +30,11 @@ make run       # run with BONGHOS_HOME=./devhome
 Dependencies are vendored under `source/third_party/`, so the project builds
 offline with `GOPROXY=direct`.
 
+**cgo is required.** The SQLite driver is a cgo package, so a `CGO_ENABLED=0`
+build links and starts but fails at the first database access. Keep cgo enabled;
+cross-compiling for ARM64 also needs `gcc-aarch64-linux-gnu`. `make cross`
+handles this and `make verify-binaries` proves each binary can open a database.
+
 ## Project rules
 
 These are not style preferences — they are architectural commitments. Pull

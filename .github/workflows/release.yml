@@ -28,17 +28,31 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      # mattn/go-sqlite3 is a cgo package. Building with CGO_ENABLED=0 would
+      # publish binaries that fail at the first database access, so cgo stays
+      # enabled and arm64 uses a cross-compiler.
+      - name: Install arm64 cross-compiler
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build binaries
         working-directory: source
         env:
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
         run: |
           cp web/src/* cmd/bonghos/webdist/
-          for arch in amd64 arm64; do
-            GOOS=linux GOARCH="$arch" go build \
-              -ldflags "-s -w -X github.com/Chansovisoth/Bonghos/internal/app.Version=${{ steps.version.outputs.version }}" \
-              -o "../bonghos-linux-$arch" ./cmd/bonghos
-          done
+          LD="-s -w -X github.com/Chansovisoth/Bonghos/internal/app.Version=${{ steps.version.outputs.version }}"
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LD" -o ../bonghos-linux-amd64 ./cmd/bonghos
+          GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
+            go build -ldflags "$LD" -o ../bonghos-linux-arm64 ./cmd/bonghos
+
+      - name: Verify the amd64 binary works before publishing
+        run: |
+          tmp=$(mktemp -d)
+          mkdir -p "$tmp/home"
+          ./bonghos-linux-amd64 --home "$tmp/home" user list
+          ./bonghos-linux-amd64 version
 
       - name: Package source archive
         run: |

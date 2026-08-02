@@ -213,7 +213,10 @@ chmod +x setup.sh
 Required: a 64-bit Linux system, Java 17 or 21 (for Minecraft), `tar`, `gzip`.
 Optional: `tmux` (console), `unzip`, `xz-utils`, `zstd`, `p7zip-full`, `unrar`.
 
-Build-time only: Go 1.22+, Git.
+Build-time only: Go 1.22+, Git, and a C compiler (`gcc`, usually already
+present). The SQLite driver is a cgo package, so `CGO_ENABLED=0` builds link
+successfully but fail at the first database access — keep cgo enabled. Building
+for ARM64 from an x86 machine additionally needs `gcc-aarch64-linux-gnu`.
 
 ---
 

@@ -56,15 +56,37 @@ jobs:
           go-version: '1.22'
           cache-dependency-path: source/go.sum
 
+      # The SQLite driver is a cgo package: CGO_ENABLED=0 builds link fine but
+      # fail at the first database access. cgo stays on, and arm64 needs a
+      # cross-compiler.
+      - name: Install arm64 cross-compiler
+        if: matrix.goarch == 'arm64'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build linux-${{ matrix.goarch }}
         working-directory: source
         env:
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
         run: |
           cp web/src/* cmd/bonghos/webdist/
+          if [ "${{ matrix.goarch }}" = "arm64" ]; then
+            export CC=aarch64-linux-gnu-gcc
+          fi
           go build -ldflags "-s -w" -o "bonghos-linux-${{ matrix.goarch }}" ./cmd/bonghos
+
+      # Catch the cgo trap: prove the binary can actually open a database.
+      - name: Verify the binary works
+        if: matrix.goarch == 'amd64'
+        working-directory: source
+        run: |
+          tmp=$(mktemp -d)
+          mkdir -p "$tmp/home"
+          ./bonghos-linux-amd64 --home "$tmp/home" user list
+          ./bonghos-linux-amd64 version
 
       - uses: actions/upload-artifact@v4
         with:

@@ -274,6 +274,8 @@ check_java() {
 check_dependencies() {
   head1 "Build dependencies"
   check_go || true
+  # The SQLite driver is a cgo package, so a C compiler is genuinely required.
+  need_pkg gcc  build-essential required "compiling the SQLite driver (cgo)" || true
   need_pkg git  git  required "source retrieval and updates" || true
   need_pkg tar  tar  required "archive handling" || true
   need_pkg gzip gzip required "archive handling" || true
@@ -352,12 +354,25 @@ run_tests() {
 build_binary() { # build_binary <output-path>
   local out="$1"
   head1 "Building the Bonghos executable"
-  ( cd "$SOURCE_DIR" && go build \
+  # CGO_ENABLED=1 is required: the SQLite driver is a cgo package and a
+  # CGO_ENABLED=0 build would fail at the first database access instead of
+  # at build time.
+  ( cd "$SOURCE_DIR" && CGO_ENABLED=1 go build \
       -ldflags "-s -w -X github.com/Chansovisoth/Bonghos/internal/app.Version=$BONGHOS_VERSION" \
       -o "$out" ./cmd/bonghos ) || die "build failed"
   chmod 0755 "$out"
   ok "Built $(basename "$out") ($(du -h "$out" | cut -f1))"
   "$out" version >/dev/null || die "built executable does not run on this machine"
+  # Prove the database driver actually works, not just that the binary starts.
+  local probe
+  probe="$(mktemp -d "${TMPDIR:-/tmp}/bonghos-probe.XXXXXX")"
+  mkdir -p "$probe/home"
+  if ! "$out" --home "$probe/home" user list >/dev/null 2>&1; then
+    rm -rf "$probe"
+    die "the built executable cannot open a database (was it built without cgo?)"
+  fi
+  rm -rf "$probe"
+  ok "Executable verified (starts and opens a database)"
 }
 
 # Atomically install the executable via a same-filesystem temp file + rename.

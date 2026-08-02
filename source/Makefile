@@ -83,11 +83,39 @@ clean:
 	@echo "Cleaned build artifacts (devhome and runtime data untouched)"
 
 ## cross: build release binaries for both supported architectures.
+##
+## IMPORTANT: the SQLite driver (mattn/go-sqlite3) is a cgo package. Building
+## with CGO_ENABLED=0 produces a binary that links and runs until the first
+## database access, then fails with "go-sqlite3 requires cgo to work". So cgo
+## must stay enabled, and arm64 needs a cross-compiler:
+##
+##     sudo apt install gcc-aarch64-linux-gnu
 cross: web
 	@mkdir -p $(BIN_DIR)
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-linux-amd64 ./cmd/bonghos
-	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-linux-arm64 ./cmd/bonghos
-	@echo "Cross-compiled into $(BIN_DIR)/"
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-linux-amd64 ./cmd/bonghos
+	@if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then \
+		GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
+			go build -ldflags "$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY)-linux-arm64 ./cmd/bonghos; \
+		echo "Built $(BIN_DIR)/$(BINARY)-linux-arm64"; \
+	else \
+		echo "SKIPPED arm64: aarch64-linux-gnu-gcc not found."; \
+		echo "  Install it with: sudo apt install gcc-aarch64-linux-gnu"; \
+	fi
+	@echo "Cross-compile finished; artifacts in $(BIN_DIR)/"
+
+## verify-binaries: prove each built binary can actually open a database.
+## Guards against the CGO_ENABLED=0 trap above, which only fails at runtime.
+verify-binaries:
+	@for b in $(BIN_DIR)/$(BINARY)-linux-*; do \
+		case "$$b" in *arm64) echo "skip $$b (cannot execute on this host)"; continue;; esac; \
+		tmp=$$(mktemp -d); mkdir -p "$$tmp/home"; \
+		if "$$b" --home "$$tmp/home" user list >/dev/null 2>&1; then \
+			echo "ok   $$b opens its database"; \
+		else \
+			echo "FAIL $$b cannot open a database (cgo missing?)"; rm -rf "$$tmp"; exit 1; \
+		fi; \
+		rm -rf "$$tmp"; \
+	done
 
 help:
 	@echo "Bonghos developer commands:"

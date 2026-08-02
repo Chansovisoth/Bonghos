@@ -142,6 +142,9 @@ no Docker or containers.
   project builds reproducibly offline with no JavaScript supply chain. The
   rationale is documented in `source/web/README.md`.
 - Go dependencies are vendored under `source/third_party/`.
+- The SQLite driver requires cgo. Builds must use `CGO_ENABLED=1`; a
+  `CGO_ENABLED=0` build compiles and starts but fails on the first database
+  access. Cross-compiling for ARM64 needs `gcc-aarch64-linux-gnu`.
 
 ### Known limitations
 
