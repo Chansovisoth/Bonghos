@@ -1,0 +1,3 @@
+This directory receives the compiled Web UI from source/web/src at build time.
+It is populated by `make web`, `make build`, or the root ./setup.sh.
+The files themselves are generated and therefore not committed.
