@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bonghos</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="login-view" class="login-wrap hidden">
+  <form id="login-form" class="login-card" autocomplete="on">
+    <div class="brand"><span class="brand-mark">⛏</span> Bonghos</div>
+    <p class="muted">Minecraft Server Management Panel</p>
+    <label>Username<input id="login-user" autocomplete="username" required></label>
+    <label>Password<input id="login-pass" type="password" autocomplete="current-password" required></label>
+    <label>Authenticator code<input id="login-code" inputmode="numeric" pattern="[0-9]*" maxlength="10" placeholder="6-digit code or recovery code" required></label>
+    <button type="submit" class="btn primary" id="login-btn">Sign in</button>
+    <div id="login-error" class="error hidden"></div>
+  </form>
+</div>
+
+<div id="app-view" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand small"><span class="brand-mark">⛏</span> Bonghos</div>
+    <div id="server-picker" class="server-picker"></div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <div id="whoami" class="muted"></div>
+      <button id="logout-btn" class="btn ghost">Sign out</button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<div id="toast-host"></div>
+<div id="modal-host"></div>
+<script src="/app.js"></script>
+</body>
+</html>
