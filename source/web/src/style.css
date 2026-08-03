@@ -105,6 +105,7 @@ a:hover { color: var(--accent-strong); }
 .login-card { width: min(430px, 100%); background: var(--surface); border: 1px solid var(--border); padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); box-shadow: var(--shadow); }
 .login-card .brand + .muted { margin-top: calc(-1 * var(--space-2)); }
 .login-card p { margin-bottom: 0; }
+.activation-title { font-family: "Projekt Blackbird", var(--font-display); font-size: 2rem; font-weight: 400; line-height: 1; letter-spacing: 0; text-transform: none; }
 #login-step-1, #login-step-2 { display: grid; gap: var(--space-4); }
 
 label, .field-label, .otp-label { display: flex; flex-direction: column; gap: var(--space-2); color: var(--muted); font-size: 0.78rem; font-weight: 700; }

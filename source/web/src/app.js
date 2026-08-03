@@ -2810,12 +2810,12 @@ async function activationFlow(token) {
       if (!res.ok) return toast(d.error, "err");
       form.innerHTML = "";
       form.append(
-        el("div", { class: "brand" }, "Account created"),
+        el("div", { class: "brand activation-title" }, "Account created"),
         el("p", {}, "Store these one-time recovery codes safely:"),
         el("pre", { class: "mono" }, (d.recovery_codes || []).join("\n")),
         el("a", { class: "btn primary", href: "/", style: "text-align:center" }, "Go to sign-in"));
     } },
-      el("div", { class: "brand" }, "Activate your Bonghos account"),
+      el("div", { class: "brand activation-title" }, "Activate your Bonghos account"),
       el("p", { class: "muted" }, `You are joining as ${info.role}.`),
       el("label", {}, "Username", user),
       el("label", {}, "Password (min 10 chars)", p1),
