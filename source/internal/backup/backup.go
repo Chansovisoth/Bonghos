@@ -144,16 +144,30 @@ func (m *Manager) Create(inst *instance.Instance, t Type, mode, trigger string,
 	}
 	stamp := time.Now().UTC().Format("2006-01-02_15-04-05")
 	shortType := map[Type]string{TypeFull: "full", TypeWorld: "world", TypeConfig: "config"}[t]
-	archiveName := fmt.Sprintf("%s_%s.tar.zst", stamp, shortType)
 	relDir := instance.BackupDirFor(inst.Slug)
+
+	// The timestamp only has one-second resolution, so two backups of the same
+	// type started in the same second would collide. That is not hypothetical:
+	// a restore takes an emergency safety copy immediately before restoring,
+	// and an overwritten archive silently invalidates the earlier backup's
+	// checksum. Append the backup ID whenever the name is already taken.
+	archiveName := fmt.Sprintf("%s_%s.tar.zst", stamp, shortType)
 	relPath := filepath.Join(relDir, archiveName)
 	finalPath := filepath.Join(m.Home, relPath)
+	if _, err := os.Lstat(finalPath); err == nil {
+		archiveName = fmt.Sprintf("%s_%s_%s.tar.zst", stamp, shortType, backupID)
+		relPath = filepath.Join(relDir, archiveName)
+		finalPath = filepath.Join(m.Home, relPath)
+	}
 	stagingDir := filepath.Join(m.Home, config.DirStaging, "backup-"+backupID)
 	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(stagingDir)
 	stagingArchive := filepath.Join(stagingDir, archiveName)
+	if _, err := os.Lstat(finalPath); err == nil {
+		return nil, fmt.Errorf("refusing to overwrite an existing backup archive at %s", relPath)
+	}
 
 	rec := &Record{
 		BackupID: backupID, InstanceID: inst.ID, InstanceSlug: inst.Slug,
@@ -382,10 +396,72 @@ func (m *Manager) Verify(backupID string) error {
 	return err
 }
 
+// scopeWants reports whether a top-level entry belongs to the requested
+// restore scope.
+func scopeWants(scope, name, destServerDir string) bool {
+	switch scope {
+	case ScopeWorld:
+		// The world directory itself plus the sibling dimension folders and
+		// player administration data that a world is meaningless without.
+		world := minecraft.WorldDir(destServerDir)
+		if name == world || strings.HasPrefix(name, world+"_") {
+			return true
+		}
+		switch name {
+		case "playerdata", "stats", "advancements", "usercache.json":
+			return true
+		}
+		return false
+	case ScopeConfig:
+		// Everything a world is not: settings, mod configuration and scripts.
+		switch name {
+		case "server.properties", "eula.txt", "ops.json", "whitelist.json",
+			"banned-players.json", "banned-ips.json", "server-icon.png",
+			"user_jvm_args.txt", "config", "defaultconfigs", "kubejs", "scripts":
+			return true
+		}
+		// Startup scripts are configuration too.
+		return strings.HasSuffix(name, ".sh") || strings.HasSuffix(name, ".txt") ||
+			strings.HasSuffix(name, ".cfg") || strings.HasSuffix(name, ".toml")
+	default: // ScopeFull
+		return true
+	}
+}
+
+// Restore scopes. NormalizeScope accepts the shorthand the UI and CLI use as
+// well as the canonical names, so a caller sending "world" cannot silently fall
+// through to a full-server restore.
+const (
+	ScopeFull   = "full_server"
+	ScopeWorld  = "world_only"
+	ScopeConfig = "configuration_only"
+)
+
+// NormalizeScope maps accepted aliases onto canonical scope names. An empty
+// scope defaults to a full restore. Unknown values are rejected rather than
+// silently treated as "full_server", because guessing wrong here overwrites a
+// live world.
+func NormalizeScope(scope string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case "", "full", "full_server", "all":
+		return ScopeFull, nil
+	case "world", "world_only", "world_and_player_data":
+		return ScopeWorld, nil
+	case "config", "configuration", "configuration_only":
+		return ScopeConfig, nil
+	default:
+		return "", fmt.Errorf("unknown restore scope %q (use full_server, world_only or configuration_only)", scope)
+	}
+}
+
 // Restore extracts a verified backup into staging, validates paths, then
 // replaces the target. The caller guarantees the server is stopped and has
 // created an emergency pre-restore backup unless explicitly disabled.
 func (m *Manager) Restore(rec *Record, destServerDir string, scope string) error {
+	scope, err := NormalizeScope(scope)
+	if err != nil {
+		return err
+	}
 	full := filepath.Join(m.Home, rec.ArchivePath)
 	if err := m.Verify(rec.BackupID); err != nil {
 		return fmt.Errorf("backup failed verification, refusing restore: %w", err)
@@ -406,12 +482,8 @@ func (m *Manager) Restore(rec *Record, destServerDir string, scope string) error
 		return err
 	}
 	for _, e := range entries {
-		if scope == "world_only" {
-			world := minecraft.WorldDir(destServerDir)
-			keep := map[string]bool{world: true, "server.properties": false}
-			if !keep[e.Name()] && e.Name() != world {
-				continue
-			}
+		if !scopeWants(scope, e.Name(), destServerDir) {
+			continue
 		}
 		src := filepath.Join(stagingDir, e.Name())
 		dst := filepath.Join(destServerDir, e.Name())

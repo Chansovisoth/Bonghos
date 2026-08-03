@@ -377,3 +377,7 @@ func (a *App) RunBackup(ctx context.Context, inst *instance.Instance, t backup.T
 	mode, trigger string, by int64) (*backup.Record, error) {
 	return a.runBackup(ctx, inst, t, mode, trigger, by)
 }
+
+// Handler exposes the fully wired HTTP handler (middleware, routes, SPA) so
+// tests can drive the real API through httptest without opening a socket.
+func (a *App) Handler() http.Handler { return a.routes() }

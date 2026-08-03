@@ -105,16 +105,16 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/backups/{id}", a.requirePerm(authorization.PermBackupsCreate, a.handleBackupDelete))
 
 	// --- schedules ----------------------------------------------------------
-	mux.HandleFunc("GET /api/schedules", a.requirePerm(authorization.PermServerView, a.handleScheduleList))
+	mux.HandleFunc("GET /api/schedules", a.requirePerm(authorization.PermSchedulesManage, a.handleScheduleList))
 	mux.HandleFunc("POST /api/schedules", a.requirePerm(authorization.PermSchedulesManage, a.handleScheduleCreate))
 	mux.HandleFunc("PATCH /api/schedules/{id}", a.requirePerm(authorization.PermSchedulesManage, a.handleScheduleUpdate))
 	mux.HandleFunc("DELETE /api/schedules/{id}", a.requirePerm(authorization.PermSchedulesManage, a.handleScheduleDelete))
 	mux.HandleFunc("POST /api/schedules/{id}/run", a.requirePerm(authorization.PermSchedulesManage, a.handleScheduleRunNow))
-	mux.HandleFunc("GET /api/schedules/{id}/history", a.requirePerm(authorization.PermServerView, a.handleScheduleHistory))
+	mux.HandleFunc("GET /api/schedules/{id}/history", a.requirePerm(authorization.PermSchedulesManage, a.handleScheduleHistory))
 
 	// --- activity / host ----------------------------------------------------
-	mux.HandleFunc("GET /api/activity", a.requirePerm(authorization.PermServerView, a.handleActivity))
-	mux.HandleFunc("GET /api/host", a.requirePerm(authorization.PermServerView, a.handleHost))
+	mux.HandleFunc("GET /api/activity", a.requirePerm(authorization.PermConfigManage, a.handleActivity))
+	mux.HandleFunc("GET /api/host", a.requirePerm(authorization.PermConfigManage, a.handleHost))
 	mux.HandleFunc("GET /api/version", a.handleVersion)
 
 	// --- websocket ----------------------------------------------------------

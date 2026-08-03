@@ -72,7 +72,6 @@ var rolePerms = map[Role]map[Permission]bool{
 		PermServerView:  true,
 		PermPlayersView: true,
 		PermConsoleView: true, // read-only console logs
-		PermBackupsView: true,
 	},
 }
 

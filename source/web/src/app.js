@@ -102,6 +102,40 @@ const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
 // websocket
 // ---------------------------------------------------------------------------
 let wsRetry = 1000;
+// Topics that stay subscribed for the whole session.
+const BASE_TOPICS = ["overview", "servers", "backups"];
+// Heavier per-page topics, subscribed only while that page is open so Bonghos
+// does not broadcast console lines or metrics to a browser that is not showing
+// them (specification section 28).
+const PAGE_TOPICS = {
+  console: "console",
+  performance: "performance",
+  players: "players",
+  schedules: "schedules",
+  activity: "activity",
+};
+let currentPageTopic = null;
+
+function wsSend(obj) {
+  if (S.ws && S.ws.readyState === WebSocket.OPEN) {
+    try { S.ws.send(JSON.stringify(obj)); } catch {}
+    return true;
+  }
+  return false;
+}
+
+// syncPageSubscription unsubscribes the previous page topic and subscribes the
+// new one. Base topics are untouched.
+function syncPageSubscription(page) {
+  const next = PAGE_TOPICS[page] || null;
+  if (next === currentPageTopic) return;
+  if (currentPageTopic && !BASE_TOPICS.includes(currentPageTopic)) {
+    wsSend({ action: "unsubscribe", topic: currentPageTopic });
+  }
+  currentPageTopic = next;
+  if (next) wsSend({ action: "subscribe", topic: next });
+}
+
 function connectWS() {
   if (S.ws) try { S.ws.close(); } catch {}
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -109,8 +143,13 @@ function connectWS() {
   S.ws = ws;
   ws.onopen = () => {
     wsRetry = 1000;
-    ["overview", "console", "players", "servers", "backups", "performance", "activity"]
-      .forEach((t) => ws.send(JSON.stringify({ type: "subscribe", topic: t })));
+    // Always-on topics: status and long-running operations must keep arriving
+    // whatever page is open, so an import or backup started elsewhere is seen.
+    BASE_TOPICS.forEach((t) => wsSend({ action: "subscribe", topic: t }));
+    // Server-side subscriptions were lost with the old connection, so forget
+    // what we think is subscribed and re-send for the current page.
+    currentPageTopic = null;
+    syncPageSubscription(S.page);
   };
   ws.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
@@ -208,12 +247,12 @@ const PAGES = [
   ["files", "Files", "server.files.manage"],
   ["configuration", "Configuration", "server.configuration.manage"],
   ["backups", "Backups", "server.backups.view"],
-  ["schedules", "Schedules", "server.view"],
+  ["schedules", "Schedules", "server.schedules.manage"],
   ["performance", "Performance", "server.view"],
   ["servers", "Servers", "server.view"],
-  ["activity", "Activity", "server.view"],
+  ["activity", "Activity", "server.configuration.manage"],
   ["users", "Users", "users.manage"],
-  ["host", "Host", "server.view"],
+  ["host", "Host", "server.configuration.manage"],
 ];
 
 function buildNav() {
@@ -226,6 +265,7 @@ function buildNav() {
 
 function navigate(page) {
   S.page = page;
+  syncPageSubscription(page);
   document.querySelectorAll(".nav-item").forEach((n) =>
     n.classList.toggle("active", n.dataset.page === page));
   renderPage();
@@ -678,15 +718,33 @@ function updateBackupProgress(d) {
 }
 
 function restoreBackup(b) {
+  // Default to the narrowest scope the archive actually supports, so a
+  // world-only backup never quietly triggers a full-server restore.
+  const defaultScope =
+    b.backup_type === "world_and_player_data" ? "world_only" :
+    b.backup_type === "configuration_only" ? "configuration_only" : "full_server";
+
+  const scopeSel = el("select", { class: "input" },
+    el("option", { value: "full_server", selected: defaultScope === "full_server" }, "Full server — everything in the archive"),
+    el("option", { value: "world_only", selected: defaultScope === "world_only" }, "World only — world, dimensions and player data"),
+    el("option", { value: "configuration_only", selected: defaultScope === "configuration_only" }, "Configuration only — settings, mod config and scripts"));
+
   modal("Restore backup", [
-    el("p", {}, `Restore ${b.backup_id} (${b.backup_type.replace(/_/g, " ")})? The server must be stopped. Current files in the restored scope are replaced; a safety copy of the previous world is kept.`),
+    el("p", {}, `Restore ${b.backup_id} (${b.backup_type.replace(/_/g, " ")}) created ${fmtTime(b.created_at)}.`),
+    el("label", { class: "field" }, el("span", {}, "Restore scope"), scopeSel),
+    el("p", { class: "muted" },
+      "The server must be stopped. Bonghos takes an emergency backup of the current state before replacing anything, and the previous files are kept alongside as .bonghos-pre-restore until you remove them."),
   ], [
     ["Cancel", "ghost", (c) => c()],
     ["Restore", "danger", async (c) => {
       c();
-      const scope = b.backup_type === "world_and_player_data" ? "world" : "full";
-      try { await api(`/backups/${b.backup_id}/restore`, { method: "POST", json: { scope, confirm: true } }); toast("Restore complete", "ok"); }
-      catch (e) { toast(e.message, "err"); }
+      toast("Creating emergency pre-restore backup…", "ok");
+      try {
+        const r = await api(`/backups/${b.backup_id}/restore`,
+          { method: "POST", json: { scope: scopeSel.value, confirm: true } });
+        toast("Restore complete (" + (r.scope || scopeSel.value).replace(/_/g, " ") + ")", "ok");
+        renderPage();
+      } catch (e) { toast(e.message, "err"); }
     }]]);
 }
 

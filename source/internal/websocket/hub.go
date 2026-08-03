@@ -141,13 +141,21 @@ func (c *client) readLoop(h *Hub, onCommand func(string)) {
 		}
 		var msg struct {
 			Action  string `json:"action"` // subscribe | unsubscribe | console_command
+			Type    string `json:"type"`   // accepted alias for "action"
 			Topic   string `json:"topic"`
 			Command string `json:"command"`
 		}
 		if json.Unmarshal(raw, &msg) != nil {
 			continue
 		}
-		switch msg.Action {
+		// Accept either key. "action" is canonical, but tolerating "type"
+		// means a client using the other spelling degrades to nothing
+		// happening rather than silently receiving no events at all.
+		verb := msg.Action
+		if verb == "" {
+			verb = msg.Type
+		}
+		switch verb {
 		case "subscribe":
 			if c.canUse == nil || c.canUse(msg.Topic) {
 				c.mu.Lock()

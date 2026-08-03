@@ -376,7 +376,13 @@ func (a *App) runBackup(ctx context.Context, inst *instance.Instance, t backup.T
 		return nil, err
 	}
 	defer release()
+	return a.runBackupLocked(ctx, inst, t, mode, trigger, by)
+}
 
+// runBackupLocked performs a backup assuming the caller already holds the
+// operation lock. Restore uses this for its emergency pre-restore copy, which
+// happens inside the restore lock and must not try to take a second one.
+func (a *App) runBackupLocked(ctx context.Context, inst *instance.Instance, t backup.Type, mode, trigger string, by int64) (*backup.Record, error) {
 	online := mode == "online" && a.Runner.Online()
 	if online {
 		_ = a.Runner.SendCommand("say Backup starting…")
@@ -463,11 +469,19 @@ func (a *App) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Scope   string `json:"scope"` // world | full
-		Confirm bool   `json:"confirm"`
+		Scope string `json:"scope"` // full_server | world_only | configuration_only
+		// SkipEmergencyBackup disables the automatic pre-restore safety copy.
+		// It is deliberately awkward to set and is audited when used.
+		SkipEmergencyBackup bool `json:"skip_emergency_backup"`
+		Confirm             bool `json:"confirm"`
 	}
 	if err := readJSON(r, &req, 1<<14); err != nil || !req.Confirm {
 		writeErr(w, 400, errors.New("restore requires explicit confirmation"))
+		return
+	}
+	scope, err := backup.NormalizeScope(req.Scope)
+	if err != nil {
+		writeErr(w, 400, err)
 		return
 	}
 	rec, err := a.Backups.Get(r.PathValue("id"))
@@ -482,12 +496,36 @@ func (a *App) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
-	if err := a.Backups.Restore(rec, inst.AbsoluteDir(a.Home), req.Scope); err != nil {
+	// A restore overwrites live server files, so take an emergency safety copy
+	// of the current state first. If that fails, refuse to restore: losing the
+	// present world to recover an older one is not an acceptable trade.
+	if req.SkipEmergencyBackup {
+		a.audit(u.ID, u.Username, "backup_restore_without_safety_copy", inst.Slug, rec.BackupID, remoteIP(r))
+		a.Logf("restore of %s proceeding WITHOUT an emergency pre-restore backup (requested by %s)",
+			rec.BackupID, u.Username)
+	} else {
+		a.Hub.Broadcast("backups", "progress", map[string]any{
+			"stage": "emergency_pre_restore_backup", "backup_id": rec.BackupID,
+		})
+		safety, err := a.runBackupLocked(context.Background(), inst, backup.TypeFull,
+			"offline", "emergency-pre-restore", u.ID)
+		if err != nil {
+			writeErr(w, 500, fmt.Errorf("emergency pre-restore backup failed, refusing to restore: %w", err))
+			return
+		}
+		a.audit(u.ID, u.Username, "backup_emergency_pre_restore", inst.Slug, safety.BackupID, remoteIP(r))
+	}
+
+	a.Hub.Broadcast("backups", "progress", map[string]any{
+		"stage": "restoring", "backup_id": rec.BackupID,
+	})
+	if err := a.Backups.Restore(rec, inst.AbsoluteDir(a.Home), scope); err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	a.audit(u.ID, u.Username, "backup_restored", inst.Slug, rec.BackupID, remoteIP(r))
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	a.audit(u.ID, u.Username, "backup_restored", inst.Slug, rec.BackupID+" scope="+scope, remoteIP(r))
+	a.Hub.Broadcast("backups", "restored", map[string]any{"backup_id": rec.BackupID, "scope": scope})
+	writeJSON(w, 200, map[string]any{"ok": true, "scope": scope})
 }
 
 func (a *App) handleBackupProtect(w http.ResponseWriter, r *http.Request) {
