@@ -2118,13 +2118,29 @@ const PROVIDER_ICONS = {
 
 const PROVIDER_FAVICONS = {
   curseforge: "curseforge-favicon.ico",
+  fabric: "fabric-favicon.png",
+  forge: "forge-favicon.ico",
   modrinth: "modrinth-favicon.ico",
+  neoforge: "neoforge-favicon.ico",
+  quilt: "quilt-favicon.ico",
 };
 
 function serverProviderLabel(server) {
   const sourceHint = `${server.source_provider || ""} ${server.source_url_host || ""} ${server.source_type || ""}`.toLowerCase();
-  const inferredProvider = sourceHint.includes("curseforge") ? "curseforge"
-    : sourceHint.includes("modrinth") ? "modrinth" : "";
+  let inferredProvider = "";
+  if (sourceHint.includes("curseforge")) {
+    inferredProvider = "curseforge";
+  } else if (sourceHint.includes("modrinth")) {
+    inferredProvider = "modrinth";
+  } else if (sourceHint.includes("neoforge")) {
+    inferredProvider = "neoforge";
+  } else if (sourceHint.includes("minecraftforge") || sourceHint.includes("files.minecraftforge")) {
+    inferredProvider = "forge";
+  } else if (sourceHint.includes("fabricmc")) {
+    inferredProvider = "fabric";
+  } else if (sourceHint.includes("quiltmc")) {
+    inferredProvider = "quilt";
+  }
   const raw = String(server.provider || inferredProvider || server.modloader || "unknown").trim();
   const key = raw.toLowerCase().replace(/[\s_-]+/g, "");
   const iconData = PROVIDER_ICONS[key === "neoforge" ? "forge" : key];
@@ -2140,7 +2156,7 @@ function serverProviderLabel(server) {
     icon.setAttribute("aria-hidden", "true");
     icon.innerHTML = iconData.body;
   }
-  const names = { forge: "Forge", neoforge: "NeoForge", fabric: "Fabric", modrinth: "Modrinth", curseforge: "CurseForge" };
+  const names = { forge: "Forge", neoforge: "NeoForge", fabric: "Fabric", quilt: "Quilt", modrinth: "Modrinth", curseforge: "CurseForge" };
   return el("span", { class: "server-provider" }, icon, names[key] || raw);
 }
 

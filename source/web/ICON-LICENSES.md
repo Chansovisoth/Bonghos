@@ -18,9 +18,13 @@ Bonghos vendors an unchanged subset of 38 Solar linear icons in `src/solar-icons
 - Source: https://icon-sets.iconify.design/material-icon-theme/minecraft-fabric/
 - Retrieved: 2026-08-04
 
-Provider icons are embedded locally in `src/app.js`; Forge and NeoForge labels use Solar's sledgehammer icon. Unknown providers fall back to the existing Solar server icon.
+Provider icons are embedded locally in `src/app.js` as a fallback. Unknown providers fall back to the existing Solar server icon.
 
-The displayed CurseForge and Modrinth marks use locally vendored copies of their official favicons:
+The displayed provider marks use locally vendored copies of their official favicons:
 
 - https://static-beta.curseforge.com/images/favicon.ico
+- https://fabricmc.net/assets/favicon.png
+- https://files.minecraftforge.net/favicon.ico
 - https://modrinth.com/favicon.ico
+- https://neoforged.net/favicon.ico
+- https://quiltmc.org/favicon/favicon.ico
