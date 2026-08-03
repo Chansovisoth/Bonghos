@@ -2162,13 +2162,42 @@ const PROVIDER_ICONS = {
 };
 
 const PROVIDER_FAVICONS = {
-  curseforge: "curseforge-favicon.ico",
-  fabric: "fabric-favicon.png",
-  forge: "forge-favicon.ico",
-  modrinth: "modrinth-favicon.ico",
-  neoforge: "neoforge-favicon.ico",
-  quilt: "quilt-favicon.ico",
+  curseforge: "/curseforge-favicon.png",
+  fabric: "/fabric-favicon.png",
+  forge: "/forge-favicon.png",
+  modrinth: "/modrinth-favicon.png",
+  neoforge: "/neoforge-favicon.png",
+  quilt: "/quilt-favicon.png",
 };
+
+function normalizedProviderKey(value) {
+  const compact = String(value || "unknown").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return {
+    curse: "curseforge",
+    curseforge: "curseforge",
+    forgecdn: "curseforge",
+    fabricloader: "fabric",
+    fabricmc: "fabric",
+    forge: "forge",
+    minecraftforge: "forge",
+    modrinth: "modrinth",
+    neoforge: "neoforge",
+    neoforged: "neoforge",
+    quilt: "quilt",
+    quiltmc: "quilt",
+  }[compact] || compact;
+}
+
+function providerIconFallback(key) {
+  const iconData = PROVIDER_ICONS[key === "neoforge" ? "forge" : key];
+  if (!iconData) return solarIcon("server-square-linear", "provider-icon");
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("class", "provider-icon");
+  icon.setAttribute("viewBox", iconData.viewBox);
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = iconData.body;
+  return icon;
+}
 
 function serverProviderLabel(server) {
   const sourceHint = `${server.source_provider || ""} ${server.source_url_host || ""} ${server.source_type || ""}`.toLowerCase();
@@ -2187,19 +2216,13 @@ function serverProviderLabel(server) {
     inferredProvider = "quilt";
   }
   const raw = String(server.modloader || server.provider || inferredProvider || "unknown").trim();
-  const key = raw.toLowerCase().replace(/[\s_-]+/g, "");
-  const iconData = PROVIDER_ICONS[key === "neoforge" ? "forge" : key];
+  const key = normalizedProviderKey(raw);
   const favicon = PROVIDER_FAVICONS[key];
   const icon = favicon
-    ? el("img", { class: "provider-icon", src: favicon, alt: "", width: "18", height: "18" })
-    : iconData
-      ? document.createElementNS("http://www.w3.org/2000/svg", "svg")
-      : solarIcon("server-square-linear", "provider-icon");
-  if (iconData && !favicon) {
-    icon.setAttribute("class", "provider-icon");
-    icon.setAttribute("viewBox", iconData.viewBox);
-    icon.setAttribute("aria-hidden", "true");
-    icon.innerHTML = iconData.body;
+    ? el("img", { class: "provider-icon", src: favicon, alt: "", width: "18", height: "18", loading: "lazy", decoding: "async" })
+    : providerIconFallback(key);
+  if (favicon) {
+    icon.addEventListener("error", () => icon.replaceWith(providerIconFallback(key)), { once: true });
   }
   const names = { forge: "Forge", neoforge: "NeoForge", fabric: "Fabric", quilt: "Quilt", modrinth: "Modrinth", curseforge: "CurseForge" };
   return el("span", { class: "server-provider" }, icon, names[key] || raw);
