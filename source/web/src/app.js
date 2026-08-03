@@ -381,9 +381,9 @@ async function pageOverview(main) {
   let host = null, events = [], history = [];
   try { host = await api("/host"); } catch {}
   try { events = (await api("/events?limit=25")).events || []; } catch {}
-  try { history = (await api("/metrics?hours=1")).samples || []; } catch {}
+  try { history = await api("/metrics?hours=1") || []; } catch {}
 
-  const memUsed = (host && host.mem_total) ? host.mem_total - host.mem_avail : 0;
+  const memUsed = (host && host.mem_total) ? host.mem_total - host.mem_available : 0;
 
   main.innerHTML = "";
   main.append(
@@ -439,8 +439,9 @@ async function pageOverview(main) {
 
 function serviceSummary(d, host) {
   const mc = (d.state && d.state !== "stopped") ? "running" : "stopped";
-  const cp = (host && host.services && host.services.control_plane) || "active";
-  return cp === "active" ? "Panel ok · " + mc : cp + " · " + mc;
+  const cp = host && host.service_bonghos ? host.service_bonghos : "active";
+  const sup = host && host.service_minecraft ? host.service_minecraft : mc;
+  return cp === "active" ? "Panel ok · Minecraft " + sup : cp + " · Minecraft " + sup;
 }
 
 // eventRow renders one timeline entry, coloured by severity.
