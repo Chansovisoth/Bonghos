@@ -435,8 +435,13 @@ func backupRestore(a *app.App, args []string) error {
 		return fmt.Errorf("emergency backup failed, refusing to restore: %w", err)
 	}
 	fmt.Println("Restoring …")
-	if err := a.Backups.Restore(rec, inst.AbsoluteDir(a.Home), scope); err != nil {
+	res, err := a.Backups.Restore(rec, inst.AbsoluteDir(a.Home), scope)
+	if err != nil {
 		return err
+	}
+	if res.LevelNameUpdated {
+		fmt.Printf("Pointed level-name at the restored world: %s (was %s)\n",
+			res.WorldName, res.PreviousLevel)
 	}
 	fmt.Println("Restore complete. Start the server with: bonghos server start")
 	return nil

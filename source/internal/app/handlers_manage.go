@@ -528,13 +528,23 @@ func (a *App) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 	a.Hub.Broadcast("backups", "progress", map[string]any{
 		"stage": "restoring", "backup_id": rec.BackupID,
 	})
-	if err := a.Backups.Restore(rec, inst.AbsoluteDir(a.Home), scope); err != nil {
+	res, err := a.Backups.Restore(rec, inst.AbsoluteDir(a.Home), scope)
+	if err != nil {
 		writeErr(w, 500, err)
 		return
 	}
-	a.audit(u.ID, u.Username, "backup_restored", inst.Slug, rec.BackupID+" scope="+scope, remoteIP(r))
+	detail := rec.BackupID + " scope=" + scope
+	if res.LevelNameUpdated {
+		detail += fmt.Sprintf(" level-name %s→%s", res.PreviousLevel, res.WorldName)
+	}
+	a.audit(u.ID, u.Username, "backup_restored", inst.Slug, detail, remoteIP(r))
 	a.Hub.Broadcast("backups", "restored", map[string]any{"backup_id": rec.BackupID, "scope": scope})
-	writeJSON(w, 200, map[string]any{"ok": true, "scope": scope})
+	writeJSON(w, 200, map[string]any{
+		"ok": true, "scope": scope,
+		"world_name":         res.WorldName,
+		"level_name_updated": res.LevelNameUpdated,
+		"previous_level":     res.PreviousLevel,
+	})
 }
 
 func (a *App) handleBackupProtect(w http.ResponseWriter, r *http.Request) {

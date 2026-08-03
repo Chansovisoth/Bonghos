@@ -78,6 +78,12 @@ Nothing yet.
 - The restore dialog claimed the previous files were kept alongside as
   `.bonghos-pre-restore`, but those are removed once each replacement succeeds.
   The durable undo is the emergency backup, and the dialog now says so.
+- A world-only restore put the archived world back under its own name but left
+  `level-name` naming a different one, so the server kept loading the old world
+  and the operator saw no change after an apparently successful restore.
+  Restoring a world now repoints `level-name` at it, and the API, CLI and UI
+  report the change. `Manager.Restore` returns a `RestoreResult` describing what
+  it did instead of only an error.
 
 ## [0.1.0] — 2026-08-02
 

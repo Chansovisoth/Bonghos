@@ -776,7 +776,7 @@ function restoreBackup(b) {
     el("p", {}, `Restore ${b.backup_id} (${b.backup_type.replace(/_/g, " ")}) created ${fmtTime(b.created_at)}.`),
     el("label", { class: "field" }, el("span", {}, "Restore scope"), scopeSel),
     el("p", { class: "muted" },
-      "The server must be stopped. Bonghos takes a verified emergency backup of the current state first — that backup is how you undo this, and it appears in the list below. Files in the selected scope are then replaced."),
+      "The server must be stopped. Bonghos takes a verified emergency backup of the current state first — that backup is how you undo this, and it appears in the list below. Files in the selected scope are then replaced. If a world-only restore brings back a world under a different name, level-name is repointed at it so the server actually loads it."),
   ], [
     ["Cancel", "ghost", (c) => c()],
     ["Restore", "danger", async (c) => {
@@ -785,7 +785,11 @@ function restoreBackup(b) {
       try {
         const r = await api(`/backups/${b.backup_id}/restore`,
           { method: "POST", json: { scope: scopeSel.value, confirm: true } });
-        toast("Restore complete (" + (r.scope || scopeSel.value).replace(/_/g, " ") + ")", "ok");
+        let msg = "Restore complete (" + (r.scope || scopeSel.value).replace(/_/g, " ") + ")";
+        if (r.level_name_updated) {
+          msg += ` — level-name now points at “${r.world_name}” (was “${r.previous_level}”)`;
+        }
+        toast(msg, "ok");
         renderPage();
       } catch (e) { toast(e.message, "err"); }
     }]]);

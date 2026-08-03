@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Chansovisoth/Bonghos/internal/authorization"
 	"github.com/Chansovisoth/Bonghos/internal/backup"
 	"github.com/Chansovisoth/Bonghos/internal/instance"
+	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 )
 
 // newServerProject creates a project on disk with a small, recognisable set of
@@ -268,6 +270,21 @@ func TestWorldOnlyRestoreAfterLevelNameChanged(t *testing.T) {
 	}
 	if string(got) != "ORIGINAL WORLD" {
 		t.Errorf("world contains %q, want the archived contents", got)
+	}
+
+	// Restoring the files is only half the job: the server boots whatever
+	// level-name points at. If it still says "beta", the restored world sits
+	// on disk unused and the operator sees an unchanged world after what
+	// looked like a successful restore.
+	props, err := os.ReadFile(filepath.Join(dir, "server.properties"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(props), "level-name=alpha") {
+		t.Errorf("server.properties does not point at the restored world:\n%s", props)
+	}
+	if active := minecraft.WorldDir(dir); active != "alpha" {
+		t.Errorf("server would load world %q, want the restored %q", active, "alpha")
 	}
 }
 

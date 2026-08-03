@@ -477,32 +477,45 @@ func NormalizeScope(scope string) (string, error) {
 	}
 }
 
+// RestoreResult describes what a restore actually did, so callers can report
+// it rather than guessing.
+type RestoreResult struct {
+	Scope        string `json:"scope"`
+	EntriesTaken int    `json:"entries_restored"`
+	// WorldName is the world directory the server will use after the restore.
+	WorldName string `json:"world_name,omitempty"`
+	// LevelNameUpdated is true when server.properties was repointed at the
+	// restored world because the live value named a different one.
+	LevelNameUpdated bool   `json:"level_name_updated,omitempty"`
+	PreviousLevel    string `json:"previous_level_name,omitempty"`
+}
+
 // Restore extracts a verified backup into staging, validates paths, then
 // replaces the target. The caller guarantees the server is stopped and has
 // created an emergency pre-restore backup unless explicitly disabled.
-func (m *Manager) Restore(rec *Record, destServerDir string, scope string) error {
+func (m *Manager) Restore(rec *Record, destServerDir string, scope string) (*RestoreResult, error) {
 	scope, err := NormalizeScope(scope)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	full := filepath.Join(m.Home, rec.ArchivePath)
 	if err := m.Verify(rec.BackupID); err != nil {
-		return fmt.Errorf("backup failed verification, refusing restore: %w", err)
+		return nil, fmt.Errorf("backup failed verification, refusing restore: %w", err)
 	}
 	stagingDir := filepath.Join(m.Home, config.DirStaging, "restore-"+rec.BackupID+"-"+fmt.Sprint(time.Now().Unix()))
 	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	defer os.RemoveAll(stagingDir)
 	if err := extractTarZstSafe(full, stagingDir); err != nil {
-		return err
+		return nil, err
 	}
 	if err := os.MkdirAll(destServerDir, 0o755); err != nil {
-		return err
+		return nil, err
 	}
 	entries, err := os.ReadDir(stagingDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	worlds := worldNames(stagingDir, destServerDir)
 	restored := 0
@@ -518,12 +531,12 @@ func (m *Manager) Restore(rec *Record, destServerDir string, scope string) error
 		os.RemoveAll(old)
 		if _, err := os.Lstat(dst); err == nil {
 			if err := os.Rename(dst, old); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if err := os.Rename(src, dst); err != nil {
 			os.Rename(old, dst) // roll back this entry
-			return err
+			return nil, err
 		}
 		// The replacement succeeded, so the displaced copy is no longer needed.
 		// The durable safety net is the emergency pre-restore backup, not this
@@ -533,9 +546,31 @@ func (m *Manager) Restore(rec *Record, destServerDir string, scope string) error
 	// A scoped restore that matched nothing has quietly done nothing at all,
 	// which looks identical to success from the outside. Say so instead.
 	if restored == 0 {
-		return fmt.Errorf("nothing in this backup matched the %s scope; no files were changed", scope)
+		return nil, fmt.Errorf("nothing in this backup matched the %s scope; no files were changed", scope)
 	}
-	return nil
+
+	res := &RestoreResult{Scope: scope, EntriesTaken: restored}
+
+	// Restoring a world under its archived name is only half the job: the
+	// server boots whatever level-name says. If the live value names a
+	// different world, the restored one would sit on disk unused and the
+	// operator would see an untouched world after a "successful" restore.
+	// A full restore already replaces server.properties from the archive, so
+	// this only applies to a world-only restore.
+	if scope == ScopeWorld {
+		archiveWorld := minecraft.WorldDir(stagingDir)
+		current := minecraft.WorldDir(destServerDir)
+		res.WorldName = archiveWorld
+		if archiveWorld != current {
+			if err := minecraft.WriteProperty(destServerDir, "level-name", archiveWorld); err != nil {
+				return res, fmt.Errorf("restored world %q but could not point level-name at it (still %q): %w",
+					archiveWorld, current, err)
+			}
+			res.LevelNameUpdated = true
+			res.PreviousLevel = current
+		}
+	}
+	return res, nil
 }
 
 // extractTarZstSafe unpacks with the same traversal protections as imports.
