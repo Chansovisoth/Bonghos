@@ -846,7 +846,7 @@ func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleActivity(w http.ResponseWriter, r *http.Request) {
 	limit := 100
-	rows, err := a.DB.Query(`SELECT id, user_id, username, action, target, detail, remote_addr, created_at
+	rows, err := a.DB.Query(`SELECT id, user_id, username, action, target, detail, remote_addr, occurred_at
 		FROM audit_log ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		writeErr(w, 500, err)

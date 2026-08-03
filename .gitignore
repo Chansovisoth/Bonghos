@@ -4,9 +4,8 @@
 /source/bonghos-linux-*
 
 # Embedded frontend is generated from web/src by `make web` / setup.sh
-/source/cmd/bonghos/webdist/*.html
-/source/cmd/bonghos/webdist/*.css
-/source/cmd/bonghos/webdist/*.js
+/source/cmd/bonghos/webdist/*
+!/source/cmd/bonghos/webdist/.gitkeep
 
 # Local development runtime
 /source/devhome/

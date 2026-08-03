@@ -86,6 +86,29 @@ func TestUnauthenticatedRequestsAreRejected(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedActivityUsesAuditTimestamp(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	c := env.newClient()
+	c.mustLogin("owner", "correct horse battery", secret)
+
+	var out []struct {
+		Username string `json:"username"`
+		Action   string `json:"action"`
+		At       string `json:"at"`
+	}
+	status, body := c.do("GET", "/api/activity", nil, &out)
+	if status != 200 {
+		t.Fatalf("activity failed: %d %s", status, body)
+	}
+	if len(out) == 0 {
+		t.Fatal("activity returned no audit events")
+	}
+	if out[0].Action == "" || out[0].At == "" {
+		t.Fatalf("activity event missing action or timestamp: %+v", out[0])
+	}
+}
+
 // State-changing requests must carry a CSRF token even with a valid session.
 func TestStateChangingRequestRequiresCSRFToken(t *testing.T) {
 	env := newTestEnv(t)
