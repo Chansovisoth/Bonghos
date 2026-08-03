@@ -927,8 +927,7 @@ async function pageOverview(main) {
       statCard("Host memory", host ? fmtBytes(memUsed) : "—",
         host ? "of " + fmtBytes(host.mem_total) : ""),
       statCard("Disk free", fmtBytes(s.disk_free), "of " + fmtBytes(s.disk_total)),
-      statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute"),
-      statCard("Services", serviceSummary(d, host), "")),
+      statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute")),
 
     // Trends, previously the Performance tab.
     el("div", { class: "grid cols-2 flow-section" },
@@ -977,13 +976,6 @@ async function copyText(value, successMessage) {
     input.remove();
   }
   toast(successMessage, "ok");
-}
-
-function serviceSummary(d, host) {
-  const mc = (d.state && d.state !== "stopped") ? "running" : "stopped";
-  const cp = host && host.service_bonghos ? host.service_bonghos : "active";
-  const sup = host && host.service_minecraft ? host.service_minecraft : mc;
-  return cp === "active" ? "Panel ok · Minecraft " + sup : cp + " · Minecraft " + sup;
 }
 
 // eventRow renders one timeline entry, coloured by severity.
