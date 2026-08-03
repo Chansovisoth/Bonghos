@@ -37,6 +37,36 @@ func TestDetectStartupScripts(t *testing.T) {
 	if cands[0].Path != "startserver.sh" {
 		t.Errorf("top candidate = %q, want startserver.sh (got %+v)", cands[0].Path, cands)
 	}
+	if cands[0].Modloader != "neoforge" {
+		t.Errorf("modloader = %q, want neoforge", cands[0].Modloader)
+	}
+}
+
+func TestDetectStartupScriptUsesServerPackVariablesForModloader(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"start.sh":      "echo supports Forge and NeoForge\njava @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.4.0/unix_args.txt nogui\n",
+		"variables.txt": "# generated server pack\nMODLOADER=Forge\nMODLOADER_VERSION=47.4.0\n",
+	})
+	cands, err := DetectStartupScripts(root, 2)
+	if err != nil || len(cands) == 0 {
+		t.Fatalf("cands=%v err=%v", cands, err)
+	}
+	if cands[0].Modloader != "forge" {
+		t.Fatalf("modloader = %q, want forge", cands[0].Modloader)
+	}
+}
+
+func TestDetectStartupScriptIgnoresNeoForgeInComments(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"run.sh": "# Forge and NeoForge are both supported by this template\njava @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.4.0/unix_args.txt nogui\n",
+	})
+	cands, err := DetectStartupScripts(root, 2)
+	if err != nil || len(cands) == 0 {
+		t.Fatalf("cands=%v err=%v", cands, err)
+	}
+	if cands[0].Modloader != "forge" {
+		t.Fatalf("modloader = %q, want forge", cands[0].Modloader)
+	}
 }
 
 func TestDetectInteractivePrompt(t *testing.T) {

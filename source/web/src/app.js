@@ -1021,7 +1021,7 @@ function overviewPlayerFace(player, moreCount = 0) {
   const image = el("img", {
     src: getPlayerFaceUrl(username), alt: "", width: "36", height: "36",
     loading: "lazy", decoding: "async", referrerpolicy: "no-referrer",
-    onerror: () => image.replaceWith(fallback),
+    onerror: () => handlePlayerFaceError(image, fallback, username, 64),
   });
   return el("span", {
     class: "overview-player-face" + (moreCount ? " is-more" : ""),
@@ -1292,7 +1292,7 @@ function playerRow(p) {
     loading: "lazy",
     decoding: "async",
     referrerpolicy: "no-referrer",
-    onerror: () => avatar.replaceWith(fallback),
+    onerror: () => handlePlayerFaceError(avatar, fallback, p.username),
   });
   return el("tr", {},
     el("td", {}, el("div", { class: "player-identity" }, avatar,
@@ -1309,8 +1309,21 @@ function playerRow(p) {
 
 function getPlayerFaceUrl(username, size = 64) {
   const name = encodeURIComponent(String(username || "MHF_Steve"));
-  if (DEMO_MODE) return `https://minotar.net/helm/${name}/${size}.png`;
+  if (DEMO_MODE) return directPlayerFaceUrl(username, size);
   return `/api/players/avatar?username=${name}&size=${encodeURIComponent(size)}`;
+}
+
+function directPlayerFaceUrl(username, size = 64) {
+  return `https://minotar.net/helm/${encodeURIComponent(String(username || "MHF_Steve"))}/${size}.png`;
+}
+
+function handlePlayerFaceError(image, fallback, username, size = 64) {
+  if (!DEMO_MODE && !image.dataset.directFallback) {
+    image.dataset.directFallback = "true";
+    image.src = directPlayerFaceUrl(username, size);
+    return;
+  }
+  image.replaceWith(fallback);
 }
 
 function playerActions(p) {
@@ -2173,7 +2186,7 @@ function serverProviderLabel(server) {
   } else if (sourceHint.includes("quiltmc")) {
     inferredProvider = "quilt";
   }
-  const raw = String(server.provider || inferredProvider || server.modloader || "unknown").trim();
+  const raw = String(server.modloader || server.provider || inferredProvider || "unknown").trim();
   const key = raw.toLowerCase().replace(/[\s_-]+/g, "");
   const iconData = PROVIDER_ICONS[key === "neoforge" ? "forge" : key];
   const favicon = PROVIDER_FAVICONS[key];

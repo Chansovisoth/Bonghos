@@ -23,10 +23,13 @@ var (
 	reJavaCmd     = regexp.MustCompile(`(?m)\bjava\b|\$JAVA|"?\$\{?JAVA`)
 	reUnixArgs    = regexp.MustCompile(`@(user_jvm_args\.txt|libraries/[^\s"']*unix_args\.txt)`)
 	reForge       = regexp.MustCompile(`(?i)forge|neoforge`)
+	reForgePath   = regexp.MustCompile(`(?i)libraries/net/minecraftforge|files\.minecraftforge\.net|forge-[^/\s"']*installer|FORGE_INSTALLER_URL`)
+	reNeoForge    = regexp.MustCompile(`(?i)libraries/net/neoforged|maven\.neoforged\.net|neoforge-[^/\s"']*installer|NEOFORGE_VERSION`)
 	reFabric      = regexp.MustCompile(`(?i)fabric-server|fabric_installer|fabric\.jar`)
 	reQuilt       = regexp.MustCompile(`(?i)quilt`)
 	reSourced     = regexp.MustCompile(`(?m)^\s*(?:\.|source)\s+([^\s;]+)`)
 	reInteractive = regexp.MustCompile(`(?m)^\s*(read\s+-[nprs]|read\s+-r\s+-p|pause\b)|Press any key`)
+	reModloader   = regexp.MustCompile(`(?mi)^\s*MODLOADER\s*=\s*["']?([A-Za-z]+)`)
 )
 
 // StartupCandidate is a ranked launch-script candidate.
@@ -105,19 +108,33 @@ func inspectScript(root, rel string) *StartupCandidate {
 		c.UsesArgFile = m[1]
 		c.Score += 20
 	}
-	switch {
-	case reForge.MatchString(body):
-		c.Modloader = "forge"
-		if strings.Contains(strings.ToLower(body), "neoforge") {
-			c.Modloader = "neoforge"
+	if modloader := declaredModloader(root, body); modloader != "" {
+		c.Modloader = modloader
+		c.Score += 10
+	} else {
+		uncommented := stripShellComments(body)
+		switch {
+		case reForge.MatchString(uncommented):
+			forge := reForgePath.MatchString(uncommented)
+			neoforge := reNeoForge.MatchString(uncommented)
+			switch {
+			case neoforge && !forge:
+				c.Modloader = "neoforge"
+			case forge && !neoforge:
+				c.Modloader = "forge"
+			case strings.Contains(strings.ToLower(uncommented), "neoforge") && !strings.Contains(strings.ToLower(uncommented), "minecraftforge"):
+				c.Modloader = "neoforge"
+			default:
+				c.Modloader = "forge"
+			}
+			c.Score += 10
+		case reFabric.MatchString(uncommented):
+			c.Modloader = "fabric"
+			c.Score += 10
+		case reQuilt.MatchString(uncommented):
+			c.Modloader = "quilt"
+			c.Score += 10
 		}
-		c.Score += 10
-	case reFabric.MatchString(body):
-		c.Modloader = "fabric"
-		c.Score += 10
-	case reQuilt.MatchString(body):
-		c.Modloader = "quilt"
-		c.Score += 10
 	}
 	// interactive prompt detection with file:line reporting
 	for i, line := range strings.Split(body, "\n") {
@@ -141,6 +158,48 @@ func inspectScript(root, rel string) *StartupCandidate {
 		return nil
 	}
 	return &c
+}
+
+func declaredModloader(root, body string) string {
+	if m := reModloader.FindStringSubmatch(body); m != nil {
+		return normalizeModloader(m[1])
+	}
+	for _, name := range []string{"variables.txt"} {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || len(data) > 1<<20 {
+			continue
+		}
+		if m := reModloader.FindStringSubmatch(string(data)); m != nil {
+			return normalizeModloader(m[1])
+		}
+	}
+	return ""
+}
+
+func normalizeModloader(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "neoforge":
+		return "neoforge"
+	case "forge":
+		return "forge"
+	case "fabric", "legacyfabric":
+		return "fabric"
+	case "quilt":
+		return "quilt"
+	default:
+		return ""
+	}
+}
+
+func stripShellComments(body string) string {
+	var lines []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // PatchInteractive rewrites known interactive patterns to non-blocking forms.
