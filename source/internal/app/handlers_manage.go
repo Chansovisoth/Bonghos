@@ -538,6 +538,9 @@ func (a *App) handleBackupRestore(w http.ResponseWriter, r *http.Request) {
 		detail += fmt.Sprintf(" level-name %s→%s", res.PreviousLevel, res.WorldName)
 	}
 	a.audit(u.ID, u.Username, "backup_restored", inst.Slug, detail, remoteIP(r))
+	a.recordEvent(inst.ID, CatBackup, "restore_completed", SevWarning,
+		"Restored backup "+rec.BackupID+" ("+strings.ReplaceAll(scope, "_", " ")+")",
+		map[string]any{"backup_id": rec.BackupID, "scope": scope})
 	a.Hub.Broadcast("backups", "restored", map[string]any{"backup_id": rec.BackupID, "scope": scope})
 	writeJSON(w, 200, map[string]any{
 		"ok": true, "scope": scope,

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -91,15 +92,33 @@ type Supervisor struct {
 	crashTimes []time.Time
 
 	// console fan-out
-	subMu   sync.Mutex
-	subs    map[chan string]bool
-	history []string // bounded recent console history
+	subMu       sync.Mutex
+	subs        map[chan string]bool
+	history     []string // bounded recent console history
+	historySize int      // approximate bytes held in history
+
+	// Commands Bonghos issues for its own bookkeeping (player polling) are
+	// hidden from the user-facing console: their echo and reply are still
+	// parsed and logged, but repeating "There are 0 of a max of 10 players
+	// online" every twelve seconds buries whatever the operator was reading.
+	suppressMu    sync.Mutex
+	suppressUntil time.Time
+	suppressRe    *regexp.Regexp
+	suppressEcho  string
 
 	onLine  func(line string) // log-parser hook
 	onState func(s State, ps PersistedState)
 }
 
-const historyLines = 500
+const (
+	historyLines = 500
+	// historyBytes bounds the replay buffer in bytes as well as lines. The
+	// console protocol caps a frame at 64 KiB, and 500 lines of modded boot
+	// output comfortably exceeds that: the frame was rejected and connecting
+	// clients silently received no backlog at all. Staying under the frame
+	// limit keeps replay working; clients wanting more read the log file.
+	historyBytes = 48 * 1024
+)
 
 func New(cfg Config) *Supervisor {
 	if cfg.GracefulStopSeconds <= 0 {
@@ -308,13 +327,24 @@ func (s *Supervisor) readConsole(tty *os.File) {
 	sc := bufio.NewScanner(tty)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
-		line := sc.Text()
+		// The raw PTY text goes to the log file so nothing is lost for
+		// debugging, but everything the UI sees is sanitized: escape
+		// sequences are meaningless outside a terminal and would otherwise
+		// be stored in the history buffer and rendered in the browser.
+		raw := sc.Text()
 		if logFile != nil {
-			fmt.Fprintln(logFile, line)
+			fmt.Fprintln(logFile, SanitizeLine(raw))
 		}
-		s.broadcast(line)
+		line := SanitizeLine(raw)
+		if line == "" && strings.TrimSpace(raw) != "" {
+			continue // the line was entirely control sequences
+		}
+		// Parsing happens for every line; only the console stream is filtered.
 		if s.onLine != nil {
 			s.onLine(line)
+		}
+		if !s.suppressed(line) {
+			s.broadcast(line)
 		}
 		// running detection: "Done (12.3s)!" from the server
 		if strings.Contains(line, "Done (") && strings.Contains(line, ")!") {
@@ -331,8 +361,10 @@ func (s *Supervisor) readConsole(tty *os.File) {
 func (s *Supervisor) broadcast(line string) {
 	s.subMu.Lock()
 	s.history = append(s.history, line)
-	if len(s.history) > historyLines {
-		s.history = s.history[len(s.history)-historyLines:]
+	s.historySize += len(line) + 1
+	for len(s.history) > historyLines || (s.historySize > historyBytes && len(s.history) > 1) {
+		s.historySize -= len(s.history[0]) + 1
+		s.history = s.history[1:]
 	}
 	for ch := range s.subs {
 		select {
@@ -356,6 +388,54 @@ func (s *Supervisor) Subscribe() (history []string, ch chan string, cancel func(
 		delete(s.subs, ch)
 		s.subMu.Unlock()
 	}
+}
+
+// SendInternalCommand issues a command Bonghos needs for its own bookkeeping
+// and hides its echo and reply from the user-facing console for a short
+// window. The output is still written to the log file and still passed to the
+// log parser, so player tracking is unaffected.
+func (s *Supervisor) SendInternalCommand(cmd string) error {
+	cmd = strings.TrimSpace(cmd)
+	reply, ok := internalReplies[cmd]
+	if !ok {
+		// Only known bookkeeping commands may be hidden. Anything else is
+		// treated as an ordinary command so nothing can be issued invisibly.
+		return s.SendCommand(cmd)
+	}
+	s.suppressMu.Lock()
+	s.suppressUntil = time.Now().Add(5 * time.Second)
+	s.suppressRe = reply
+	s.suppressEcho = cmd
+	s.suppressMu.Unlock()
+	return s.SendCommand(cmd)
+}
+
+// internalReplies maps a bookkeeping command to the reply it produces. Keeping
+// this list closed means an operator's own commands can never be suppressed.
+var internalReplies = map[string]*regexp.Regexp{
+	"list": regexp.MustCompile(`players online|There are \d+ of a max`),
+}
+
+// suppressed reports whether a console line came from an internal command and
+// should be kept out of the console stream and history.
+func (s *Supervisor) suppressed(line string) bool {
+	s.suppressMu.Lock()
+	defer s.suppressMu.Unlock()
+	if s.suppressUntil.IsZero() || time.Now().After(s.suppressUntil) {
+		return false
+	}
+	trimmed := strings.TrimSpace(line)
+	// The terminal echoes the command itself before the server replies.
+	if s.suppressEcho != "" && (trimmed == s.suppressEcho || strings.HasSuffix(trimmed, "> "+s.suppressEcho)) {
+		return true
+	}
+	if s.suppressRe != nil && s.suppressRe.MatchString(line) {
+		// The reply has arrived; stop suppressing so a command the operator
+		// types themselves is never hidden.
+		s.suppressUntil = time.Time{}
+		return true
+	}
+	return false
 }
 
 // SendCommand forwards a Minecraft console command. Input is rejected while

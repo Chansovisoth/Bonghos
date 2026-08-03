@@ -55,6 +55,12 @@ func numCPU() int {
 }
 
 // ProcessCPU returns CPU percent of pid since the previous call.
+//
+// Both counters are unsigned and monotonic only while the same process keeps
+// running. A restarted server reuses the collector with a fresh, smaller tick
+// count, and an unguarded subtraction wraps to about 1.8e19 — a single poisoned
+// sample that then skews every average and chart drawn from the metrics table.
+// Anything that is not a sane forward delta returns zero instead.
 func (c *Collector) ProcessCPU(pid int) float64 {
 	if pid <= 0 {
 		return 0
@@ -65,16 +71,51 @@ func (c *Collector) ProcessCPU(pid int) float64 {
 		c.lastProc[pid] = procTicks
 		c.lastTot = totTicks
 	}()
-	prevP, okP := c.lastProc[pid], c.lastProc[pid] > 0
-	if !okP || c.lastTot == 0 || totTicks <= c.lastTot {
+
+	// A zero reading means /proc was unreadable or the process has gone. Do
+	// not treat it as "used no CPU"; it is an absence of data.
+	if procTicks == 0 || totTicks == 0 {
 		return 0
 	}
+	prevP, okP := c.lastProc[pid], c.lastProc[pid] > 0
+	if !okP || c.lastTot == 0 {
+		return 0 // first sample for this PID: nothing to compare against
+	}
+	// Counters going backwards means the PID was reused or the host counter
+	// reset. Re-baseline silently rather than reporting nonsense.
+	if procTicks < prevP || totTicks <= c.lastTot {
+		return 0
+	}
+
 	dp := float64(procTicks - prevP)
 	dt := float64(totTicks - c.lastTot)
 	if dt <= 0 {
 		return 0
 	}
-	return dp / dt * 100 * c.nCPU
+	pct := dp / dt * 100 * c.nCPU
+
+	// A process cannot use more than every core. Small overshoots happen from
+	// rounding across a sampling boundary, so clamp rather than discard, but
+	// treat anything wildly out of range as a bad reading.
+	max := 100 * c.nCPU
+	switch {
+	case pct < 0 || pct != pct: // negative, or NaN from a zero delta
+		return 0
+	case pct > max*2:
+		return 0 // implausible: something reset underneath us
+	case pct > max:
+		return max
+	}
+	return pct
+}
+
+// ForgetProcess drops the cached tick baseline for a PID. The supervisor calls
+// this when a server stops so the next start is measured from its own zero
+// rather than against a dead process's counters.
+func (c *Collector) ForgetProcess(pid int) {
+	if pid > 0 {
+		delete(c.lastProc, pid)
+	}
 }
 
 func readProcTicks(pid int) uint64 {

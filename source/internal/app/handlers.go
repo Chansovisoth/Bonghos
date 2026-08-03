@@ -18,6 +18,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/instance"
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/monitoring"
+	"github.com/Chansovisoth/Bonghos/internal/qrcode"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/systemd"
 )
 
@@ -118,6 +119,10 @@ func (a *App) routes() http.Handler {
 
 	// --- activity / host ----------------------------------------------------
 	mux.HandleFunc("GET /api/activity", a.requirePerm(authorization.PermConfigManage, a.handleActivity))
+	// The server's own timeline. Unlike the audit trail this is what the
+	// server did rather than what a person did, so anyone who can see the
+	// dashboard can see it.
+	mux.HandleFunc("GET /api/events", a.requirePerm(authorization.PermServerView, a.handleEvents))
 	mux.HandleFunc("GET /api/host", a.requirePerm(authorization.PermConfigManage, a.handleHost))
 	mux.HandleFunc("GET /api/version", a.handleVersion)
 
@@ -214,10 +219,15 @@ func (a *App) handleInvitationTOTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]string{
-		"secret": secret,
-		"uri":    auth.TOTPProvisioningURI(req.Username, secret),
-	})
+	uri := auth.TOTPProvisioningURI(req.Username, secret)
+	out := map[string]string{"secret": secret, "uri": uri}
+	// The QR is rendered server-side as SVG so the browser needs no QR library
+	// and the enrolment page keeps working offline. Failure is not fatal: the
+	// activation page falls back to the secret and URI it already shows.
+	if svg, err := qrcode.SVG(uri, 4); err == nil {
+		out["qr_svg"] = svg
+	}
+	writeJSON(w, 200, out)
 }
 
 func (a *App) handleInvitationActivate(w http.ResponseWriter, r *http.Request) {
@@ -843,6 +853,28 @@ func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 // activity
 // ---------------------------------------------------------------------------
+
+// handleEvents returns the recent server timeline: starting, loading mods,
+// ready, crashed, restarted, backups. It answers "what is happening now" and
+// "what happened recently" without the operator reading journalctl.
+func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	var instID int64
+	if inst, err := a.activeInstance(); err == nil {
+		instID = inst.ID
+	}
+	events, err := a.listEvents(instID, limit)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"events": events})
+}
 
 func (a *App) handleActivity(w http.ResponseWriter, r *http.Request) {
 	limit := 100

@@ -75,7 +75,9 @@ Any future telemetry would be disabled by default and strictly opt-in.
 - Constrained file manager scoped to the server directory
 
 **Accounts and security**
-- Multiple accounts with **mandatory** TOTP two-factor authentication
+- Multiple accounts with **mandatory** TOTP two-factor authentication, enrolled
+  by scanning a QR code in the terminal or the Web UI (with the secret and
+  `otpauth://` URI always shown as a fallback)
 - Owner / Admin / Member / Viewer roles enforced in the backend
 - Admin-created invitations; no public registration
 - Argon2id passwords, encrypted TOTP secrets, hashed one-use recovery codes

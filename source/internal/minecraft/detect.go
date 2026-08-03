@@ -169,8 +169,11 @@ var jvmVarNames = []string{
 }
 
 var (
-	reXms      = regexp.MustCompile(`-Xms(\S+)`)
-	reXmx      = regexp.MustCompile(`-Xmx(\S+)`)
+	// Match only the memory value itself. A greedy \S+ swallows a trailing
+	// quote in JAVA_ARGS="-Xmx4G -Xms4G", so rewriting the value corrupted
+	// the shell assignment and the new setting never took effect.
+	reXms      = regexp.MustCompile(`-Xms(\d+[kKmMgGtT]?)`)
+	reXmx      = regexp.MustCompile(`-Xmx(\d+[kKmMgGtT]?)`)
 	reAssign   = regexp.MustCompile(`(?m)^\s*(?:export\s+)?([A-Z_]+)=["']?([^"'\n#]*)`)
 	memValueRE = regexp.MustCompile(`^\d+[kKmMgG]?$`)
 )
@@ -184,11 +187,127 @@ type JVMConfig struct {
 	Xmx        string `json:"xmx"`
 	ExtraArgs  string `json:"extra_args"`
 	Editable   bool   `json:"editable"`
+	// Note explains why a source cannot be edited, or what owns it.
+	Note string `json:"note,omitempty"`
+}
+
+// detectOwningVariable looks for a JVM variable assignment in the startup
+// script family that takes precedence over a generated argument file.
+func detectOwningVariable(root, startupRel string) *JVMConfig {
+	if startupRel == "" {
+		return nil
+	}
+	for _, f := range scriptFamily(root, startupRel) {
+		data, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			continue
+		}
+		for _, m := range reAssign.FindAllStringSubmatch(string(data), -1) {
+			name, value := m[1], strings.TrimSpace(m[2])
+			if !contains(jvmVarNames, name) {
+				continue
+			}
+			if !strings.Contains(value, "-Xm") {
+				continue // not the memory-bearing assignment
+			}
+			// Only take over when an argument file would otherwise win and
+			// that file is regenerated; otherwise the normal order applies.
+			generated := false
+			for _, af := range []string{"user_jvm_args.txt", "jvm_args.txt", "java_args.txt"} {
+				if _, err := os.Stat(filepath.Join(root, af)); err != nil {
+					continue
+				}
+				if argFileIsGenerated(root, startupRel, af) {
+					generated = true
+					break
+				}
+			}
+			if !generated {
+				return nil
+			}
+			cfg := &JVMConfig{
+				SourceFile: filepath.ToSlash(f), SourceKind: "variable",
+				Variable: name, Editable: true,
+				Note: "This pack regenerates its argument file at launch, so " +
+					name + " here is the setting that actually takes effect.",
+			}
+			parseJVMArgs(value, cfg)
+			return cfg
+		}
+	}
+	return nil
+}
+
+// generatedArgFile matches a startup script writing an argument file itself,
+// which means anything the panel edits there is discarded on the next start.
+// ServerPackCreator packs do exactly this: variables.txt holds JAVA_ARGS and
+// start.sh regenerates user_jvm_args.txt from it on every run.
+var generatedArgFile = regexp.MustCompile(
+	`(?m)(?:>>?|\btee\b)\s*"?[^"\n]*?(user_jvm_args\.txt|jvm_args\.txt|java_args\.txt)`)
+
+// argFileIsGenerated reports whether the startup script (or a script it
+// sources) rewrites the given argument file at launch.
+func argFileIsGenerated(root, startupRel, argFile string) bool {
+	if startupRel == "" {
+		return false
+	}
+	base := filepath.Base(argFile)
+	for _, f := range scriptFamily(root, startupRel) {
+		data, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			continue
+		}
+		body := string(data)
+		for _, m := range generatedArgFile.FindAllStringSubmatch(body, -1) {
+			if m[1] == base {
+				return true
+			}
+		}
+		// Some packs say so in a comment rather than in obvious redirection.
+		lower := strings.ToLower(body)
+		if strings.Contains(lower, strings.ToLower(base)) &&
+			(strings.Contains(lower, "regenerat") || strings.Contains(lower, "overwrit") ||
+				strings.Contains(lower, "do not edit") || strings.Contains(lower, "don't edit") ||
+				strings.Contains(lower, "will be replaced")) {
+			return true
+		}
+	}
+	return false
+}
+
+// scriptFamily returns the startup script plus any scripts it sources.
+func scriptFamily(root, startupRel string) []string {
+	files := []string{startupRel}
+	data, err := os.ReadFile(filepath.Join(root, startupRel))
+	if err != nil {
+		return files
+	}
+	for _, m := range reSourced.FindAllStringSubmatch(string(data), 8) {
+		files = append(files, filepath.ToSlash(
+			filepath.Join(filepath.Dir(startupRel), strings.Trim(m[1], `"'`))))
+	}
+	// ServerPackCreator keeps its settings beside the script even when the
+	// script reads it without a `source` line.
+	for _, known := range []string{"variables.txt", "settings.cfg"} {
+		cand := filepath.ToSlash(filepath.Join(filepath.Dir(startupRel), known))
+		if _, err := os.Stat(filepath.Join(root, cand)); err == nil {
+			files = append(files, cand)
+		}
+	}
+	return files
 }
 
 // DetectJVMConfig inspects the selected startup script, sourced files and
 // known argument files, returning the best editable source found.
 func DetectJVMConfig(root, startupRel string) (*JVMConfig, error) {
+	// Priority 0: a variable that owns the launch settings. When the startup
+	// script regenerates the argument file, the argument file is an output,
+	// not a source: editing it looks like it worked and is silently reverted
+	// on the next restart.
+	if cfg := detectOwningVariable(root, startupRel); cfg != nil {
+		return cfg, nil
+	}
+
 	// Priority 1: dedicated JVM argument files.
 	argFiles := []string{"user_jvm_args.txt", "jvm_args.txt", "java_args.txt"}
 	// include any @file references from the startup script
@@ -214,6 +333,13 @@ func DetectJVMConfig(root, startupRel string) (*JVMConfig, error) {
 				SourceFile: filepath.ToSlash(af), SourceKind: "arg_file", Editable: true,
 			}
 			parseJVMArgs(string(data), cfg)
+			if argFileIsGenerated(root, startupRel, af) {
+				// Nothing better was found, so report it, but do not let the
+				// panel write to a file the pack rewrites at launch.
+				cfg.Editable = false
+				cfg.Note = "This file is regenerated by the startup script on every run, " +
+					"so changes made here are lost. Edit the launch settings the script reads instead."
+			}
 			// unix_args.txt from Forge installers is pack-owned; editing xms/xmx
 			// there is still safe line-wise, but user_jvm_args.txt is preferred.
 			return cfg, nil
@@ -312,14 +438,20 @@ func UpdateJVMArgFile(content, xms, xmx string) string {
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if reXms.MatchString(line) && xms != "" {
-			lines[i] = reXms.ReplaceAllString(line, "-Xms"+xms)
+		// Both substitutions must build on each other. Applying the second to
+		// the original line discarded the first, which silently lost the Xms
+		// change whenever both appeared together, as in
+		// JAVA_ARGS="-Xmx4G -Xms4G".
+		updated := line
+		if reXms.MatchString(updated) && xms != "" {
+			updated = reXms.ReplaceAllString(updated, "-Xms"+xms)
 			replacedXms = true
 		}
-		if reXmx.MatchString(line) && xmx != "" {
-			lines[i] = reXmx.ReplaceAllString(line, "-Xmx"+xmx)
+		if reXmx.MatchString(updated) && xmx != "" {
+			updated = reXmx.ReplaceAllString(updated, "-Xmx"+xmx)
 			replacedXmx = true
 		}
+		lines[i] = updated
 	}
 	if !replacedXms && xms != "" {
 		lines = append(lines, "-Xms"+xms)

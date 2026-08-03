@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Chansovisoth/Bonghos/internal/auth"
@@ -46,6 +47,10 @@ type App struct {
 	Sched      *scheduler.Scheduler
 	Hub        *websocket.Hub
 	Runner     *Runner
+
+	// Startup phases already reported for the current server run.
+	phaseMu    sync.Mutex
+	seenPhases map[string]bool
 	Collector  *monitoring.Collector
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
@@ -269,7 +274,9 @@ func (a *App) playerPollLoop(ctx context.Context) {
 			if st, _ := a.Runner.State(); st != "running" {
 				continue
 			}
-			_ = a.Runner.SendCommand("list")
+			// Internal bookkeeping: the reply is parsed for the player list
+			// but kept out of the operator's console.
+			_ = a.Runner.SendInternalCommand("list")
 		}
 	}
 }
