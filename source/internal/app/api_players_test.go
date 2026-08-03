@@ -1,7 +1,9 @@
 package app
 
 import (
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,5 +57,51 @@ func TestPlayerListIncludesOperatorState(t *testing.T) {
 	}
 	if got["Alex"] {
 		t.Error("Alex should not be marked as an operator")
+	}
+}
+
+func TestPlayerAvatarProxiesSameOriginImage(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/helm/Alex/64.png" {
+			t.Fatalf("unexpected upstream path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("png-bytes"))
+	}))
+	defer upstream.Close()
+
+	oldBase := playerAvatarBaseURL
+	oldClient := playerAvatarClient
+	playerAvatarBaseURL = upstream.URL + "/helm"
+	playerAvatarClient = upstream.Client()
+	t.Cleanup(func() {
+		playerAvatarBaseURL = oldBase
+		playerAvatarClient = oldClient
+	})
+
+	env := newTestEnv(t)
+	secret := env.createUser("viewer", "correct horse battery", authorization.RoleViewer)
+	c := env.newClient()
+	c.mustLogin("viewer", "correct horse battery", secret)
+
+	req, err := http.NewRequest(http.MethodGet, env.server.URL+"/api/players/avatar?username=Alex&size=64", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("avatar status = %d, body = %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", got)
+	}
+	if string(body) != "png-bytes" {
+		t.Fatalf("avatar body = %q", body)
 	}
 }

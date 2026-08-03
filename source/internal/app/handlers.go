@@ -78,6 +78,7 @@ func (a *App) routes() http.Handler {
 
 	// --- players ------------------------------------------------------------
 	mux.HandleFunc("GET /api/players", a.requirePerm(authorization.PermPlayersView, a.handlePlayerList))
+	mux.HandleFunc("GET /api/players/avatar", a.requirePerm(authorization.PermPlayersView, a.handlePlayerAvatar))
 	mux.HandleFunc("POST /api/players/action", a.requirePerm(authorization.PermPlayersManage, a.handlePlayerAction))
 
 	// --- monitoring ---------------------------------------------------------

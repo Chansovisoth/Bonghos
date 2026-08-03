@@ -1308,7 +1308,9 @@ function playerRow(p) {
 }
 
 function getPlayerFaceUrl(username, size = 64) {
-  return `https://minotar.net/helm/${encodeURIComponent(String(username || "MHF_Steve"))}/${size}.png`;
+  const name = encodeURIComponent(String(username || "MHF_Steve"));
+  if (DEMO_MODE) return `https://minotar.net/helm/${name}/${size}.png`;
+  return `/api/players/avatar?username=${name}&size=${encodeURIComponent(size)}`;
 }
 
 function playerActions(p) {
