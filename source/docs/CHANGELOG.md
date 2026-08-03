@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- TOTP enrolment now shows a scannable QR code: block characters in the
+  terminal during `bonghos setup` and `bonghos admin create`, and an SVG on the
+  Web UI activation page. The QR encodes the same `otpauth://` URI as before.
+  Rendering is best-effort — a non-interactive or narrow terminal, or any
+  encoding failure, falls back to the secret and URI and never interrupts
+  account creation. The QR is generated server-side, so the browser needs no
+  JavaScript QR library and enrolment keeps working offline. The secret and URI
+  are still never written to the audit trail or application logs.
+- Vendored `rsc.io/qr` (BSD-3-Clause) under `source/third_party/qr`, consistent
+  with the other vendored dependencies, so builds stay offline-reproducible.
 
 ## [0.1.1] — 2026-08-03
 

@@ -27,6 +27,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/database"
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/portability"
+	"github.com/Chansovisoth/Bonghos/internal/qrcode"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/console"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/systemd"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/tmux"
@@ -351,10 +352,7 @@ func setupOwner(a *app.App) error {
 		return err
 	}
 	fmt.Println("\nTwo-factor authentication (TOTP) is mandatory.")
-	fmt.Println("Add this secret to your authenticator app:")
-	fmt.Println("\n  Secret:", secret)
-	fmt.Println("  URI:   ", auth.TOTPProvisioningURI(username, secret))
-	fmt.Println()
+	printTOTPEnrolment(username, secret)
 	for {
 		fmt.Print("Enter the 6-digit code from your app to confirm: ")
 		code := readLine()
@@ -380,6 +378,28 @@ func readLine() string {
 	var s string
 	fmt.Scanln(&s)
 	return strings.TrimSpace(s)
+}
+
+// printTOTPEnrolment shows the enrolment QR code when the terminal can display
+// one, always followed by the secret and URI. Rendering is best-effort: any
+// failure falls through to the manual values rather than interrupting setup.
+func printTOTPEnrolment(username, secret string) {
+	uri := auth.TOTPProvisioningURI(username, secret)
+
+	if art, err := qrcode.Stdout(uri); err == nil {
+		fmt.Println("\nScan this QR code with your authenticator app:")
+		fmt.Println()
+		fmt.Print(art)
+		fmt.Println("\nIf scanning does not work, enter this secret manually:")
+	} else {
+		// Not a terminal, too narrow, or encoding failed. The manual path is
+		// the authoritative one anyway.
+		fmt.Println("Add this secret to your authenticator app:")
+	}
+
+	fmt.Println("\n  Secret:", secret)
+	fmt.Println("  URI:   ", uri)
+	fmt.Println()
 }
 
 func readSecret() (string, error) {

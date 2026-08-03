@@ -1274,6 +1274,7 @@ async function activationFlow(token) {
     const p1 = el("input", { type: "password", autocomplete: "new-password" });
     const p2 = el("input", { type: "password", autocomplete: "new-password" });
     const code = el("input", { inputmode: "numeric", maxlength: "6" });
+    const qrBox = el("div", { class: "qr-box hidden" });
     const secretBox = el("div", { class: "muted mono", style: "word-break:break-all" });
     let secret = "";
     const genBtn = el("button", { class: "btn", type: "button", onclick: async () => {
@@ -1281,8 +1282,24 @@ async function activationFlow(token) {
       const d = await fetch(`/api/invitations/${token}/totp`, { method: "POST",
         headers: { "Content-Type": "application/json", "X-Bonghos-CSRF": csrf.csrf },
         body: JSON.stringify({ username: user.value }) }).then((r) => r.json());
+      if (d.error) return toast(d.error, "err");
       secret = d.secret;
-      secretBox.textContent = "Secret: " + d.secret + "\nURI: " + d.uri;
+      // The QR is generated server-side, so the browser needs no QR library
+      // and this page keeps working offline. Without it the secret below is
+      // still everything an authenticator app needs.
+      // The SVG is built by Bonghos from integer coordinates and contains no
+      // user input, but it arrives as markup, so refuse anything that does not
+      // look like the plain shape we generate.
+      const svgOK = typeof d.qr_svg === "string" &&
+        d.qr_svg.startsWith("<svg ") && !/<script|onload=|xlink:href/i.test(d.qr_svg);
+      if (svgOK) {
+        qrBox.innerHTML = d.qr_svg;
+        qrBox.prepend(el("p", { class: "muted" }, "Scan this with your authenticator app:"));
+        qrBox.classList.remove("hidden");
+      }
+      secretBox.textContent =
+        (svgOK ? "If scanning does not work, enter this secret manually:\n\n" : "") +
+        "Secret: " + d.secret + "\nURI: " + d.uri;
     } }, "Generate authenticator secret");
     const form = el("form", { class: "login-card", onsubmit: async (e) => {
       e.preventDefault();
@@ -1306,7 +1323,7 @@ async function activationFlow(token) {
       el("label", {}, "Username", user),
       el("label", {}, "Password (min 10 chars)", p1),
       el("label", {}, "Confirm password", p2),
-      genBtn, secretBox,
+      genBtn, qrBox, secretBox,
       el("label", {}, "6-digit code from your authenticator", code),
       el("button", { class: "btn primary" }, "Activate"));
     wrap.append(form);

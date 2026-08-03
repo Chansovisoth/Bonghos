@@ -158,3 +158,101 @@ func mustTOTP(t *testing.T, secret string) string {
 	}
 	return code
 }
+
+// The invitation enrolment endpoint must always return the secret and URI a
+// user can type by hand. The QR is an extra convenience, never a replacement.
+func TestInvitationTOTPKeepsManualFallback(t *testing.T) {
+	env := newTestEnv(t)
+	env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner, err := env.app.Auth.UserByName("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := env.app.Auth.CreateInvitation(owner.ID, authorization.RoleMember, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := env.newClient()
+	var out struct {
+		Secret string `json:"secret"`
+		URI    string `json:"uri"`
+		QRSVG  string `json:"qr_svg"`
+	}
+	status, body := c.do("POST", "/api/invitations/"+inv.Token+"/totp",
+		map[string]string{"username": "newcomer"}, &out)
+	if status != 200 {
+		t.Fatalf("enrolment failed: %d %s", status, body)
+	}
+
+	if out.Secret == "" {
+		t.Error("no secret returned; manual enrolment would be impossible")
+	}
+	if !strings.HasPrefix(out.URI, "otpauth://totp/") {
+		t.Errorf("URI is not an otpauth provisioning URI: %q", out.URI)
+	}
+	if !strings.Contains(out.URI, out.Secret) {
+		t.Error("the URI does not carry the same secret that was returned")
+	}
+
+	// The QR is optional, but if present it must encode that same URI and
+	// contain nothing script-like, because the page injects it as markup.
+	if out.QRSVG != "" {
+		if !strings.HasPrefix(out.QRSVG, "<svg ") {
+			t.Errorf("qr_svg is not an SVG document: %.60s", out.QRSVG)
+		}
+		for _, bad := range []string{"<script", "onload=", "javascript:"} {
+			if strings.Contains(strings.ToLower(out.QRSVG), bad) {
+				t.Errorf("qr_svg contains %q", bad)
+			}
+		}
+		// The QR encodes the URI; it must not embed the raw secret as text.
+		if strings.Contains(out.QRSVG, out.Secret) {
+			t.Error("qr_svg leaks the secret as literal text")
+		}
+	}
+}
+
+// Enrolment must never write the secret or the provisioning URI to the audit
+// trail, where other administrators could read it.
+func TestTOTPEnrolmentIsNotAudited(t *testing.T) {
+	env := newTestEnv(t)
+	env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner, err := env.app.Auth.UserByName("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv, err := env.app.Auth.CreateInvitation(owner.ID, authorization.RoleMember, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	c := env.newClient()
+	var out struct {
+		Secret string `json:"secret"`
+		URI    string `json:"uri"`
+	}
+	if status, body := c.do("POST", "/api/invitations/"+inv.Token+"/totp",
+		map[string]string{"username": "newcomer"}, &out); status != 200 {
+		t.Fatalf("enrolment failed: %d %s", status, body)
+	}
+
+	rows, err := env.app.DB.Query(`SELECT action, target, detail FROM audit_log`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var action, target, detail string
+		if err := rows.Scan(&action, &target, &detail); err != nil {
+			t.Fatal(err)
+		}
+		joined := action + " " + target + " " + detail
+		if strings.Contains(joined, out.Secret) {
+			t.Errorf("audit row leaks the TOTP secret: %q", joined)
+		}
+		if strings.Contains(joined, "otpauth://") {
+			t.Errorf("audit row leaks the provisioning URI: %q", joined)
+		}
+	}
+}

@@ -154,6 +154,11 @@ code { background: var(--bg-alt); border: 1px solid var(--border); border-radius
   background: rgba(200,100,70,0.06); }
 .dropzone .hint { margin-top: 10px; }
 @media (prefers-reduced-motion: reduce) { .dropzone { transition: none; } }
+.qr-box { text-align: center; margin: 12px 0; }
+.qr-box svg { max-width: 220px; width: 100%; height: auto; border-radius: 6px;
+  background: #fff; padding: 6px; }
+.qr-box p { margin: 0 0 8px; }
+
 .notice { border: 1px solid var(--warn); border-radius: 8px; background: rgba(217,164,65,0.08);
   padding: 12px 14px; font-size: 0.85rem; margin-bottom: 14px; }
 @media (max-width: 900px) {

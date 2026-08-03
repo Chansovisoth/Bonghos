@@ -314,10 +314,22 @@
  Two-factor authentication is MANDATORY for every account. It cannot be
  disabled.
 
- During setup you will see something like:
+ During setup Bonghos prints a QR code you can scan directly from the
+ terminal, followed by the same details in text:
+
+     Scan this QR code with your authenticator app:
+
+     [ a block-character QR code ]
+
+     If scanning does not work, enter this secret manually:
 
      Secret: FN7UXCXJSFSNIA6QQAOBH2TSPPNASYVL
      URI:    otpauth://totp/Bonghos:admin?secret=...&issuer=Bonghos
+
+ The QR code needs a terminal at least ~50 columns wide. If your terminal is
+ narrower, is not interactive (a pipe or a script), or cannot draw block
+ characters, Bonghos simply prints the secret and URI instead — nothing is
+ lost, and typing the secret works exactly the same.
 
  Install any RFC 6238 authenticator app:
 
@@ -326,8 +338,9 @@
      * Google Authenticator (Android, iOS)
      * 1Password, Bitwarden, KeePassXC (also store TOTP)
 
- Add the account by typing the secret manually, or by scanning the QR code
- shown in the Web UI when creating accounts there.
+ Add the account by scanning the QR code, or by typing the secret by hand.
+ Accounts created through the Web UI show a QR code on the activation page in
+ the same way, again with the secret underneath as a fallback.
 
  Then enter the 6-digit code to confirm. If it is rejected, your device clock
  is probably wrong — enable automatic time sync on your phone.

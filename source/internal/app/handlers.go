@@ -17,6 +17,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/instance"
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/monitoring"
+	"github.com/Chansovisoth/Bonghos/internal/qrcode"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/systemd"
 )
 
@@ -210,10 +211,15 @@ func (a *App) handleInvitationTOTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	writeJSON(w, 200, map[string]string{
-		"secret": secret,
-		"uri":    auth.TOTPProvisioningURI(req.Username, secret),
-	})
+	uri := auth.TOTPProvisioningURI(req.Username, secret)
+	out := map[string]string{"secret": secret, "uri": uri}
+	// The QR is rendered server-side as SVG so the browser needs no QR library
+	// and the enrolment page keeps working offline. Failure is not fatal: the
+	// activation page falls back to the secret and URI it already shows.
+	if svg, err := qrcode.SVG(uri, 4); err == nil {
+		out["qr_svg"] = svg
+	}
+	writeJSON(w, 200, out)
 }
 
 func (a *App) handleInvitationActivate(w http.ResponseWriter, r *http.Request) {
