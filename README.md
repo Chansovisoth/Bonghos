@@ -143,11 +143,19 @@ Bonghos and Minecraft run as a **normal Linux user**. Root is never required.
 Production ships as **one executable** with the Web UI compiled in. No Node.js, no
 npm, no separate frontend process at runtime.
 
-> **Note on the frontend:** the original specification called for React + TypeScript +
-> Vite + Tailwind. This build deliberately uses dependency-free vanilla JavaScript
-> instead, so the project builds reproducibly offline with zero JavaScript supply-chain
-> exposure. The rationale is documented in [`source/web/README.md`](source/web/README.md).
-> The visual design, layout, motion and accessibility goals are unchanged.
+> **Known deviation — the frontend stack.** The specification asked for React,
+> TypeScript, Vite, Tailwind, shadcn-style components, TanStack Query, Motion, Recharts,
+> Vitest, React Testing Library, Playwright and pnpm. **None of that is present.** The
+> frontend is dependency-free HTML, CSS and JavaScript, chosen so the project builds
+> reproducibly offline with no JavaScript supply chain. The rationale is in
+> [`source/web/README.md`](source/web/README.md).
+>
+> This is a real trade-off, not a free win. The visual design, layout, motion and
+> accessibility goals are met, and there is no build step to break — but the project
+> also has **no browser-level tests**, because Vitest, RTL and Playwright came with the
+> stack that was dropped and nothing replaced them. A frontend/backend protocol
+> mismatch that silently disabled every live update shipped in v0.1.0 for exactly this
+> reason. If you want the specified stack, this is the piece to revisit first.
 
 ---
 
@@ -422,14 +430,22 @@ Contributions welcome — see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.m
 
 This is v0.1.0. Being honest about what is and is not proven:
 
-- **Well tested:** path containment, archive-extraction safety, TOTP, permission matrix,
-  scheduler time calculations, SSRF URL validation, slug generation, plus an end-to-end
-  suite covering login, anti-enumeration, archive import, JVM detection, EULA handling,
-  file-manager containment, backup creation and verification, schedule creation,
-  invitation and activation, and Member role enforcement.
+- **Covered by unit tests** (`source/internal/*/`): canonical path containment,
+  archive-extraction safety, authenticated encryption, TOTP against the RFC 6238
+  vector, the role permission matrix, scheduler next-run calculation, SSRF URL
+  validation, slug generation, and running-process detection.
+- **Covered by API tests** (`source/internal/app/`): these drive the real HTTP handler
+  through `httptest` — login, resistance to account enumeration, CSRF rejection,
+  session revocation, disabled accounts, the exact Member and Viewer restrictions,
+  Owner protections, and restore safety and scope handling.
 - **Exercised manually, not yet under automated integration tests:** the supervisor's
   crash/restart/backoff behaviour against real Minecraft, boot autostart and
-  unclean-shutdown recovery, tmux console lifecycle, restore, and retention pruning.
+  unclean-shutdown recovery, tmux console lifecycle, archive import end to end,
+  scheduled execution, and retention pruning.
+- **No browser-level tests.** There is no Playwright or equivalent suite, so the Web UI
+  is verified by hand. A subscription-key mismatch that silently disabled every live
+  update survived release precisely because nothing tested the browser side; treat UI
+  behaviour as the least-proven part of the project.
 - **Not yet verified against a real modded server on real hardware.** The test fixtures
   are synthetic.
 - systemd integration is implemented but was validated in an environment without a live

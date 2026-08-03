@@ -57,8 +57,11 @@ jobs:
       - name: Package source archive
         run: |
           v="${{ steps.version.outputs.version }}"
-          # setup.sh, Tutorial.txt, README.md, LICENSE and source/ sit at the
-          # archive root — no extra nesting layer.
+          # The archive contains a single Bonghos-<version>/ directory, which
+          # is the normal convention for a release tarball, and setup.sh,
+          # Tutorial.txt, README.md, LICENSE and source/ sit directly inside
+          # it. There is no second nesting layer: after extracting, the user is
+          # one `cd` away from running ./setup.sh.
           tar --exclude-vcs \
               --exclude='./bonghos-linux-*' \
               --exclude='./source/bin' \

@@ -7,7 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- Live updates never worked. The frontend sent `{"type": "subscribe"}` while the
+  WebSocket hub read the `action` key, so no client subscribed to anything and
+  console output, performance charts, import and backup progress, player updates
+  and activity silently never arrived. The hub now accepts either key, the
+  frontend sends the canonical one, and CI checks that the two sides agree.
+- Restoring a backup through the Web UI replaced live server files without
+  taking an emergency pre-restore copy first. The CLI did this correctly; the
+  HTTP handler called `Restore` directly. Restore now creates a verified full
+  backup first and refuses to continue if that fails.
+- Restore scope was silently ignored. The UI sent `world` while the backend
+  compared against `world_only`, so a world-only restore became a full restore
+  that overwrote mods and startup scripts. Scope names are normalized and
+  unknown values are rejected instead of defaulting to a full restore.
+- Backup archives could overwrite each other. Names use one-second resolution,
+  so the emergency copy taken immediately before a restore could collide with an
+  existing archive and invalidate its stored checksum. Names now disambiguate
+  with the backup ID and the manager refuses to overwrite.
+- Listing schedules required only `server.view`, and the audit trail and host
+  page were readable by every role. None of these belong to a Member's five
+  permitted actions or a Viewer's view list. Backups were also removed from the
+  Viewer role.
+- Player actions were built by an inline switch that had drifted from
+  `minecraft.PlayerCommand`, so `ban_ip`, `pardon_ip` and `send_message` were
+  rejected by the API despite being implemented. All callers now share one set
+  of validated templates.
+- The file manager never enforced a text-editing size limit, and new projects
+  did not default to recovering after an unclean shutdown.
+
+### Added
+
+- API tests driving the real HTTP handler through `httptest`, covering login,
+  resistance to account enumeration, CSRF rejection, session revocation,
+  disabled accounts, the exact Member and Viewer restrictions, Owner
+  protections, and restore safety and scope handling. The previous release
+  claimed an end-to-end suite that existed only as an uncommitted script.
+- Importing an existing directory now refuses when a Java process is already
+  running in it, on both the API and CLI paths. Detection is best-effort: it
+  reads `/proc`, so it only sees the current user's processes.
+- Drag-and-drop archive upload with real progress, speed, estimated time
+  remaining and a working Cancel button, uploading through `XMLHttpRequest`
+  so the transfer can be observed and aborted.
+- The two-step login flow: credentials, then the authenticator code. Step one
+  contacts nothing, so the interface reveals no more than the API does.
+- Per-page WebSocket subscriptions that unsubscribe on navigation and
+  re-subscribe after a reconnect.
 
 ## [0.1.0] — 2026-08-02
 

@@ -179,6 +179,27 @@ jobs:
             grep -rq "$svc" source/internal/runtime/systemd/ || { echo "code missing $svc"; exit 1; }
           done
 
+      # A frontend/backend key mismatch once silently disabled every live
+      # update in a released build. Nothing caught it because the two sides are
+      # written in different languages and no test spans them.
+      - name: Frontend and backend agree on the WebSocket protocol
+        run: |
+          grep -q '"action": *"subscribe"\|action: "subscribe"' source/web/src/app.js \
+            || { echo "frontend does not send an 'action' subscribe message"; exit 1; }
+          grep -q 'case "subscribe"' source/internal/websocket/hub.go \
+            || { echo "hub does not handle a subscribe action"; exit 1; }
+          grep -q 'case "unsubscribe"' source/internal/websocket/hub.go \
+            || { echo "hub does not handle an unsubscribe action"; exit 1; }
+          # Every topic the frontend subscribes to must be one the backend
+          # actually broadcasts, or the page silently shows nothing.
+          for topic in overview console players servers backups performance activity; do
+            grep -rq "\"$topic\"" source/internal/app/ \
+              || { echo "backend never broadcasts topic '$topic'"; exit 1; }
+          done
+
+      - name: Node syntax check for the frontend
+        run: node --check source/web/src/app.js
+
       - name: Repository URL is consistent
         run: |
           for f in README.md Tutorial.txt setup.sh; do
