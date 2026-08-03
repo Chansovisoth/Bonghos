@@ -197,6 +197,25 @@ function showLogin() {
   if (S.ws) try { S.ws.close(); } catch {}
   $("#app-view").classList.add("hidden");
   $("#login-view").classList.remove("hidden");
+  loginStep(1);
+}
+
+// loginStep switches between the credential step and the authenticator step.
+// Step two is always reached, whatever was typed in step one: the interface
+// must not reveal whether an account exists any more than the API does.
+function loginStep(n) {
+  const s1 = $("#login-step-1"), s2 = $("#login-step-2");
+  if (!s1 || !s2) return;
+  s1.classList.toggle("hidden", n !== 1);
+  s2.classList.toggle("hidden", n !== 2);
+  $("#login-error").classList.add("hidden");
+  if (n === 2) {
+    $("#login-step-2-who").textContent = "Signing in as " + $("#login-user").value.trim();
+    $("#login-code").value = "";
+    setTimeout(() => $("#login-code").focus(), 30);
+  } else {
+    setTimeout(() => $("#login-user").focus(), 30);
+  }
 }
 
 async function boot() {
@@ -208,18 +227,42 @@ async function boot() {
   } catch { showLogin(); }
 }
 
+$("#login-back").addEventListener("click", () => loginStep(1));
+
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+
+  // Step one never contacts the server. Nothing is checked here, so nothing
+  // can be learned from how fast or how differently it responds.
+  const onStepOne = $("#login-step-2").classList.contains("hidden");
+  if (onStepOne) {
+    const user = $("#login-user").value.trim();
+    const pass = $("#login-pass").value;
+    if (!user || !pass) {
+      const eb = $("#login-error");
+      eb.textContent = "Enter your username and password.";
+      eb.classList.remove("hidden");
+      return;
+    }
+    loginStep(2);
+    return;
+  }
+
   const btn = $("#login-btn"); btn.disabled = true;
   $("#login-error").classList.add("hidden");
   try {
     S.me = await api("/auth/login", { method: "POST", json: {
-      username: $("#login-user").value, password: $("#login-pass").value, code: $("#login-code").value,
+      username: $("#login-user").value.trim(),
+      password: $("#login-pass").value,
+      code: $("#login-code").value.trim(),
     }});
     const c = await api("/auth/csrf"); csrfToken = c.csrf;
+    $("#login-pass").value = ""; $("#login-code").value = "";
     enterApp();
   } catch (err) {
     const eb = $("#login-error"); eb.textContent = err.message; eb.classList.remove("hidden");
+    $("#login-code").value = "";
+    $("#login-code").focus();
   } finally { btn.disabled = false; }
 });
 
@@ -942,6 +985,68 @@ function deleteProject(s2) {
     }]]);
 }
 
+// uploadArchive streams the file with XMLHttpRequest rather than fetch,
+// because only XHR reports upload progress and can be aborted mid-transfer.
+// The browser streams the body; the whole archive is never held in memory.
+function uploadArchive(file, displayName) {
+  const host = $("#ops-host");
+  const started = Date.now();
+  let lastTime = started, lastLoaded = 0, instantRate = 0;
+
+  const bar = el("div", { style: "width:0%" });
+  const line = el("div", { class: "muted", style: "margin-top:6px" }, "Preparing upload…");
+  const xhr = new XMLHttpRequest();
+  const cancelBtn = el("button", { class: "btn ghost", onclick: () => xhr.abort() }, "Cancel");
+  const card = el("div", { class: "card", style: "margin-bottom:14px" },
+    el("div", { class: "toolbar", style: "margin-bottom:8px" },
+      el("strong", {}, "Uploading " + file.name),
+      el("span", { class: "tag" }, "browser → host"),
+      el("div", { class: "spacer" }), cancelBtn),
+    el("div", { class: "progress" }, bar), line);
+  if (host) host.prepend(card); else toast("Upload started", "ok");
+
+  xhr.upload.addEventListener("progress", (e) => {
+    if (!e.lengthComputable) {
+      line.textContent = `${fmtBytes(e.loaded)} sent`;
+      return;
+    }
+    const now = Date.now();
+    const dt = (now - lastTime) / 1000;
+    if (dt >= 0.5) {
+      instantRate = (e.loaded - lastLoaded) / dt;
+      lastTime = now; lastLoaded = e.loaded;
+    }
+    const avg = e.loaded / Math.max(0.001, (now - started) / 1000);
+    const pct = (e.loaded / e.total) * 100;
+    bar.style.width = pct.toFixed(1) + "%";
+    const remaining = instantRate > 0 ? (e.total - e.loaded) / instantRate : null;
+    line.textContent =
+      `${fmtBytes(e.loaded)} / ${fmtBytes(e.total)} · ${pct.toFixed(0)}%` +
+      ` · ${fmtBytes(instantRate || avg)}/s` +
+      (remaining !== null && isFinite(remaining) ? ` · about ${fmtDur(remaining)} remaining` : "");
+  });
+
+  xhr.addEventListener("load", () => {
+    let d = {}; try { d = JSON.parse(xhr.responseText); } catch {}
+    card.remove();
+    if (xhr.status >= 200 && xhr.status < 300) {
+      toast("Upload complete — the host is now extracting and installing it", "ok");
+    } else {
+      toast(d.error || `Upload failed (HTTP ${xhr.status})`, "err");
+    }
+  });
+  xhr.addEventListener("error", () => { card.remove(); toast("Upload failed: connection lost", "err"); });
+  xhr.addEventListener("abort", () => { card.remove(); toast("Upload cancelled", "ok"); });
+
+  const fd = new FormData();
+  fd.append("display_name", displayName);
+  fd.append("archive", file);
+  xhr.open("POST", "/api/imports/upload");
+  xhr.withCredentials = true;
+  xhr.setRequestHeader("X-Bonghos-CSRF", csrfToken);
+  xhr.send(fd);
+}
+
 function importWizard() {
   const name = el("input", { placeholder: "My Awesome Server" });
   const slugPrev = el("div", { class: "hint mono" }, "");
@@ -962,8 +1067,44 @@ function importWizard() {
     el("option", { value: "copy" }, "Copy into Bonghos (source untouched)"),
     el("option", { value: "move" }, "Move into Bonghos"),
     el("option", { value: "link" }, "Link in place (advanced — excluded from Bonghos migration)"));
-  const fileInput = el("input", { type: "file", accept: ".zip,.tar,.gz,.tgz,.xz,.zst,.7z,.rar" });
-  const rowUpload = el("div", { class: "field-row" }, el("label", {}, "Archive (.zip, .tar.gz, .tar.xz, .tar.zst, .7z, .rar)", fileInput));
+  const fileInput = el("input", { type: "file", accept: ".zip,.tar,.gz,.tgz,.xz,.zst,.7z,.rar", style: "display:none" });
+  const chosen = el("div", { class: "hint mono" }, "");
+  const dropzone = el("div", { class: "dropzone", tabindex: "0", role: "button",
+    "aria-label": "Drag a server-pack archive here, or choose one" },
+    el("p", {}, "Drag a server-pack archive here"),
+    el("p", { class: "muted" }, "or"),
+    el("button", { class: "btn ghost", type: "button", onclick: (e) => { e.preventDefault(); fileInput.click(); } }, "Choose Archive"),
+    chosen);
+
+  function setChosen(f) {
+    if (!f) { chosen.textContent = ""; return; }
+    chosen.textContent = `${f.name} — ${fmtBytes(f.size)}`;
+    if (!name.value.trim()) {
+      // Offer the archive name as a starting display name.
+      name.value = f.name.replace(/\.(zip|tar|tgz|gz|xz|zst|7z|rar)$/i, "").replace(/[._]+/g, " ").trim();
+      name.dispatchEvent(new Event("input"));
+    }
+  }
+  fileInput.addEventListener("change", () => setChosen(fileInput.files[0]));
+  dropzone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+  });
+  ["dragenter", "dragover"].forEach((ev) => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); e.stopPropagation(); dropzone.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach((ev) => dropzone.addEventListener(ev, (e) => {
+    e.preventDefault(); e.stopPropagation(); dropzone.classList.remove("dragover");
+  }));
+  dropzone.addEventListener("drop", (e) => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!f) return;
+    // DataTransfer files cannot be assigned to an input in every browser, so
+    // keep the dropped file separately and prefer it when submitting.
+    dropzone.droppedFile = f;
+    setChosen(f);
+  });
+  const rowUpload = el("div", { class: "field-row" },
+    el("label", {}, "Archive (.zip, .tar.gz, .tar.xz, .tar.zst, .7z, .rar)", dropzone), fileInput);
   const rowURL = el("div", { class: "field-row hidden" }, el("label", {}, "URL", url), el("span", { class: "hint" }, "HTTPS only by default. The download runs on the Linux host and continues if you close this page."));
   const rowLocal = el("div", { class: "field-row hidden" }, el("label", {}, "Absolute path to archive", localPath));
   const rowDir = el("div", { class: "field-row hidden" }, el("label", {}, "Absolute path to directory", dirPath), el("label", {}, "Mode", dirMode));
@@ -983,17 +1124,11 @@ function importWizard() {
     ["Import", "primary", async (c) => {
       try {
         if (method.value === "upload") {
-          const f = fileInput.files[0];
-          if (!f) throw new Error("Choose an archive file first.");
+          const f = dropzone.droppedFile || fileInput.files[0];
+          if (!f) throw new Error("Choose or drop an archive file first.");
+          if (!name.value.trim()) throw new Error("Enter a display name for the project.");
           c(); navigate("servers");
-          const fd = new FormData();
-          fd.append("display_name", name.value);
-          fd.append("archive", f);
-          const res = await fetch("/api/imports/upload", { method: "POST", body: fd,
-            headers: { "X-Bonghos-CSRF": csrfToken }, credentials: "same-origin" });
-          const d = await res.json();
-          if (!res.ok) throw new Error(d.error || "upload failed");
-          toast("Upload started — do not close this page until the upload itself finishes", "ok");
+          uploadArchive(f, name.value);
         } else if (method.value === "url") {
           await api("/imports/url", { method: "POST", json: { url: url.value, display_name: name.value } });
           c(); navigate("servers");

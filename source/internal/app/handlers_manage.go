@@ -18,13 +18,22 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/scheduler"
 )
 
+// maxTextEditBytes caps in-browser text editing. Larger files are still
+// listed and downloadable, they just cannot be opened in the editor.
+const maxTextEditBytes = 2 << 20 // 2 MiB
+
 // activeFiles returns a path-jailed file manager for the active project.
 func (a *App) activeFiles() (*files.Manager, *instance.Instance, error) {
 	inst, err := a.activeInstance()
 	if err != nil {
 		return nil, nil, err
 	}
-	return &files.Manager{Root: inst.AbsoluteDir(a.Home)}, inst, nil
+	// MaxEditBytes keeps the text editor away from huge or binary files;
+	// browsing, download and upload are unaffected.
+	return &files.Manager{
+		Root:         inst.AbsoluteDir(a.Home),
+		MaxEditBytes: maxTextEditBytes,
+	}, inst, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -736,55 +745,42 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 func (a *App) handlePlayerAction(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	var req struct {
-		Action   string `json:"action"` // kick | ban | pardon | op | deop | whitelist_add | whitelist_remove
+		// kick | ban | pardon | ban_ip | pardon_ip | op | deop |
+		// whitelist_add | whitelist_remove | send_message
+		Action string `json:"action"`
+		// Username carries a player name, or an IP address for the *_ip
+		// actions. "player" is accepted as an alias.
 		Username string `json:"username"`
+		Player   string `json:"player"`
 		Reason   string `json:"reason"`
+		Message  string `json:"message"`
 	}
 	if err := readJSON(r, &req, 1<<14); err != nil {
 		writeErr(w, 400, errors.New("invalid request"))
 		return
 	}
-	name := strings.TrimSpace(req.Username)
-	if name == "" || len(name) > 16 || strings.ContainsAny(name, " \t\n\r\"'\\/") {
-		writeErr(w, 400, errors.New("invalid player name"))
-		return
+	target := strings.TrimSpace(req.Username)
+	if target == "" {
+		target = strings.TrimSpace(req.Player)
 	}
-	reason := strings.TrimSpace(req.Reason)
-	if strings.ContainsAny(reason, "\n\r") || len(reason) > 200 {
-		writeErr(w, 400, errors.New("invalid reason"))
-		return
+	extra := req.Reason
+	if req.Action == "send_message" {
+		extra = req.Message
 	}
-	var cmd string
-	switch req.Action {
-	case "kick":
-		cmd = "kick " + name
-		if reason != "" {
-			cmd += " " + reason
-		}
-	case "ban":
-		cmd = "ban " + name
-		if reason != "" {
-			cmd += " " + reason
-		}
-	case "pardon":
-		cmd = "pardon " + name
-	case "op":
-		cmd = "op " + name
-	case "deop":
-		cmd = "deop " + name
-	case "whitelist_add":
-		cmd = "whitelist add " + name
-	case "whitelist_remove":
-		cmd = "whitelist remove " + name
-	default:
-		writeErr(w, 400, errors.New("unknown player action"))
+
+	// Build the command from a fixed template. Validation lives in the
+	// minecraft package so the CLI, scheduler and API cannot drift apart, and
+	// so player-supplied text never reaches a shell.
+	cmd, err := minecraft.PlayerCommand(req.Action, target, extra)
+	if err != nil {
+		writeErr(w, 400, err)
 		return
 	}
 	if err := a.Runner.SendCommand(cmd); err != nil {
 		writeErr(w, 409, err)
 		return
 	}
-	a.audit(u.ID, u.Username, "player_"+req.Action, name, reason, remoteIP(r))
+	a.audit(u.ID, u.Username, "player_"+req.Action, target, strings.TrimSpace(extra), remoteIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

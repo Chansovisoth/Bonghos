@@ -11,10 +11,23 @@
   <form id="login-form" class="login-card" autocomplete="on">
     <div class="brand"><span class="brand-mark">⛏</span> Bonghos</div>
     <p class="muted">Minecraft Server Management Panel</p>
-    <label>Username<input id="login-user" autocomplete="username" required></label>
-    <label>Password<input id="login-pass" type="password" autocomplete="current-password" required></label>
-    <label>Authenticator code<input id="login-code" inputmode="numeric" pattern="[0-9]*" maxlength="10" placeholder="6-digit code or recovery code" required></label>
-    <button type="submit" class="btn primary" id="login-btn">Sign in</button>
+
+    <!-- Step one collects the username and password. The second step is shown
+         unconditionally afterwards, whether or not the account exists, so the
+         interface reveals nothing the API would not. -->
+    <div id="login-step-1">
+      <label>Username<input id="login-user" autocomplete="username" required></label>
+      <label>Password<input id="login-pass" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="btn primary" id="login-continue">Continue</button>
+    </div>
+
+    <div id="login-step-2" class="hidden">
+      <p class="muted" id="login-step-2-who"></p>
+      <label>Authenticator code<input id="login-code" inputmode="numeric" pattern="[0-9A-Za-z-]*" maxlength="11" placeholder="6-digit code or recovery code" autocomplete="one-time-code"></label>
+      <button type="submit" class="btn primary" id="login-btn">Verify</button>
+      <button type="button" class="btn ghost" id="login-back">Back</button>
+    </div>
+
     <div id="login-error" class="error hidden"></div>
   </form>
 </div>

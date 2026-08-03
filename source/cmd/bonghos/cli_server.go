@@ -14,6 +14,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/authorization"
 	"github.com/Chansovisoth/Bonghos/internal/backup"
 	"github.com/Chansovisoth/Bonghos/internal/instance"
+	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 )
 
 // ---------------------------------------------------------------------------
@@ -114,6 +115,13 @@ func serverImport(a *app.App, args []string) error {
 	st, err := os.Stat(dir)
 	if err != nil || !st.IsDir() {
 		return fmt.Errorf("not a readable directory: %s", dir)
+	}
+	if procs := minecraft.FindRunningJavaIn(dir); len(procs) > 0 {
+		fmt.Fprintln(os.Stderr, "A Java process is already running in that directory:")
+		for _, p := range procs {
+			fmt.Fprintf(os.Stderr, "  PID %d  %s\n", p.PID, p.Command)
+		}
+		return errors.New("stop that server before importing its directory")
 	}
 	name := strings.TrimSpace(strings.Join(args[1:], " "))
 	if name == "" {

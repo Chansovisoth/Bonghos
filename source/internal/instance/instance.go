@@ -161,6 +161,10 @@ func (s *Store) Create(i *Instance) error {
 	if i.RestartDelaySeconds == 0 {
 		i.RestartDelaySeconds = 10
 	}
+	// Recommended defaults for a new project: autostart off, 30s boot delay,
+	// recovery after an unclean shutdown on. Callers that want recovery
+	// disabled turn it off through Update once the project exists.
+	i.RecoverAfterUncleanShutdown = true
 	res, err := s.DB.Exec(`INSERT INTO instances
 		(slug, display_name, server_type, source_type, source_url_host, minecraft_version,
 		 modloader, modloader_version, server_directory, external_directory, startup_script,

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -338,6 +339,20 @@ func (a *App) handleImportExisting(w http.ResponseWriter, r *http.Request) {
 	// Refuse importing from inside the Bonghos system tree.
 	if security.WithinRoot(filepath.Join(a.Home, "system"), resolved) {
 		writeErr(w, 400, errors.New("cannot import from inside the Bonghos system directory"))
+		return
+	}
+
+	// A live server writing into this directory while it is copied, moved or
+	// adopted would produce a corrupt world. Refuse rather than adopting or
+	// killing a process Bonghos did not start.
+	if procs := minecraft.FindRunningJavaIn(resolved); len(procs) > 0 {
+		pids := make([]string, 0, len(procs))
+		for _, p := range procs {
+			pids = append(pids, strconv.Itoa(p.PID))
+		}
+		writeErr(w, 409, fmt.Errorf(
+			"a Java process is already running in this directory (PID %s); stop that server before importing it",
+			strings.Join(pids, ", ")))
 		return
 	}
 

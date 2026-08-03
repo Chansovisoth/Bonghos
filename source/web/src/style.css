@@ -145,9 +145,15 @@ code { background: var(--bg-alt); border: 1px solid var(--border); border-radius
   padding: 2px 6px; font-family: var(--mono); font-size: 0.82em; }
 .tag { font-size: 0.72rem; background: var(--bg-alt); border: 1px solid var(--border);
   padding: 2px 8px; border-radius: 5px; color: var(--muted); }
-.dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 36px;
-  text-align: center; color: var(--muted); cursor: pointer; }
-.dropzone.drag { border-color: var(--accent); color: var(--accent); }
+.dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 28px;
+  text-align: center; color: var(--muted); cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease; }
+.dropzone p { margin: 0 0 8px; }
+.dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); }
+.dropzone.drag, .dropzone.dragover { border-color: var(--accent); color: var(--accent);
+  background: rgba(200,100,70,0.06); }
+.dropzone .hint { margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .dropzone { transition: none; } }
 .notice { border: 1px solid var(--warn); border-radius: 8px; background: rgba(217,164,65,0.08);
   padding: 12px 14px; font-size: 0.85rem; margin-bottom: 14px; }
 @media (max-width: 900px) {
