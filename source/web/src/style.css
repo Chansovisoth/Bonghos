@@ -330,9 +330,9 @@ tr:hover td { background: var(--surface-2); }
 .player-avatar { width: 32px; height: 32px; display: block; flex: 0 0 32px; border: 1px solid var(--border); background: var(--inset); object-fit: cover; image-rendering: pixelated; }
 .player-avatar-fallback { display: grid; place-items: center; color: var(--faint); font-family: var(--font-mono); font-size: 0.78rem; font-weight: 800; }
 
-.console-shell { min-height: calc(100vh - 180px); display: grid; grid-template-rows: auto minmax(340px, 1fr) auto; border: 1px solid var(--border); background: var(--inset); }
+.console-shell { display: grid; grid-template-rows: auto auto auto; border: 1px solid var(--border); background: var(--inset); }
 .console-toolbar { display: flex; gap: var(--space-2); align-items: center; padding: var(--space-3); border-bottom: 1px solid var(--border); background: var(--surface); flex-wrap: wrap; }
-.console { background: oklch(9% 0.01 63); color: oklch(90% 0.014 95); overflow-y: auto; padding: var(--space-3) var(--space-4); font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.console { height: 460px; max-height: 55vh; background: oklch(9% 0.01 63); color: oklch(90% 0.014 95); overflow-y: auto; padding: var(--space-3) var(--space-4); font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .console.paused { box-shadow: inset 0 0 0 1px var(--warn); }
 .console-line { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .console .warnline { color: var(--warn); }
@@ -497,7 +497,7 @@ pre { padding: var(--space-3); overflow-x: auto; white-space: pre-wrap; }
   .backups-table td:first-child > span:first-child { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .backup-create-button { flex: 1 1 100% !important; }
   #toast-host { right: var(--space-4); left: var(--space-4); width: auto; }
-  .console-shell { min-height: 70vh; }
+  .console { height: 360px; max-height: 48vh; }
   .console-input { flex-direction: column; }
   .timeline-item { grid-template-columns: 1fr; gap: var(--space-1); }
 }
