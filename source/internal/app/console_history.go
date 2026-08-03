@@ -69,12 +69,31 @@ func (a *App) consoleHistoryFromLog(limit int) ([]string, string) {
 	if err != nil {
 		return nil, ""
 	}
-	logPath := filepath.Join(inst.AbsoluteDir(a.Home), "logs", "bonghos-console.log")
-	lines, err := tailLines(logPath, limit)
-	if err != nil {
-		return nil, ""
+	logDir := filepath.Join(inst.AbsoluteDir(a.Home), "logs")
+	candidates := []struct {
+		path   string
+		source string
+	}{
+		{filepath.Join(logDir, "bonghos-console.log"), "log"},
+		{filepath.Join(logDir, "latest.log"), "latest_log"},
+		{filepath.Join(logDir, "debug.log"), "debug_log"},
 	}
-	return lines, "log"
+	for _, candidate := range candidates {
+		lines, err := tailLines(candidate.path, limit)
+		if err == nil && hasConsoleContent(lines) {
+			return lines, candidate.source
+		}
+	}
+	return nil, ""
+}
+
+func hasConsoleContent(lines []string) bool {
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func tailLines(path string, limit int) ([]string, error) {

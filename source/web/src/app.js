@@ -1153,6 +1153,7 @@ async function pageConsole(main) {
   if (!can("server.console.use") || stopped) input.disabled = true;
   search.addEventListener("input", () => { S.consoleSearch = search.value; renderConsoleLines(box); });
   renderConsoleLines(box);
+  if (!S.consoleLines.length) renderConsolePlaceholder(box, "Loading console history...");
   input.addEventListener("keydown", async (e) => {
     if (e.key === "ArrowUp" && S.commandHistory.length) {
       e.preventDefault();
@@ -1219,9 +1220,12 @@ async function loadConsoleHistory(box) {
     const target = box && box.isConnected ? box : $("#console-box");
     if (!target) return;
     renderConsoleLines(target);
+    if (!S.consoleLines.length) renderConsolePlaceholder(target, "No console history yet.");
     if (!S.consolePaused) target.scrollTop = target.scrollHeight;
   } catch (err) {
     console.warn("Console history unavailable:", err);
+    const target = box && box.isConnected ? box : $("#console-box");
+    if (target && !S.consoleLines.length) renderConsolePlaceholder(target, "Console history unavailable.");
   }
 }
 
@@ -1239,12 +1243,19 @@ function renderConsoleLines(box) {
     if (q && !String(line).toLowerCase().includes(q)) continue;
     box.append(consoleLineNode(line));
   }
+  if (q && !box.childNodes.length) renderConsolePlaceholder(box, "No matching console lines.");
+}
+
+function renderConsolePlaceholder(box, message) {
+  box.innerHTML = "";
+  box.append(el("div", { class: "console-line console-placeholder" }, message));
 }
 
 function appendConsoleLine(line) {
   const box = $("#console-box");
   if (!box) return;
   if (S.consoleSearch && !String(line).toLowerCase().includes(S.consoleSearch.toLowerCase())) return;
+  if (box.querySelector(".console-placeholder")) box.innerHTML = "";
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.append(consoleLineNode(line));
   while (box.childNodes.length > CONSOLE_LINE_LIMIT) box.firstChild.remove();

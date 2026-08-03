@@ -335,6 +335,7 @@ tr:hover td { background: var(--surface-2); }
 .console { height: 460px; max-height: 55vh; background: oklch(9% 0.01 63); color: oklch(90% 0.014 95); overflow-y: auto; padding: var(--space-3) var(--space-4); font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .console.paused { box-shadow: inset 0 0 0 1px var(--warn); }
 .console-line { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.console-placeholder { color: var(--faint); }
 .console .warnline { color: var(--warn); }
 .console .errline { color: var(--danger); }
 .console-input { display: flex; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--border); background: var(--surface); }

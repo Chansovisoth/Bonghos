@@ -91,3 +91,52 @@ func TestConsoleHistoryFallsBackToMemoryCache(t *testing.T) {
 		t.Fatalf("unexpected cached tail: first=%q last=%q", out.Lines[0], out.Lines[len(out.Lines)-1])
 	}
 }
+
+func TestConsoleHistoryFallsBackToMinecraftLatestLog(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("viewer", "correct horse battery", authorization.RoleViewer)
+	c := env.newClient()
+	c.mustLogin("viewer", "correct horse battery", secret)
+
+	inst := &instance.Instance{
+		Slug:            "latest-log",
+		DisplayName:     "Latest Log",
+		ServerDirectory: instance.RelativeDirFor("latest-log"),
+		StartupScript:   "run.sh",
+	}
+	if err := env.app.Instances.Create(inst); err != nil {
+		t.Fatalf("create instance: %v", err)
+	}
+	if err := env.app.Instances.SetActive(inst.ID); err != nil {
+		t.Fatalf("set active: %v", err)
+	}
+
+	logDir := filepath.Join(inst.AbsoluteDir(env.home), "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		t.Fatalf("mkdir logs: %v", err)
+	}
+	var b strings.Builder
+	for i := 1; i <= 1002; i++ {
+		fmt.Fprintf(&b, "[Server thread/INFO] line-%04d\n", i)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, "latest.log"), []byte(b.String()), 0o644); err != nil {
+		t.Fatalf("write latest log: %v", err)
+	}
+
+	var out struct {
+		Lines  []string `json:"lines"`
+		Source string   `json:"source"`
+	}
+	if status, body := c.do("GET", "/api/server/console/history", nil, &out); status != 200 {
+		t.Fatalf("history status=%d body=%s", status, body)
+	}
+	if out.Source != "latest_log" {
+		t.Fatalf("source = %q, want latest_log", out.Source)
+	}
+	if len(out.Lines) != 1000 {
+		t.Fatalf("returned %d lines, want 1000", len(out.Lines))
+	}
+	if out.Lines[0] != "[Server thread/INFO] line-0003" || out.Lines[len(out.Lines)-1] != "[Server thread/INFO] line-1002" {
+		t.Fatalf("unexpected latest log tail: first=%q last=%q", out.Lines[0], out.Lines[len(out.Lines)-1])
+	}
+}
