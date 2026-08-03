@@ -362,6 +362,7 @@ func (r *Runner) attachConsole() {
 		r.mu.Lock()
 		r.console = c
 		r.mu.Unlock()
+		r.app.resetConsoleHistory()
 
 		r.consoleWG.Add(1)
 		go func() {
@@ -440,6 +441,7 @@ func (e *executor) OperationInProgress() bool {
 
 // handleConsoleLine parses a console line for player events and fans it out.
 func (a *App) handleConsoleLine(line string, live bool) {
+	a.appendConsoleHistory(line)
 	if live {
 		a.Hub.Broadcast("console", "line", map[string]any{
 			"line": line,

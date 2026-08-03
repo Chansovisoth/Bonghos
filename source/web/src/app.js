@@ -285,6 +285,8 @@ const DEMO_METRICS = Array.from({ length: 60 }, (_, i) => ({
   disk_free: (186 - i * 0.08) * 1024 * 1024 * 1024,
 }));
 
+const CONSOLE_LINE_LIMIT = 1000;
+
 function demoDelay() {
   return new Promise((resolve) => setTimeout(resolve, 80));
 }
@@ -325,6 +327,7 @@ async function demoApi(path, opts = {}) {
     case "/version": return { version: "0.1.1-demo" };
     case "/servers": return { servers: DEMO_SERVERS, active_id: 1 };
     case "/server/status": return S.status;
+    case "/server/console/history": return { lines: DEMO_CONSOLE.slice(-CONSOLE_LINE_LIMIT), limit: CONSOLE_LINE_LIMIT, source: "demo" };
     case "/overview": return {
       state: S.status.state,
       version: "0.1.1-demo",
@@ -435,6 +438,7 @@ const S = {
   consoleLines: [],
   consolePaused: false,
   consoleSearch: "",
+  consoleHistoryRequest: 0,
   commandHistory: [],
   commandHistoryAt: -1,
   perf: [],
@@ -510,7 +514,7 @@ function handleEvent(m) {
   const { topic, type, data } = m;
   if (topic === "console" && type === "line") {
     S.consoleLines.push(data.line);
-    if (S.consoleLines.length > 1000) S.consoleLines.splice(0, S.consoleLines.length - 1000);
+    trimConsoleLines();
     appendConsoleLine(data.line);
   } else if (type === "status") {
     S.status = data || S.status;
@@ -534,6 +538,13 @@ function handleEvent(m) {
   } else if (topic === "activity" && S.page === "activity") {
     renderPage();
   }
+}
+
+function trimConsoleLines(lines = S.consoleLines) {
+  if (lines.length <= CONSOLE_LINE_LIMIT) return lines;
+  const trimmed = lines.slice(lines.length - CONSOLE_LINE_LIMIT);
+  if (lines === S.consoleLines) S.consoleLines = trimmed;
+  return trimmed;
 }
 
 // ---------------------------------------------------------------------------
@@ -1181,7 +1192,7 @@ async function pageConsole(main) {
           try { await navigator.clipboard.writeText(S.consoleLines.join("\n")); toast("Console buffer copied", "ok"); }
           catch { toast("Copy failed in this browser", "err"); }
         } }, "Copy"),
-        el("button", { class: "btn ghost console-clear-control", onclick: () => { box.innerHTML = ""; S.consoleLines = []; } }, "Clear"),
+        el("button", { class: "btn ghost console-clear-control", onclick: () => { S.consoleHistoryRequest++; box.innerHTML = ""; S.consoleLines = []; } }, "Clear"),
         !DEMO_MODE ? el("span", { class: "status-label " + (S.ws && S.ws.readyState === WebSocket.OPEN ? "running" : "stopped") },
           el("span", { class: "status-square", "aria-hidden": "true" }),
           S.ws && S.ws.readyState === WebSocket.OPEN ? "Connected" : "Reconnecting") : null),
@@ -1193,6 +1204,25 @@ async function pageConsole(main) {
           el("button", { class: "btn ghost", onclick: () => sendQuick("save-all") }, "save-all"),
         ] : null)));
   box.scrollTop = box.scrollHeight;
+  loadConsoleHistory(box);
+}
+
+async function loadConsoleHistory(box) {
+  const requestId = ++S.consoleHistoryRequest;
+  const liveStart = S.consoleLines.length;
+  try {
+    const d = await api(`/server/console/history?limit=${CONSOLE_LINE_LIMIT}`);
+    if (requestId !== S.consoleHistoryRequest || S.page !== "console") return;
+    const history = Array.isArray(d.lines) ? d.lines : [];
+    const liveTail = S.consoleLines.slice(liveStart);
+    S.consoleLines = trimConsoleLines(history.concat(liveTail));
+    const target = box && box.isConnected ? box : $("#console-box");
+    if (!target) return;
+    renderConsoleLines(target);
+    if (!S.consolePaused) target.scrollTop = target.scrollHeight;
+  } catch (err) {
+    console.warn("Console history unavailable:", err);
+  }
 }
 
 function consoleLineNode(line) {
@@ -1217,7 +1247,7 @@ function appendConsoleLine(line) {
   if (S.consoleSearch && !String(line).toLowerCase().includes(S.consoleSearch.toLowerCase())) return;
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.append(consoleLineNode(line));
-  while (box.childNodes.length > 1000) box.firstChild.remove();
+  while (box.childNodes.length > CONSOLE_LINE_LIMIT) box.firstChild.remove();
   if (!S.consolePaused && atBottom) box.scrollTop = box.scrollHeight;
 }
 
@@ -2719,7 +2749,7 @@ async function pageSettings(main) {
         el("div", {}, el("h3", {}, "Monitoring"), el("p", { class: "muted" }, "Live metrics are subscribed only on Overview and Performance.")),
         el("dl", { class: "kv" },
           el("dt", {}, "WebSocket topics"), el("dd", { class: "mono" }, BASE_TOPICS.join(", ") + " + active page"),
-          el("dt", {}, "Console buffer"), el("dd", {}, "Last 1000 lines in this browser"))),
+          el("dt", {}, "Console buffer"), el("dd", {}, "Latest 1000 lines from server history plus live events"))),
       el("div", { class: "settings-row" },
         el("div", {}, el("h3", {}, "Application"), el("p", { class: "muted" }, "Runtime settings not exposed by the API are shown honestly rather than mocked.")),
         el("dl", { class: "kv" },

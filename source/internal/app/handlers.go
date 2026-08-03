@@ -73,6 +73,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/server/restart", a.requirePerm(authorization.PermServerRestart, a.handleRestart))
 	mux.HandleFunc("POST /api/server/force-stop", a.requirePerm(authorization.PermServerForceStop, a.handleForceStop))
 	mux.HandleFunc("GET /api/server/status", a.requirePerm(authorization.PermServerView, a.handleStatus))
+	mux.HandleFunc("GET /api/server/console/history", a.requirePerm(authorization.PermConsoleView, a.handleConsoleHistory))
 	mux.HandleFunc("POST /api/server/command", a.requirePerm(authorization.PermConsoleUse, a.handleCommand))
 
 	// --- players ------------------------------------------------------------

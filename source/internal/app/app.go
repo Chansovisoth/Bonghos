@@ -49,9 +49,11 @@ type App struct {
 	Runner     *Runner
 
 	// Startup phases already reported for the current server run.
-	phaseMu    sync.Mutex
-	seenPhases map[string]bool
-	Collector  *monitoring.Collector
+	phaseMu        sync.Mutex
+	seenPhases     map[string]bool
+	consoleMu      sync.Mutex
+	consoleHistory []string
+	Collector      *monitoring.Collector
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
