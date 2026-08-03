@@ -37,7 +37,7 @@ const fmtDur = (s) => {
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleString() : "—";
 
 function toast(msg, kind = "") {
-  const t = el("div", { class: "toast " + kind }, msg);
+  const t = el("div", { class: "toast " + kind, role: "status" }, msg);
   $("#toast-host").append(t);
   setTimeout(() => t.remove(), 6000);
 }
@@ -47,7 +47,7 @@ function modal(title, bodyNodes, actions) {
   host.innerHTML = "";
   const close = () => (host.innerHTML = "");
   const m = el("div", { class: "overlay", onclick: (e) => { if (e.target === m) close(); } },
-    el("div", { class: "modal" },
+    el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": title },
       el("h2", {}, title),
       ...bodyNodes,
       el("div", { class: "actions" },
@@ -65,10 +65,164 @@ function confirmModal(title, message, confirmLabel, onConfirm, danger = true) {
 }
 
 // ---------------------------------------------------------------------------
+// theme
+// ---------------------------------------------------------------------------
+const THEME_KEY = "bonghos.theme";
+const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+
+function themeChoice() {
+  return localStorage.getItem(THEME_KEY) || "system";
+}
+
+function applyTheme(choice = themeChoice()) {
+  const dark = choice === "dark" || (choice === "system" && themeQuery.matches);
+  document.documentElement.dataset.theme = choice;
+  document.documentElement.dataset.resolvedTheme = dark ? "dark" : "light";
+}
+
+function setTheme(choice) {
+  if (choice === "system") localStorage.removeItem(THEME_KEY);
+  else localStorage.setItem(THEME_KEY, choice);
+  applyTheme(choice);
+  document.querySelectorAll("[data-theme-choice]").forEach((b) =>
+    b.classList.toggle("active", b.dataset.themeChoice === choice));
+}
+
+themeQuery.addEventListener("change", () => { if (themeChoice() === "system") applyTheme("system"); });
+applyTheme();
+
+// ---------------------------------------------------------------------------
+// local demo mode
+// ---------------------------------------------------------------------------
+const DEMO_MODE = new URLSearchParams(location.search).has("demo");
+const DEMO_PERMS = [
+  "server.view", "server.start", "server.stop", "server.restart", "server.force_stop",
+  "server.console.view", "server.console.use", "server.players.view", "server.players.manage",
+  "server.files.manage", "server.configuration.manage", "server.icon.manage",
+  "server.import.manage", "server.backups.view", "server.backups.create",
+  "server.backups.restore", "server.schedules.manage", "users.manage",
+  "security.manage", "host.manage", "portability.manage",
+];
+const DEMO_ME = { id: 1, username: "demo-owner", role: "owner", permissions: DEMO_PERMS };
+const DEMO_SERVERS = [
+  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", modloader: "forge", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true },
+  { id: 2, slug: "creative-lab", display_name: "Creative Lab", modloader: "fabric", source_type: "archive-upload", external_directory: false },
+];
+const DEMO_CONSOLE = [
+  "[19:27:36] [Server thread/INFO]: Starting minecraft server version 1.20.1",
+  "[19:27:43] [Server thread/INFO]: Loading Forge mods from /home/klaude/bonghos/servers/minecraft-java/modded/bio1/mods",
+  "[19:28:12] [Server thread/WARN]: Can't keep up! Is the server overloaded? Running 2475ms behind",
+  "[19:28:40] [Server thread/INFO]: Steve joined the game",
+  "[19:29:04] [Server thread/ERROR]: Example datapack warning for visual review only",
+];
+const DEMO_METRICS = Array.from({ length: 60 }, (_, i) => ({
+  at: new Date(Date.now() - (59 - i) * 60000).toISOString(),
+  cpu_percent: 18 + Math.sin(i / 6) * 11 + (i % 13),
+  rss_bytes: (2600 + Math.sin(i / 8) * 220 + i * 3) * 1024 * 1024,
+  online_players: i % 17 > 9 ? 4 : 3,
+  disk_free: (186 - i * 0.08) * 1024 * 1024 * 1024,
+}));
+
+function demoDelay() {
+  return new Promise((resolve) => setTimeout(resolve, 80));
+}
+
+async function demoApi(path, opts = {}) {
+  await demoDelay();
+  const method = opts.method || "GET";
+  const clean = path.split("?")[0];
+  if (method !== "GET") {
+    if (clean === "/server/start") { S.status = { state: "running" }; return { ok: true }; }
+    if (clean === "/server/stop") { S.status = { state: "stopped" }; return { ok: true }; }
+    if (clean === "/server/restart") { S.status = { state: "restarting" }; return { ok: true }; }
+    if (clean === "/server/command") {
+      S.consoleLines.push("> " + ((opts.json && opts.json.command) || ""));
+      return { ok: true };
+    }
+    if (clean === "/servers/slug-preview") {
+      const name = (opts.json && opts.json.name) || "server";
+      return { slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server" };
+    }
+    return { ok: true };
+  }
+  switch (clean) {
+    case "/auth/csrf": return { csrf: "demo-csrf-token" };
+    case "/auth/me": return DEMO_ME;
+    case "/version": return { version: "0.1.1-demo" };
+    case "/servers": return { servers: DEMO_SERVERS, active_id: 1 };
+    case "/server/status": return S.status;
+    case "/overview": return {
+      state: S.status.state,
+      version: "0.1.1-demo",
+      instance: DEMO_SERVERS[0],
+      motd: "A precise Bonghos local demo",
+      port: "25565",
+      max_players: "20",
+      last_backup: { created_at: new Date(Date.now() - 5 * 3600000).toISOString() },
+      next_schedule_at: new Date(Date.now() + 3 * 3600000).toISOString(),
+      sample: DEMO_METRICS[DEMO_METRICS.length - 1],
+    };
+    case "/host": return {
+      bind_address: "127.0.0.1", port: 8080, home: "/home/demo/bonghos",
+      mem_total: 32 * 1024 * 1024 * 1024, mem_available: 18 * 1024 * 1024 * 1024,
+      disk_total: 512 * 1024 * 1024 * 1024, disk_free: 186 * 1024 * 1024 * 1024,
+      load1: 0.82, systemd: true, service_bonghos: "active", service_minecraft: "running",
+      version: "0.1.1-demo",
+      note: "Demo data only. Local listening does not prove public accessibility.",
+    };
+    case "/events": return { events: [
+      { occurred_at: new Date(Date.now() - 9 * 60000).toISOString(), severity: "info", message: "Server reached ready state" },
+      { occurred_at: new Date(Date.now() - 22 * 60000).toISOString(), severity: "warning", message: "Backup verification took longer than usual" },
+      { occurred_at: new Date(Date.now() - 48 * 60000).toISOString(), severity: "info", message: "Scheduled restart completed" },
+    ] };
+    case "/metrics": return DEMO_METRICS;
+    case "/players": return { players: [
+      { username: "Steve", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
+      { username: "Alex", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 3922 },
+      { username: "Long_Name_With_Underscores", online: false, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 18422 },
+    ] };
+    case "/files": return [
+      { name: "world", is_dir: true, size: 0, mod_time: new Date(Date.now() - 3600000).toISOString() },
+      { name: "server.properties", is_dir: false, size: 914, mod_time: new Date(Date.now() - 7200000).toISOString() },
+      { name: "user_jvm_args.txt", is_dir: false, size: 72, mod_time: new Date(Date.now() - 5400000).toISOString() },
+    ];
+    case "/files/content": return { content: "motd=A precise Bonghos local demo\nserver-port=25565\nmax-players=20\n" };
+    case "/configuration": return {
+      eula: true,
+      instance: DEMO_SERVERS[0],
+      jvm: { xms: "2G", xmx: "6G", source_file: "user_jvm_args.txt", source_kind: "jvm_args_file", editable: true },
+      scripts: [{ path: "run.sh", modloader: "forge", score: 98 }],
+      java: [{ path: "/usr/lib/jvm/java-21-openjdk/bin/java", version: "21" }],
+      properties: { motd: "A precise Bonghos local demo", "server-port": "25565", "max-players": "20", difficulty: "normal", gamemode: "survival", "white-list": "false", pvp: "true", "view-distance": "10", "online-mode": "true" },
+    };
+    case "/backups": return [
+      { backup_id: "demo-full-20260803-1900", backup_type: "full_server", consistency_mode: "online", trigger_type: "manual", compressed_size: 4620000000, verification_status: "verified", created_at: new Date(Date.now() - 5 * 3600000).toISOString(), protected: true },
+      { backup_id: "demo-world-20260802-0400", backup_type: "world_and_player_data", consistency_mode: "offline", trigger_type: "schedule", compressed_size: 2110000000, verification_status: "verified", created_at: new Date(Date.now() - 29 * 3600000).toISOString(), protected: false },
+    ];
+    case "/schedules": return [
+      { id: 1, name: "Nightly verified backup", enabled: true, action: "backup", schedule_type: "daily", schedule_expression: "04:00", timezone: "Asia/Phnom_Penh", next_run_at: new Date(Date.now() + 3 * 3600000).toISOString(), last_result: "success" },
+      { id: 2, name: "Weekly restart", enabled: false, action: "restart_server", schedule_type: "weekly", schedule_expression: "sun 05:00", timezone: "Asia/Phnom_Penh", next_run_at: null, last_result: "skipped" },
+    ];
+    case "/operations": return [];
+    case "/activity": return [
+      { at: new Date(Date.now() - 12 * 60000).toISOString(), username: "demo-owner", action: "backup_created", target: "bio1", detail: "full_server verified" },
+      { at: new Date(Date.now() - 46 * 60000).toISOString(), username: "demo-owner", action: "configuration_saved", target: "user_jvm_args.txt", detail: "-Xmx changed to 6G" },
+    ];
+    case "/users": return [
+      { ID: 1, Username: "demo-owner", Role: "owner", Disabled: false },
+      { ID: 2, Username: "admin", Role: "admin", Disabled: false },
+      { ID: 3, Username: "viewer", Role: "viewer", Disabled: true },
+    ];
+    default: return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
 let csrfToken = "";
 async function api(path, opts = {}) {
+  if (DEMO_MODE) return demoApi(path, opts);
   const headers = opts.headers || {};
   if (opts.method && opts.method !== "GET") headers["X-Bonghos-CSRF"] = csrfToken;
   if (opts.json !== undefined) {
@@ -94,6 +248,10 @@ const S = {
   ws: null,
   page: "overview",
   consoleLines: [],
+  consolePaused: false,
+  consoleSearch: "",
+  commandHistory: [],
+  commandHistoryAt: -1,
   perf: [],
 };
 const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
@@ -137,6 +295,7 @@ function syncPageSubscription(page) {
 }
 
 function connectWS() {
+  if (DEMO_MODE) return;
   if (S.ws) try { S.ws.close(); } catch {}
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/api/ws`);
@@ -209,16 +368,53 @@ function loginStep(n) {
   s1.classList.toggle("hidden", n !== 1);
   s2.classList.toggle("hidden", n !== 2);
   $("#login-error").classList.add("hidden");
+  $(".otp-wrap")?.classList.remove("error");
   if (n === 2) {
     $("#login-step-2-who").textContent = "Signing in as " + $("#login-user").value.trim();
     $("#login-code").value = "";
+    syncOTPCells();
     setTimeout(() => $("#login-code").focus(), 30);
   } else {
     setTimeout(() => $("#login-user").focus(), 30);
   }
 }
 
+function syncOTPCells() {
+  const input = $("#login-code");
+  const wrap = $(".otp-wrap");
+  if (!input || !wrap) return;
+  const code = input.value.replace(/\D/g, "").slice(0, 6);
+  [...wrap.children].forEach((cell, i) => { cell.textContent = code[i] || ""; });
+}
+
+function installOTPControl() {
+  const input = $("#login-code");
+  const wrap = $(".otp-wrap");
+  if (!input || !wrap) return;
+  wrap.addEventListener("click", () => input.focus());
+  input.addEventListener("focus", () => wrap.classList.add("focus"));
+  input.addEventListener("blur", () => wrap.classList.remove("focus"));
+  input.addEventListener("input", () => {
+    const raw = input.value.trim();
+    const digits = raw.replace(/\D/g, "");
+    if (digits.length >= 6 && /^[0-9\s-]+$/.test(raw)) input.value = digits.slice(0, 6);
+    syncOTPCells();
+  });
+  input.addEventListener("paste", () => setTimeout(syncOTPCells, 0));
+  syncOTPCells();
+}
+
 async function boot() {
+  if (DEMO_MODE) {
+    csrfToken = "demo-csrf-token";
+    S.me = DEMO_ME;
+    S.status = { state: "running" };
+    S.consoleLines = [...DEMO_CONSOLE];
+    S.perf = [...DEMO_METRICS];
+    enterApp();
+    setTimeout(() => toast("Demo mode uses local mock data. No server changes are made.", "ok"), 200);
+    return;
+  }
   const c = await api("/auth/csrf");
   csrfToken = c.csrf;
   try {
@@ -261,7 +457,9 @@ $("#login-form").addEventListener("submit", async (e) => {
     enterApp();
   } catch (err) {
     const eb = $("#login-error"); eb.textContent = err.message; eb.classList.remove("hidden");
+    $(".otp-wrap")?.classList.add("error");
     $("#login-code").value = "";
+    syncOTPCells();
     $("#login-code").focus();
   } finally { btn.disabled = false; }
 });
@@ -284,25 +482,34 @@ function enterApp() {
 // navigation
 // ---------------------------------------------------------------------------
 const PAGES = [
-  ["overview", "Overview", "server.view"],
-  ["console", "Console", "server.console.view"],
-  ["players", "Players", "server.players.view"],
-  ["files", "Files", "server.files.manage"],
-  ["configuration", "Configuration", "server.configuration.manage"],
-  ["backups", "Backups", "server.backups.view"],
-  ["schedules", "Schedules", "server.schedules.manage"],
-  ["performance", "Performance", "server.view"],
-  ["servers", "Servers", "server.view"],
-  ["activity", "Activity", "server.configuration.manage"],
-  ["users", "Users", "users.manage"],
-  ["host", "Host", "server.configuration.manage"],
+  { section: "Operate", id: "overview", label: "Overview", icon: "01", perm: "server.view" },
+  { section: "Operate", id: "console", label: "Console", icon: ">", perm: "server.console.view" },
+  { section: "Operate", id: "performance", label: "Performance", icon: "%", perm: "server.view" },
+  { section: "Operate", id: "players", label: "Players", icon: "P", perm: "server.players.view" },
+  { section: "Manage", id: "servers", label: "Servers", icon: "S", perm: "server.view" },
+  { section: "Manage", id: "files", label: "Files", icon: "F", perm: "server.files.manage" },
+  { section: "Manage", id: "configuration", label: "Configuration", icon: "C", perm: "server.configuration.manage" },
+  { section: "Manage", id: "backups", label: "Backups", icon: "B", perm: "server.backups.view" },
+  { section: "Manage", id: "schedules", label: "Schedules", icon: "T", perm: "server.schedules.manage" },
+  { section: "System", id: "activity", label: "Activity", icon: "A", perm: "server.configuration.manage" },
+  { section: "System", id: "users", label: "Users", icon: "U", perm: "users.manage" },
+  { section: "System", id: "security", label: "Security", icon: "!", perm: "users.manage" },
+  { section: "System", id: "host", label: "Host", icon: "H", perm: "server.configuration.manage" },
+  { section: "System", id: "settings", label: "Settings", icon: "*", perm: "server.view" },
 ];
 
 function buildNav() {
   const nav = $("#nav"); nav.innerHTML = "";
-  for (const [id, label, perm] of PAGES) {
-    if (perm && !can(perm)) continue;
-    nav.append(el("div", { class: "nav-item", "data-page": id, onclick: () => navigate(id) }, label));
+  let lastSection = "";
+  for (const page of PAGES) {
+    if (page.perm && !can(page.perm)) continue;
+    if (page.section !== lastSection) {
+      nav.append(el("div", { class: "nav-section" }, page.section));
+      lastSection = page.section;
+    }
+    nav.append(el("div", { class: "nav-item", "data-page": page.id, tabindex: "0", onclick: () => navigate(page.id), onkeydown: (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(page.id); }
+    } }, el("span", { class: "nav-icon", "aria-hidden": "true" }, page.icon), page.label));
   }
 }
 
@@ -329,15 +536,16 @@ function renderServerPicker() {
   const host = $("#server-picker"); host.innerHTML = "";
   const active = S.servers.find((s) => s.id === S.activeId);
   host.append(
-    el("div", { class: "muted", style: "margin-bottom:6px" }, "Active project"),
-    el("div", { style: "font-weight:600; font-size:0.9rem" }, active ? active.display_name : "None selected"),
+    el("div", {},
+      el("div", { class: "muted", style: "margin-bottom:6px" }, "Active project"),
+      el("div", { class: "server-name" }, active ? active.display_name : "None selected")),
     renderStatusPillNode());
 }
 
 function renderStatusPillNode() {
   const st = S.status.state || "stopped";
-  return el("div", { class: "pill " + st, id: "status-pill", style: "margin-top:8px" },
-    el("span", { class: "dot" }), st.charAt(0).toUpperCase() + st.slice(1));
+  return el("div", { class: "status-label " + st, id: "status-pill" },
+    el("span", { class: "status-square", "aria-hidden": "true" }), st.charAt(0).toUpperCase() + st.slice(1));
 }
 function renderStatusPill() {
   const p = $("#status-pill");
@@ -362,12 +570,23 @@ async function renderPage() {
       case "servers": return await pageServers(main);
       case "activity": return await pageActivity(main);
       case "users": return await pageUsers(main);
+      case "security": return await pageSecurity(main);
       case "host": return await pageHost(main);
+      case "settings": return await pageSettings(main);
     }
   } catch (err) {
     main.innerHTML = "";
     main.append(el("h1", {}, "Something went wrong"), el("p", { class: "muted" }, err.message));
   }
+}
+
+function pageHeader(title, subtitle, actions = []) {
+  return el("div", { class: "page-header" },
+    el("div", { class: "title" },
+      el("h1", {}, title),
+      subtitle ? el("p", { class: "page-sub" }, subtitle) : null),
+    el("div", { class: "spacer" }),
+    actions.length ? el("div", { class: "actions" }, actions) : null);
 }
 
 // ----- overview -------------------------------------------------------------
@@ -377,37 +596,97 @@ async function pageOverview(main) {
   renderStatusPill();
   const s = d.sample || {};
   const inst = d.instance;
+
+  // Health, host and trends live here together. Knowing whether the server is
+  // healthy should not require visiting three tabs.
+  let host = null, events = [], history = [];
+  try { host = await api("/host"); } catch {}
+  try { events = (await api("/events?limit=25")).events || []; } catch {}
+  try { history = await api("/metrics?hours=1") || []; } catch {}
+
+  const memUsed = (host && host.mem_total) ? host.mem_total - host.mem_available : 0;
+
   main.innerHTML = "";
   main.append(
-    el("div", { class: "toolbar" },
-      el("h1", {}, inst ? inst.display_name : "Overview"),
+    pageHeader(inst ? inst.display_name : "Overview", "Server state, resource pressure, backups, and recent events for the active project.", [
       renderStatusPillNode(),
-      el("div", { class: "spacer" }),
-      lifecycleButtons()),
+      lifecycleButtons(),
+    ]),
+
+    // What is happening right now.
     el("div", { class: "grid cols-4" },
-      statCard("Uptime", fmtDur(s.uptime_seconds), ""),
-      statCard("Players online", s.online_players ?? 0, ""),
+      statCard("Uptime", fmtDur(s.uptime_seconds), s.java_pid ? "Java PID " + s.java_pid : "not running"),
+      statCard("Players online", (s.online_players ?? 0) + (s.max_players ? " / " + s.max_players : ""), ""),
       statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)"),
       statCard("CPU", (s.cpu_percent ?? 0).toFixed(1) + "%", "of one core = 100%")),
-    el("div", { class: "grid cols-3", style: "margin-top:16px" },
+
+    // Host health, previously a separate tab.
+    el("div", { class: "grid cols-4", style: "margin-top:16px" },
+      statCard("Host memory", host ? fmtBytes(memUsed) : "—",
+        host ? "of " + fmtBytes(host.mem_total) : ""),
       statCard("Disk free", fmtBytes(s.disk_free), "of " + fmtBytes(s.disk_total)),
-      statCard("Last backup", d.last_backup ? fmtTime(d.last_backup.created_at) : "None yet",
-        d.last_backup ? d.last_backup.backup_type : ""),
-      statCard("Next schedule", d.next_schedule_at ? fmtTime(d.next_schedule_at) : "None", "")),
-    inst ? el("div", { class: "card", style: "margin-top:16px" },
-      el("h3", {}, "Project"),
-      el("dl", { class: "kv" },
-        el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
-        el("dt", {}, "Port"), el("dd", {}, d.port || "25565"),
-        el("dt", {}, "Modloader"), el("dd", {}, inst.modloader || "unknown"),
-        el("dt", {}, "Startup script"), el("dd", { class: "mono" }, inst.startup_script || "not selected"),
-        el("dt", {}, "Restart policy"), el("dd", {}, inst.restart_policy || "never"))) : null);
+      statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute"),
+      statCard("Services", serviceSummary(d, host), "")),
+
+    // Trends, previously the Performance tab.
+    el("div", { class: "grid cols-2", style: "margin-top:16px" },
+      trendCard("CPU", history, (x) => x.cpu_percent, (v) => v.toFixed(0) + "%"),
+      trendCard("Process memory", history, (x) => x.rss_bytes, fmtBytes)),
+
+    el("div", { class: "grid cols-2", style: "margin-top:16px" },
+      // The timeline: what the server did, in its own words.
+      el("div", { class: "card" },
+        el("h3", {}, "Recent activity"),
+        events.length
+          ? el("ul", { class: "timeline" }, ...events.map(eventRow))
+          : el("p", { class: "muted" }, "Nothing recorded yet.")),
+
+      el("div", { class: "card" },
+        el("h3", {}, "Project"),
+        inst ? el("dl", { class: "kv" },
+          el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
+          el("dt", {}, "Port"), el("dd", {}, d.port || "25565"),
+          el("dt", {}, "Modloader"), el("dd", {}, inst.modloader || "unknown"),
+          el("dt", {}, "Startup script"), el("dd", { class: "mono" }, inst.startup_script || "not selected"),
+          el("dt", {}, "Restart policy"), el("dd", {}, inst.restart_policy || "never"),
+          el("dt", {}, "Autostart"), el("dd", {}, inst.autostart_enabled ? "enabled" : "disabled"),
+          el("dt", {}, "Last backup"), el("dd", {},
+            d.last_backup ? fmtTime(d.last_backup.created_at) : "none yet"),
+          el("dt", {}, "Next schedule"), el("dd", {},
+            d.next_schedule_at ? fmtTime(d.next_schedule_at) : "none"))
+          : el("p", { class: "muted" }, "No active project selected."))));
+}
+
+function serviceSummary(d, host) {
+  const mc = (d.state && d.state !== "stopped") ? "running" : "stopped";
+  const cp = host && host.service_bonghos ? host.service_bonghos : "active";
+  const sup = host && host.service_minecraft ? host.service_minecraft : mc;
+  return cp === "active" ? "Panel ok · Minecraft " + sup : cp + " · Minecraft " + sup;
+}
+
+// eventRow renders one timeline entry, coloured by severity.
+function eventRow(e) {
+  return el("li", { class: "timeline-item sev-" + (e.severity || "info") },
+    el("span", { class: "timeline-time mono" }, fmtTime(e.occurred_at)),
+    el("span", { class: "timeline-msg" }, e.message || e.event));
+}
+
+// trendCard draws a small sparkline plus the latest value.
+function trendCard(title, samples, pick, fmt) {
+  const values = (samples || []).map(pick).filter((v) => typeof v === "number");
+  const latest = values.length ? values[values.length - 1] : 0;
+  return el("div", { class: "card" },
+    el("div", { class: "metric-label" }, title),
+    el("div", { class: "metric-value" }, fmt(latest)),
+    el("div", { class: "metric-note" }, "last hour"),
+    values.length > 1 ? sparklineNode(values) : el("p", { class: "muted" }, "Collecting samples…"));
 }
 
 function statCard(title, value, sub) {
-  return el("div", { class: "card" },
-    el("h3", {}, title),
-    el("div", { class: "stat" }, String(value), sub ? el("small", {}, " " + sub) : null));
+  return el("div", { class: "card metric" },
+    el("div", { class: "metric-label" }, title),
+    el("div", { class: "metric-value" }, String(value)),
+    el("div", { class: "metric-note" }, sub || ""));
 }
 
 function lifecycleButtons() {
@@ -437,22 +716,58 @@ function lifecycleButtons() {
 // ----- console --------------------------------------------------------------
 async function pageConsole(main) {
   main.innerHTML = "";
-  const box = el("div", { class: "console", id: "console-box" });
-  for (const line of S.consoleLines) box.append(consoleLineNode(line));
-  const input = el("input", { placeholder: can("server.console.use") ? "Type a command (e.g. say hello) and press Enter" : "Read-only console", spellcheck: "false" });
-  if (!can("server.console.use")) input.disabled = true;
+  const stopped = (S.status.state || "stopped") === "stopped";
+  const box = el("div", { class: "console" + (S.consolePaused ? " paused" : ""), id: "console-box", role: "log", "aria-live": S.consolePaused ? "off" : "polite" });
+  const search = el("input", { value: S.consoleSearch, placeholder: "Search buffer", "aria-label": "Search console buffer" });
+  const input = el("input", { placeholder: can("server.console.use") ? (stopped ? "Start the server to send commands" : "Command, for example: say hello") : "Read-only console", spellcheck: "false", autocomplete: "off" });
+  if (!can("server.console.use") || stopped) input.disabled = true;
+  search.addEventListener("input", () => { S.consoleSearch = search.value; renderConsoleLines(box); });
+  renderConsoleLines(box);
   input.addEventListener("keydown", async (e) => {
+    if (e.key === "ArrowUp" && S.commandHistory.length) {
+      e.preventDefault();
+      S.commandHistoryAt = Math.max(0, S.commandHistoryAt < 0 ? S.commandHistory.length - 1 : S.commandHistoryAt - 1);
+      input.value = S.commandHistory[S.commandHistoryAt];
+      return;
+    }
+    if (e.key === "ArrowDown" && S.commandHistory.length) {
+      e.preventDefault();
+      S.commandHistoryAt = Math.min(S.commandHistory.length, S.commandHistoryAt + 1);
+      input.value = S.commandHistoryAt >= S.commandHistory.length ? "" : S.commandHistory[S.commandHistoryAt];
+      return;
+    }
     if (e.key !== "Enter" || !input.value.trim()) return;
     const cmd = input.value.trim(); input.value = "";
+    S.commandHistory.push(cmd);
+    S.commandHistoryAt = -1;
     try { await api("/server/command", { method: "POST", json: { command: cmd } }); }
     catch (err) { toast(err.message, "err"); }
   });
+  const sendQuick = async (cmd) => {
+    try { await api("/server/command", { method: "POST", json: { command: cmd } }); toast("Command sent: " + cmd, "ok"); }
+    catch (err) { toast(err.message, "err"); }
+  };
   main.append(
-    el("div", { class: "toolbar" }, el("h1", {}, "Console"), renderStatusPillNode(),
-      el("div", { class: "spacer" }), lifecycleButtons()),
-    box,
-    el("div", { class: "console-input" }, input,
-      el("button", { class: "btn ghost", onclick: () => { box.innerHTML = ""; S.consoleLines = []; } }, "Clear view")));
+    pageHeader("Console", "Live Minecraft output and command entry for the active server.", [renderStatusPillNode(), lifecycleButtons()]),
+    el("div", { class: "console-shell" },
+      el("div", { class: "console-toolbar" },
+        search,
+        el("button", { class: "btn ghost", onclick: () => { S.consolePaused = !S.consolePaused; pageConsole(main); } }, S.consolePaused ? "Resume autoscroll" : "Pause autoscroll"),
+        el("button", { class: "btn ghost", onclick: async () => {
+          try { await navigator.clipboard.writeText(S.consoleLines.join("\n")); toast("Console buffer copied", "ok"); }
+          catch { toast("Copy failed in this browser", "err"); }
+        } }, "Copy"),
+        el("button", { class: "btn ghost", onclick: () => { box.innerHTML = ""; S.consoleLines = []; } }, "Clear view"),
+        el("span", { class: "status-label " + (DEMO_MODE || (S.ws && S.ws.readyState === WebSocket.OPEN) ? "running" : "stopped") },
+          el("span", { class: "status-square", "aria-hidden": "true" }),
+          DEMO_MODE ? "Demo stream" : (S.ws && S.ws.readyState === WebSocket.OPEN ? "Connected" : "Reconnecting"))),
+      box,
+      el("div", { class: "console-input" },
+        input,
+        can("server.console.use") && !stopped ? [
+          el("button", { class: "btn ghost", onclick: () => sendQuick("list") }, "list"),
+          el("button", { class: "btn ghost", onclick: () => sendQuick("save-all") }, "save-all"),
+        ] : null)));
   box.scrollTop = box.scrollHeight;
 }
 
@@ -460,38 +775,64 @@ function consoleLineNode(line) {
   let cls = "";
   if (/ERROR|SEVERE|FATAL/.test(line)) cls = "errline";
   else if (/WARN/.test(line)) cls = "warnline";
-  return el("div", { class: cls }, line);
+  return el("div", { class: "console-line " + cls }, line);
+}
+
+function renderConsoleLines(box) {
+  const q = (S.consoleSearch || "").toLowerCase();
+  box.innerHTML = "";
+  for (const line of S.consoleLines) {
+    if (q && !String(line).toLowerCase().includes(q)) continue;
+    box.append(consoleLineNode(line));
+  }
 }
 
 function appendConsoleLine(line) {
   const box = $("#console-box");
   if (!box) return;
+  if (S.consoleSearch && !String(line).toLowerCase().includes(S.consoleSearch.toLowerCase())) return;
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.append(consoleLineNode(line));
   while (box.childNodes.length > 1000) box.firstChild.remove();
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  if (!S.consolePaused && atBottom) box.scrollTop = box.scrollHeight;
 }
 
 // ----- players --------------------------------------------------------------
 async function pagePlayers(main) {
   const d = await api("/players");
   const players = d.players || [];
+  const search = el("input", { placeholder: "Search players", "aria-label": "Search players" });
+  const tbody = el("tbody");
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    const visible = players.filter((p) => !q || String(p.username).toLowerCase().includes(q));
+    tbody.innerHTML = "";
+    tbody.append(...(visible.length ? visible.map(playerRow) : [el("tr", {}, el("td", { colspan: "5", class: "muted" }, players.length ? "No matching players." : "No players seen yet."))]));
+  };
+  search.addEventListener("input", draw);
   main.innerHTML = "";
-  const rows = players.map((p) => el("tr", {},
+  main.append(
+    pageHeader("Players", "Observed online and recent players. Whitelist, operator, ban, and IP-ban lists are not exposed as separate read APIs yet.", [search]),
+    el("div", { class: "toolbar" },
+      el("span", { class: "status-label running" }, el("span", { class: "status-square" }), players.filter((p) => p.online).length + " online"),
+      el("span", { class: "status-label" }, el("span", { class: "status-square" }), players.length + " observed")),
+    el("div", { class: "table-wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {},
+          el("th", {}, "Player"), el("th", {}, "Status"), el("th", {}, "Last seen"),
+          el("th", {}, "Observed playtime"), el("th", {}, ""))),
+        tbody)));
+  draw();
+}
+
+function playerRow(p) {
+  return el("tr", {},
     el("td", {}, el("span", { class: "pill " + (p.online ? "running" : "") },
       el("span", { class: "dot" }), p.username)),
     el("td", {}, p.online ? "Online" : "Offline"),
     el("td", {}, fmtTime(p.last_seen_at)),
     el("td", {}, fmtDur(p.observed_playtime_seconds)),
-    el("td", { class: "row-actions" }, can("server.players.manage") ? playerActions(p) : "")));
-  main.append(
-    el("h1", {}, "Players"),
-    el("p", { class: "page-sub" }, "Playtime reflects only sessions observed while Bonghos was running."),
-    el("table", {},
-      el("thead", {}, el("tr", {},
-        el("th", {}, "Player"), el("th", {}, "Status"), el("th", {}, "Last seen"),
-        el("th", {}, "Observed playtime"), el("th", {}, ""))),
-      el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "5", class: "muted" }, "No players seen yet.")))));
+    el("td", { class: "row-actions" }, can("server.players.manage") ? playerActions(p) : ""));
 }
 
 function playerActions(p) {
@@ -520,6 +861,13 @@ function playerActions(p) {
 // ----- files ----------------------------------------------------------------
 let filePath = "";
 async function pageFiles(main, path = filePath) {
+  // A deep link from elsewhere (for example the Configuration page naming the
+  // file that owns the JVM settings) opens that file straight away.
+  if (S.pendingFileOpen) {
+    const target = S.pendingFileOpen;
+    S.pendingFileOpen = null;
+    return openFileEditor(main, target);
+  }
   filePath = path;
   const entries = await api("/files?path=" + encodeURIComponent(path));
   main.innerHTML = "";
@@ -553,10 +901,11 @@ async function pageFiles(main, path = filePath) {
       el("button", { class: "btn ghost", onclick: () => renameEntry(main, path, e2.name) }, "Rename"),
       el("button", { class: "btn danger", onclick: () => deleteEntry(main, path, e2.name) }, "Delete"))));
   main.append(
-    el("div", { class: "toolbar" }, el("h1", {}, "Files"), el("div", { class: "spacer" }),
+    pageHeader("Files", "Constrained file manager for the active server directory.", [
       el("button", { class: "btn", onclick: () => upInput.click() }, "Upload"),
       el("button", { class: "btn", onclick: () => mkdirPrompt(main, path) }, "New folder"),
-      upInput),
+      upInput,
+    ]),
     crumbs,
     el("div", { class: "file-list" },
       el("table", {},
@@ -618,6 +967,42 @@ function deleteEntry(main, path, name) {
 }
 
 // ----- configuration --------------------------------------------------------
+// jvmSourceNote explains which file actually controls the memory settings and
+// offers a direct route to it. Some packs regenerate their argument file at
+// launch, so saying "detected in user_jvm_args.txt" without that context leads
+// people to edit a file whose contents are discarded on the next restart.
+function jvmSourceNote(jvm) {
+  if (!jvm || !jvm.source_file) {
+    return el("p", { class: "muted" }, "No JVM configuration detected.");
+  }
+  const where = jvm.variable
+    ? `${jvm.variable} in ${jvm.source_file}`
+    : jvm.source_file;
+
+  const openBtn = el("button", {
+    class: "btn ghost small",
+    title: "Open this file in the file editor",
+    onclick: () => openFileInEditor(jvm.source_file),
+  }, "Open " + jvm.source_file);
+
+  return el("div", { class: "jvm-source" },
+    el("p", { class: "muted" },
+      `Controlled by ${where} (${(jvm.source_kind || "").replace(/_/g, " ")})`,
+      jvm.editable ? "" : " — not safely editable here"),
+    jvm.note ? el("p", { class: "notice" }, jvm.note) : null,
+    can("server.files.manage") ? openBtn : null);
+}
+
+// openFileInEditor jumps to the Files page with the given path already open,
+// so the authoritative file is one click away from where it is named.
+function openFileInEditor(path) {
+  if (!can("server.files.manage")) {
+    return toast("You do not have permission to edit files", "err");
+  }
+  S.pendingFileOpen = path;
+  navigate("files");
+}
+
 async function pageConfiguration(main) {
   const d = await api("/configuration");
   const inst = d.instance;
@@ -648,8 +1033,7 @@ async function pageConfiguration(main) {
   });
 
   main.append(
-    el("h1", {}, "Configuration"),
-    el("p", { class: "page-sub" }, "Changes to memory, properties and scripts take effect after a restart."),
+    pageHeader("Configuration", "Startup, Java, memory, Minecraft properties, and recovery policy for the active project."),
     d.eula ? null : el("div", { class: "notice" },
       "The Minecraft EULA has not been accepted for this project. The server will not start until it is. ",
       el("button", { class: "btn", style: "margin-left:8px", onclick: () =>
@@ -662,7 +1046,7 @@ async function pageConfiguration(main) {
     el("div", { class: "grid cols-2" },
       el("div", { class: "card" },
         el("h3", {}, "JVM memory"),
-        d.jvm ? el("p", { class: "muted" }, `Detected in ${d.jvm.source_file} (${d.jvm.source_kind})${d.jvm.editable ? "" : " — not safely editable here"}`) : el("p", { class: "muted" }, "No JVM configuration detected."),
+        jvmSourceNote(d.jvm),
         el("div", { class: "field-row" }, el("label", {}, "Minimum (-Xms)", xms)),
         el("div", { class: "field-row" }, el("label", {}, "Maximum (-Xmx)", xmx)),
         el("button", { class: "btn primary", onclick: async () => {
@@ -742,13 +1126,16 @@ async function pageBackups(main) {
           catch (e) { toast(e.message, "err"); }
         }) }, "Delete"))));
   main.append(
-    el("div", { class: "toolbar" }, el("h1", {}, "Backups"), el("div", { class: "spacer" }),
-      can("server.backups.create") ? [mkBtn("world", "World backup"), mkBtn("full", "Full backup"), mkBtn("configuration", "Config backup")] : []),
-    el("p", { class: "page-sub" }, "Online backups pause world saving briefly (save-off / save-all flush / save-on). Every backup is verified after creation."),
+    pageHeader("Backups", "Verified archives, retention decisions, and restore controls. Online backups briefly pause world saving.", [
+      can("server.backups.create") ? mkBtn("world", "World backup") : null,
+      can("server.backups.create") ? mkBtn("full", "Full backup") : null,
+      can("server.backups.create") ? mkBtn("configuration", "Config backup") : null,
+    ]),
     el("div", { class: "progress hidden", id: "backup-progress" }, el("div", { style: "width:0%" })),
-    el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", {}, "Mode"), el("th", {}, "Size"), el("th", {}, "Verified"), el("th", {}, "Created"), el("th", {}, ""))),
-      el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "7", class: "muted" }, "No backups yet.")))));
+    el("div", { class: "table-wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", {}, "Mode"), el("th", {}, "Size"), el("th", {}, "Verified"), el("th", {}, "Created"), el("th", {}, ""))),
+        el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "7", class: "muted" }, "No backups yet."))))));
 }
 
 function updateBackupProgress(d) {
@@ -817,12 +1204,13 @@ async function pageSchedules(main) {
             try { await api(`/schedules/${s.id}`, { method: "DELETE" }); renderPage(); } catch (e) { toast(e.message, "err"); }
           }) }, "Delete")] : "")));
   main.append(
-    el("div", { class: "toolbar" }, el("h1", {}, "Schedules"), el("div", { class: "spacer" }),
-      can("server.schedules.manage") ? el("button", { class: "btn primary", onclick: () => scheduleForm(null) }, "New schedule") : ""),
-    el("p", { class: "page-sub" }, "Schedules run on the Linux host even when this browser is closed. Missed runs while the machine was off follow each schedule's missed-run policy."),
-    el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", {}, "Action"), el("th", {}, "When"), el("th", {}, "Next run"), el("th", {}, "Last result"), el("th", {}, ""))),
-      el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "6", class: "muted" }, "No schedules yet.")))));
+    pageHeader("Schedules", "Persistent Linux-host schedules with next run, last result, and manual run controls.", [
+      can("server.schedules.manage") ? el("button", { class: "btn primary", onclick: () => scheduleForm(null) }, "New schedule") : null,
+    ]),
+    el("div", { class: "table-wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", {}, "Action"), el("th", {}, "When"), el("th", {}, "Next run"), el("th", {}, "Last result"), el("th", {}, ""))),
+        el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "6", class: "muted" }, "No schedules yet."))))));
 }
 
 function scheduleForm(s) {
@@ -883,8 +1271,7 @@ async function pagePerformance(main) {
   S.perf = hist || [];
   main.innerHTML = "";
   main.append(
-    el("h1", {}, "Performance"),
-    el("p", { class: "page-sub" }, "Process memory shown is the Java process resident set, not the Java heap."),
+    pageHeader("Performance", "One-hour process and host history. Process memory is Java RSS, not configured heap."),
     el("div", { class: "grid cols-2" },
       el("div", { class: "card" }, el("h3", {}, "CPU (% of one core)"), el("div", { class: "chart", id: "chart-cpu" })),
       el("div", { class: "card" }, el("h3", {}, "Process memory"), el("div", { class: "chart", id: "chart-mem" })),
@@ -900,6 +1287,32 @@ function drawCharts() {
   sparkline("#chart-mem", S.perf.map((s) => s.rss_bytes || 0), fmtBytes);
   sparkline("#chart-players", S.perf.map((s) => s.online_players || 0));
   sparkline("#chart-disk", S.perf.map((s) => s.disk_free || 0), fmtBytes);
+}
+
+// sparklineNode returns a standalone SVG element, for callers building a card
+// rather than filling a pre-existing container.
+function sparklineNode(values) {
+  const W = 320, H = 56, pad = 2;
+  const max = Math.max(...values, 1), min = Math.min(...values, 0);
+  const span = (max - min) || 1;
+  const pts = values.map((v, i) => {
+    const x = pad + (i / Math.max(1, values.length - 1)) * (W - pad * 2);
+    const y = H - pad - ((v - min) / span) * (H - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "sparkline");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("role", "img");
+  const line = document.createElementNS(ns, "polyline");
+  line.setAttribute("points", pts);
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", "currentColor");
+  line.setAttribute("stroke-width", "2");
+  svg.appendChild(line);
+  return svg;
 }
 
 function sparkline(sel, values, fmt = (v) => v.toFixed(1)) {
@@ -939,9 +1352,9 @@ async function pageServers(main) {
           } }, "Make active") : "",
       can("server.import.manage") ? el("button", { class: "btn danger", onclick: () => deleteProject(s2) }, "Delete") : "")));
   main.append(
-    el("div", { class: "toolbar" }, el("h1", {}, "Servers"), el("div", { class: "spacer" }),
-      can("server.import.manage") ? el("button", { class: "btn primary", onclick: importWizard }, "Import server") : ""),
-    el("p", { class: "page-sub" }, "One server runs at a time; all imported projects stay ready to select."),
+    pageHeader("Servers", "Project inventory, active-project selection, and persistent import progress.", [
+      can("server.import.manage") ? el("button", { class: "btn primary", onclick: importWizard }, "Import server") : null,
+    ]),
     el("div", { id: "ops-host" }, ...(ops || []).map(opCard)),
     el("div", { class: "grid cols-2" }, cards.length ? cards : el("p", { class: "muted" }, "No servers imported yet — use “Import server”.")));
 }
@@ -1132,6 +1545,10 @@ function importWizard() {
           if (!f) throw new Error("Choose or drop an archive file first.");
           if (!name.value.trim()) throw new Error("Enter a display name for the project.");
           c(); navigate("servers");
+          if (DEMO_MODE) {
+            toast("Demo import simulated for " + f.name, "ok");
+            return;
+          }
           uploadArchive(f, name.value);
         } else if (method.value === "url") {
           await api("/imports/url", { method: "POST", json: { url: url.value, display_name: name.value } });
@@ -1163,13 +1580,14 @@ async function pageActivity(main) {
   const list = await api("/activity");
   main.innerHTML = "";
   main.append(
-    el("h1", {}, "Activity"),
-    el("p", { class: "page-sub" }, "Who did what, and when."),
-    el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "User"), el("th", {}, "Action"), el("th", {}, "Target"), el("th", {}, "Detail"))),
-      el("tbody", {}, (list || []).map((a2) => el("tr", {},
-        el("td", {}, fmtTime(a2.at)), el("td", {}, a2.username), el("td", {}, a2.action.replace(/_/g, " ")),
-        el("td", { class: "mono" }, a2.target || ""), el("td", { class: "muted" }, a2.detail || ""))))));
+    pageHeader("Activity", "Audit trail of account and server-management actions."),
+    el("div", { class: "table-wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "User"), el("th", {}, "Action"), el("th", {}, "Target"), el("th", {}, "Detail"))),
+        el("tbody", {}, (list || []).length ? (list || []).map((a2) => el("tr", {},
+          el("td", {}, fmtTime(a2.at)), el("td", {}, a2.username), el("td", {}, a2.action.replace(/_/g, " ")),
+          el("td", { class: "mono" }, a2.target || ""), el("td", { class: "muted" }, a2.detail || "")))
+          : el("tr", {}, el("td", { colspan: "5", class: "muted" }, "No audit events recorded yet."))))));
 }
 
 // ----- users -----------------------------------------------------------------
@@ -1197,16 +1615,18 @@ async function pageUsers(main) {
           }) }, "Delete"),
       ] : el("span", { class: "muted" }, "you"))));
   main.append(
-    el("div", { class: "toolbar" }, el("h1", {}, "Users"), el("div", { class: "spacer" }),
-      el("button", { class: "btn primary", onclick: inviteUser }, "Invite user")),
-    el("table", {},
-      el("thead", {}, el("tr", {}, el("th", {}, "Username"), el("th", {}, "Role"), el("th", {}, "Status"), el("th", {}, ""))),
-      el("tbody", {}, rows)));
+    pageHeader("Users", "Accounts, roles, invitations, sessions, and final-Owner protection.", [
+      el("button", { class: "btn primary", onclick: inviteUser }, "Invite user"),
+    ]),
+    el("div", { class: "table-wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "Username"), el("th", {}, "Role"), el("th", {}, "Status"), el("th", {}, ""))),
+        el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "4", class: "muted" }, "No users returned by the API."))))));
 }
 
 function inviteUser() {
   const role = el("select", {},
-    ...["Admin", "Member", "Viewer"].map((r) => el("option", { value: r }, r)));
+    ...[["admin", "Admin"], ["member", "Member"], ["viewer", "Viewer"]].map(([v, r]) => el("option", { value: v }, r)));
   modal("Invite user", [
     el("div", { class: "field-row" }, el("label", {}, "Role", role),
       el("span", { class: "hint" }, "The invitation link is valid for 72 hours and works once. The new user sets their own password and authenticator during activation.")),
@@ -1228,7 +1648,8 @@ function inviteUser() {
 
 function changeRole(u) {
   const role = el("select", {},
-    ...["Owner", "Admin", "Member", "Viewer"].map((r) => el("option", { value: r, selected: r === u.Role ? "" : null }, r)));
+    ...[["owner", "Owner"], ["admin", "Admin"], ["member", "Member"], ["viewer", "Viewer"]]
+      .map(([v, r]) => el("option", { value: v, selected: v === u.Role ? "" : null }, r)));
   modal("Change role", [el("div", { class: "field-row" }, el("label", {}, u.Username, role))], [
     ["Cancel", "ghost", (c) => c()],
     ["Save", "primary", async (c) => {
@@ -1243,8 +1664,8 @@ async function pageHost(main) {
   const d = await api("/host");
   main.innerHTML = "";
   main.append(
-    el("h1", {}, "Host"),
-    el("p", { class: "page-sub" }, d.note),
+    pageHeader("Host", "Linux host dependencies, services, storage, and exact local runtime paths."),
+    el("div", { class: "notice" }, d.note),
     el("div", { class: "grid cols-3" },
       statCard("Memory available", fmtBytes(d.mem_available), "of " + fmtBytes(d.mem_total)),
       statCard("Disk free", fmtBytes(d.disk_free), "of " + fmtBytes(d.disk_total)),
@@ -1258,6 +1679,68 @@ async function pageHost(main) {
         el("dt", {}, "bonghos.service"), el("dd", {}, d.service_bonghos || "—"),
         el("dt", {}, "bonghos-minecraft.service"), el("dd", {}, d.service_minecraft || "—"),
         el("dt", {}, "Version"), el("dd", {}, d.version))));
+}
+
+async function pageSecurity(main) {
+  const users = await api("/users").catch(() => []);
+  const activity = await api("/activity").catch(() => []);
+  const activeUsers = (users || []).filter((u) => !u.Disabled).length;
+  const disabledUsers = (users || []).filter((u) => u.Disabled).length;
+  main.innerHTML = "";
+  main.append(
+    pageHeader("Security", "Authentication posture, account exposure, and sensitive-account operations."),
+    el("div", { class: "grid cols-3" },
+      statCard("Signed in as", S.me.username, S.me.role),
+      statCard("Active accounts", activeUsers, disabledUsers + " disabled"),
+      statCard("TOTP policy", "Mandatory", "enforced at setup and invitation activation")),
+    el("div", { class: "grid cols-2", style: "margin-top:14px" },
+      el("div", { class: "card" },
+        el("h3", {}, "Current session"),
+        el("dl", { class: "kv" },
+          el("dt", {}, "Username"), el("dd", {}, S.me.username),
+          el("dt", {}, "Role"), el("dd", {}, S.me.role),
+          el("dt", {}, "Permissions"), el("dd", { class: "mono" }, (S.me.permissions || []).join(", ")))),
+      el("div", { class: "card" },
+        el("h3", {}, "Recovery and sessions"),
+        el("p", { class: "muted" }, "The current API supports revoking another user's sessions from Users. It does not expose recovery-code inventory, session lists, or TOTP reset flows in the Web UI yet."))),
+    el("h2", {}, "Recent security activity"),
+    el("div", { class: "table-wrap" },
+      el("table", {},
+        el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "Actor"), el("th", {}, "Action"), el("th", {}, "Target"))),
+        el("tbody", {}, (activity || []).slice(0, 12).map((a2) => el("tr", {},
+          el("td", {}, fmtTime(a2.at)),
+          el("td", {}, a2.username),
+          el("td", {}, a2.action.replace(/_/g, " ")),
+          el("td", { class: "mono" }, a2.target || "")))))));
+}
+
+async function pageSettings(main) {
+  const version = await api("/version").catch(() => ({ version: "unknown" }));
+  const makeThemeButton = (value, label) => el("button", {
+    class: "btn ghost" + (themeChoice() === value ? " active" : ""),
+    "data-theme-choice": value,
+    onclick: () => setTheme(value),
+  }, label);
+  main.innerHTML = "";
+  main.append(
+    pageHeader("Settings", "Local UI preferences and application metadata."),
+    el("div", { class: "card" },
+      el("div", { class: "settings-row" },
+        el("div", {}, el("h3", {}, "Theme"), el("p", { class: "muted" }, "System follows the operating-system color scheme and reacts to changes.")),
+        el("div", { class: "theme-choice" },
+          makeThemeButton("system", "System"),
+          makeThemeButton("dark", "Dark"),
+          makeThemeButton("light", "Light"))),
+      el("div", { class: "settings-row" },
+        el("div", {}, el("h3", {}, "Monitoring"), el("p", { class: "muted" }, "Live metrics are subscribed only on Overview and Performance.")),
+        el("dl", { class: "kv" },
+          el("dt", {}, "WebSocket topics"), el("dd", { class: "mono" }, BASE_TOPICS.join(", ") + " + active page"),
+          el("dt", {}, "Console buffer"), el("dd", {}, "Last 1000 lines in this browser"))),
+      el("div", { class: "settings-row" },
+        el("div", {}, el("h3", {}, "Application"), el("p", { class: "muted" }, "Runtime settings not exposed by the API are shown honestly rather than mocked.")),
+        el("dl", { class: "kv" },
+          el("dt", {}, "Version"), el("dd", { class: "mono" }, version.version),
+          el("dt", {}, "Frontend"), el("dd", {}, "Dependency-free vanilla HTML, CSS, and JavaScript embedded in the Go binary")))));
 }
 
 // ---------------------------------------------------------------------------
@@ -1274,6 +1757,7 @@ async function activationFlow(token) {
     const p1 = el("input", { type: "password", autocomplete: "new-password" });
     const p2 = el("input", { type: "password", autocomplete: "new-password" });
     const code = el("input", { inputmode: "numeric", maxlength: "6" });
+    const qrBox = el("div", { class: "qr-box hidden" });
     const secretBox = el("div", { class: "muted mono", style: "word-break:break-all" });
     let secret = "";
     const genBtn = el("button", { class: "btn", type: "button", onclick: async () => {
@@ -1281,8 +1765,24 @@ async function activationFlow(token) {
       const d = await fetch(`/api/invitations/${token}/totp`, { method: "POST",
         headers: { "Content-Type": "application/json", "X-Bonghos-CSRF": csrf.csrf },
         body: JSON.stringify({ username: user.value }) }).then((r) => r.json());
+      if (d.error) return toast(d.error, "err");
       secret = d.secret;
-      secretBox.textContent = "Secret: " + d.secret + "\nURI: " + d.uri;
+      // The QR is generated server-side, so the browser needs no QR library
+      // and this page keeps working offline. Without it the secret below is
+      // still everything an authenticator app needs.
+      // The SVG is built by Bonghos from integer coordinates and contains no
+      // user input, but it arrives as markup, so refuse anything that does not
+      // look like the plain shape we generate.
+      const svgOK = typeof d.qr_svg === "string" &&
+        d.qr_svg.startsWith("<svg ") && !/<script|onload=|xlink:href/i.test(d.qr_svg);
+      if (svgOK) {
+        qrBox.innerHTML = d.qr_svg;
+        qrBox.prepend(el("p", { class: "muted" }, "Scan this with your authenticator app:"));
+        qrBox.classList.remove("hidden");
+      }
+      secretBox.textContent =
+        (svgOK ? "If scanning does not work, enter this secret manually:\n\n" : "") +
+        "Secret: " + d.secret + "\nURI: " + d.uri;
     } }, "Generate authenticator secret");
     const form = el("form", { class: "login-card", onsubmit: async (e) => {
       e.preventDefault();
@@ -1306,7 +1806,7 @@ async function activationFlow(token) {
       el("label", {}, "Username", user),
       el("label", {}, "Password (min 10 chars)", p1),
       el("label", {}, "Confirm password", p2),
-      genBtn, secretBox,
+      genBtn, qrBox, secretBox,
       el("label", {}, "6-digit code from your authenticator", code),
       el("button", { class: "btn primary" }, "Activate"));
     wrap.append(form);
@@ -1320,4 +1820,7 @@ async function activationFlow(token) {
 // ---------------------------------------------------------------------------
 const activateMatch = location.pathname.match(/^\/activate\/([A-Za-z0-9_-]+)/);
 if (activateMatch) activationFlow(activateMatch[1]);
-else boot();
+else {
+  installOTPControl();
+  boot();
+}

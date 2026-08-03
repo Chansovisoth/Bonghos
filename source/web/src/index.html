@@ -1,16 +1,26 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="system">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <title>Bonghos</title>
+<script>
+(() => {
+  const key = "bonghos.theme";
+  const choice = localStorage.getItem(key) || "system";
+  const dark = choice === "dark" || (choice === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme = choice;
+  document.documentElement.dataset.resolvedTheme = dark ? "dark" : "light";
+})();
+</script>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <div id="login-view" class="login-wrap hidden">
   <form id="login-form" class="login-card" autocomplete="on">
-    <div class="brand"><span class="brand-mark">⛏</span> Bonghos</div>
-    <p class="muted">Minecraft Server Management Panel</p>
+    <div class="brand"><span class="brand-mark">B</span> Bonghos</div>
+    <p class="muted">Native Linux Minecraft operations panel</p>
 
     <!-- Step one collects the username and password. The second step is shown
          unconditionally afterwards, whether or not the account exists, so the
@@ -23,7 +33,12 @@
 
     <div id="login-step-2" class="hidden">
       <p class="muted" id="login-step-2-who"></p>
-      <label>Authenticator code<input id="login-code" inputmode="numeric" pattern="[0-9A-Za-z-]*" maxlength="11" placeholder="6-digit code or recovery code" autocomplete="one-time-code"></label>
+      <label class="otp-label" for="login-code">Authenticator code</label>
+      <div class="otp-wrap" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <input id="login-code" class="otp-input" inputmode="numeric" pattern="[0-9A-Za-z-]*" maxlength="32" placeholder="6-digit code or recovery code" autocomplete="one-time-code" aria-describedby="login-code-help">
+      <p id="login-code-help" class="hint">Paste a six-digit code or enter a recovery code.</p>
       <button type="submit" class="btn primary" id="login-btn">Verify</button>
       <button type="button" class="btn ghost" id="login-back">Back</button>
     </div>
@@ -34,7 +49,7 @@
 
 <div id="app-view" class="app hidden">
   <aside class="sidebar">
-    <div class="brand small"><span class="brand-mark">⛏</span> Bonghos</div>
+    <div class="brand small"><span class="brand-mark">B</span> Bonghos</div>
     <div id="server-picker" class="server-picker"></div>
     <nav id="nav"></nav>
     <div class="sidebar-foot">
