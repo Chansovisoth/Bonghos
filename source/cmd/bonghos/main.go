@@ -36,7 +36,7 @@ import (
 //go:embed all:webdist
 var webEmbed embed.FS
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 func main() {
 	app.Version = version

@@ -210,3 +210,99 @@ func TestRestoreRequiresExplicitConfirmation(t *testing.T) {
 		t.Errorf("restore with an unknown scope returned %d, want 400", status)
 	}
 }
+
+// A world-only restore must find the world the archive actually contains, not
+// whatever level-name the server happens to use now. Reading only the current
+// server.properties meant that renaming the world after a backup made the
+// restore match nothing and silently succeed while changing nothing.
+func TestWorldOnlyRestoreAfterLevelNameChanged(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	inst := env.newServerProject(t, "renamed-world")
+	dir := inst.AbsoluteDir(env.app.Home)
+
+	// Neither name is the Minecraft default, so a "world" fallback cannot
+	// accidentally rescue a restore that looks in the wrong place.
+	if err := os.WriteFile(filepath.Join(dir, "server.properties"),
+		[]byte("motd=Test\nlevel-name=alpha\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "alpha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "alpha", "level.dat"),
+		[]byte("ORIGINAL WORLD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "world")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The backup captures the world while it is called "alpha".
+	rec, err := env.app.RunBackup(context.Background(), inst, backup.TypeFull, "offline", "manual", 0)
+	if err != nil {
+		t.Fatalf("create backup: %v", err)
+	}
+
+	// Afterwards the operator renames the world to "beta" and it diverges.
+	if err := os.WriteFile(filepath.Join(dir, "server.properties"),
+		[]byte("motd=Test\nlevel-name=beta\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "alpha", "level.dat"),
+		[]byte("CHANGED WORLD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := env.newClient()
+	c.mustLogin("owner", "correct horse battery", secret)
+	status, body := c.do("POST", "/api/backups/"+rec.BackupID+"/restore",
+		map[string]any{"scope": "world_only", "confirm": true}, nil)
+	if status != 200 {
+		t.Fatalf("restore failed: %d %s", status, body)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "alpha", "level.dat"))
+	if err != nil {
+		t.Fatalf("archived world was not restored: %v", err)
+	}
+	if string(got) != "ORIGINAL WORLD" {
+		t.Errorf("world contains %q, want the archived contents", got)
+	}
+}
+
+// A scoped restore that matches nothing must report that rather than
+// returning success after changing no files.
+func TestScopedRestoreMatchingNothingReportsFailure(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	inst := env.newServerProject(t, "empty-scope")
+	dir := inst.AbsoluteDir(env.app.Home)
+
+	// Back up configuration only, then ask for a world-only restore of it.
+	rec, err := env.app.RunBackup(context.Background(), inst, backup.TypeConfig, "offline", "manual", 0)
+	if err != nil {
+		t.Fatalf("create backup: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "world", "level.dat"),
+		[]byte("CURRENT WORLD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := env.newClient()
+	c.mustLogin("owner", "correct horse battery", secret)
+	status, body := c.do("POST", "/api/backups/"+rec.BackupID+"/restore",
+		map[string]any{"scope": "world_only", "confirm": true}, nil)
+	if status == 200 {
+		t.Errorf("restore reported success despite matching nothing: %s", body)
+	}
+
+	// And it really did leave the current world alone.
+	got, err := os.ReadFile(filepath.Join(dir, "world", "level.dat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "CURRENT WORLD" {
+		t.Errorf("current world was modified: %q", got)
+	}
+}

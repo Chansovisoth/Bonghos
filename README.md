@@ -6,7 +6,7 @@
 
 - Repository: <https://github.com/Chansovisoth/Bonghos>
 - License: AGPL-3.0-only
-- Status: v0.1.0 — early, actively developed. See [Known limitations](#known-limitations).
+- Status: v0.1.1 — early, actively developed. See [Known limitations](#known-limitations).
 
 Bonghos imports, configures, runs, monitors, schedules, backs up, restores and manages
 Minecraft Java Edition modded servers directly on Linux — no Docker, no cloud account,
@@ -195,7 +195,7 @@ cd ~/bonghos-source
 ### From an extracted source archive
 
 ```bash
-cd ~/Downloads/Bonghos-0.1.0
+cd ~/Downloads/Bonghos-0.1.1
 chmod +x setup.sh
 ./setup.sh
 ```
@@ -428,7 +428,7 @@ Contributions welcome — see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.m
 
 ## Known limitations
 
-This is v0.1.0. Being honest about what is and is not proven:
+This is v0.1.1. Being honest about what is and is not proven:
 
 - **Covered by unit tests** (`source/internal/*/`): canonical path containment,
   archive-extraction safety, authenticated encryption, TOTP against the RFC 6238

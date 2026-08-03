@@ -776,7 +776,7 @@ function restoreBackup(b) {
     el("p", {}, `Restore ${b.backup_id} (${b.backup_type.replace(/_/g, " ")}) created ${fmtTime(b.created_at)}.`),
     el("label", { class: "field" }, el("span", {}, "Restore scope"), scopeSel),
     el("p", { class: "muted" },
-      "The server must be stopped. Bonghos takes an emergency backup of the current state before replacing anything, and the previous files are kept alongside as .bonghos-pre-restore until you remove them."),
+      "The server must be stopped. Bonghos takes a verified emergency backup of the current state first — that backup is how you undo this, and it appears in the list below. Files in the selected scope are then replaced."),
   ], [
     ["Cancel", "ghost", (c) => c()],
     ["Restore", "danger", async (c) => {

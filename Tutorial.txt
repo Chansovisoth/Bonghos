@@ -3,9 +3,9 @@
 ===============================================================================
 
  Official repository: https://github.com/Chansovisoth/Bonghos
- Bonghos version:     0.1.0
+ Bonghos version:     0.1.1
  Tutorial format:     1
- Last updated:        2026-08-02
+ Last updated:        2026-08-03
  License:             AGPL-3.0-only
 
 -------------------------------------------------------------------------------
@@ -212,8 +212,8 @@
  If you downloaded a source ZIP or tar archive instead of using Git:
 
      cd ~/Downloads
-     unzip Bonghos-0.1.0.zip          # or: tar -xf Bonghos-0.1.0.tar.gz
-     cd Bonghos-0.1.0
+     unzip Bonghos-0.1.1.zip          # or: tar -xf Bonghos-0.1.1.tar.gz
+     cd Bonghos-0.1.1
      chmod +x setup.sh
      ./setup.sh
 
@@ -1129,7 +1129,7 @@
 
      ~/bonghos/system/bin/bonghos export --include-secrets --output ...
 
-   In v0.1.0 this requires a typed confirmation but is not separately
+   In v0.1.1 this requires a typed confirmation but is not separately
    passphrase-encrypted. It produces an archive containing your accounts and
    local secret key — treat it like a password file.
 

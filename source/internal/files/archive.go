@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -22,6 +23,10 @@ import (
 type Limits struct {
 	MaxBytes int64 // total decompressed bytes
 	MaxFiles int64
+	// FreeSpaceReserve is how many bytes must remain free on the destination
+	// filesystem. Extraction stops before consuming it, so a large pack cannot
+	// fill the disk the running server depends on. Zero disables the check.
+	FreeSpaceReserve int64
 }
 
 var (
@@ -103,6 +108,35 @@ func safeEntryPath(dest, name string) (string, error) {
 
 // Extract unpacks archive at src into dest with full safety validation.
 // Format is auto-detected. progress (may be nil) receives decompressed bytes.
+// ErrDiskSpace reports that extraction would consume the configured reserve.
+var ErrDiskSpace = errors.New("not enough free disk space to extract this archive safely")
+
+// FreeSpace returns the bytes available to an unprivileged user on the
+// filesystem holding dir. A zero result means the check is unavailable.
+func FreeSpace(dir string) int64 {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0
+	}
+	return int64(st.Bavail) * int64(st.Bsize)
+}
+
+// checkSpace reports whether extracting `incoming` more bytes into dir would
+// eat into the reserve. Unavailable statistics never block extraction.
+func checkSpace(dir string, incoming int64, lim Limits) error {
+	if lim.FreeSpaceReserve <= 0 {
+		return nil
+	}
+	free := FreeSpace(dir)
+	if free == 0 {
+		return nil
+	}
+	if free < lim.FreeSpaceReserve+incoming {
+		return ErrDiskSpace
+	}
+	return nil
+}
+
 func Extract(src, dest string, lim Limits, progress func(bytes int64)) error {
 	format, err := DetectFormat(src)
 	if err != nil {
@@ -110,6 +144,13 @@ func Extract(src, dest string, lim Limits, progress func(bytes int64)) error {
 	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
+	}
+	// Check before starting: a compressed archive typically expands several
+	// times over, so its own size is a conservative lower bound.
+	if st, serr := os.Stat(src); serr == nil {
+		if err := checkSpace(dest, st.Size(), lim); err != nil {
+			return err
+		}
 	}
 	switch format {
 	case "zip":

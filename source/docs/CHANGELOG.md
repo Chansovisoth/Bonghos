@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.1] — 2026-08-03
+
 ### Fixed
 
 - Live updates never worked. The frontend sent `{"type": "subscribe"}` while the
@@ -54,6 +58,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contacts nothing, so the interface reveals no more than the API does.
 - Per-page WebSocket subscriptions that unsubscribe on navigation and
   re-subscribe after a reconnect.
+
+### Fixed after the v0.1.1 review
+
+- A world-only restore resolved the world directory from the *destination*
+  server.properties. If `level-name` changed after the backup was taken, the
+  restore looked for the new name, matched nothing in the archive and reported
+  success while changing nothing. The archive's own server.properties is now
+  authoritative, and a scoped restore that matches nothing fails loudly instead
+  of silently doing nothing.
+- URL downloads ignored `free_space_reserve_mb`: the option existed and the
+  downloader enforced it, but the handler never passed it through. Archive
+  extraction never checked free space at all. Both now respect the configured
+  reserve.
+- Source builds stamped `0.1.0` regardless of the tag, because the version is
+  declared separately in setup.sh, main.go and the Makefile. CI now fails if
+  those three disagree with each other, with the documentation, or with the tag
+  being released.
+- The restore dialog claimed the previous files were kept alongside as
+  `.bonghos-pre-restore`, but those are removed once each replacement succeeds.
+  The durable undo is the emergency backup, and the dialog now says so.
 
 ## [0.1.0] — 2026-08-02
 
@@ -221,5 +245,6 @@ Docker or any container runtime; billing or subscriptions; public registration;
 browser shell access; automatic router, firewall, port-forwarding or tunnel
 configuration; required telemetry.
 
-[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Chansovisoth/Bonghos/releases/tag/v0.1.0

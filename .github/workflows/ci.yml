@@ -182,6 +182,27 @@ jobs:
       # A frontend/backend key mismatch once silently disabled every live
       # update in a released build. Nothing caught it because the two sides are
       # written in different languages and no test spans them.
+      # A source build stamps its version from three separate places. When they
+      # drift, users who build from source get a binary that misreports itself.
+      - name: Version strings are consistent
+        run: |
+          setup_v=$(sed -n 's/^BONGHOS_VERSION="\(.*\)"$/\1/p' setup.sh)
+          main_v=$(sed -n 's/^var version = "\(.*\)"$/\1/p' source/cmd/bonghos/main.go)
+          make_v=$(sed -n 's/^VERSION *?= *\(.*\)$/\1/p' source/Makefile | tr -d ' ')
+          echo "setup.sh=$setup_v main.go=$main_v Makefile=$make_v"
+          if [ "$setup_v" != "$main_v" ] || [ "$setup_v" != "$make_v" ]; then
+            echo "version strings disagree"; exit 1
+          fi
+          grep -q "Bonghos version: *$setup_v" Tutorial.txt \
+            || { echo "Tutorial.txt does not state version $setup_v"; exit 1; }
+          grep -q "Status: v$setup_v" README.md \
+            || { echo "README.md does not state version $setup_v"; exit 1; }
+          # A tagged build must match the tag it is being released as.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            tag_v="${GITHUB_REF_NAME#v}"
+            [ "$tag_v" = "$setup_v" ] || { echo "tag $tag_v != source version $setup_v"; exit 1; }
+          fi
+
       - name: Frontend and backend agree on the WebSocket protocol
         run: |
           grep -q '"action": *"subscribe"\|action: "subscribe"' source/web/src/app.js \

@@ -396,16 +396,39 @@ func (m *Manager) Verify(backupID string) error {
 	return err
 }
 
+// worldNames returns every directory name that could hold the world being
+// restored. The archive's own server.properties is authoritative, because
+// level-name may have been changed since the backup was taken: reading only
+// the destination would look for the new name and silently restore nothing.
+// The destination name is included too, so a rename in either direction still
+// replaces the live world rather than leaving it beside a stale copy.
+func worldNames(stagingDir, destServerDir string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(n string) {
+		if n != "" && !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	add(minecraft.WorldDir(stagingDir)) // what the archive calls it
+	add(minecraft.WorldDir(destServerDir))
+	add("world") // the Minecraft default, in case neither file was readable
+	return out
+}
+
 // scopeWants reports whether a top-level entry belongs to the requested
-// restore scope.
-func scopeWants(scope, name, destServerDir string) bool {
+// restore scope. worlds lists the acceptable world directory names.
+func scopeWants(scope, name string, worlds []string) bool {
 	switch scope {
 	case ScopeWorld:
-		// The world directory itself plus the sibling dimension folders and
-		// player administration data that a world is meaningless without.
-		world := minecraft.WorldDir(destServerDir)
-		if name == world || strings.HasPrefix(name, world+"_") {
-			return true
+		// The world directory itself plus the sibling dimension folders
+		// (world_nether, world_the_end) and the player data a world is
+		// meaningless without.
+		for _, w := range worlds {
+			if name == w || strings.HasPrefix(name, w+"_") {
+				return true
+			}
 		}
 		switch name {
 		case "playerdata", "stats", "advancements", "usercache.json":
@@ -481,10 +504,13 @@ func (m *Manager) Restore(rec *Record, destServerDir string, scope string) error
 	if err != nil {
 		return err
 	}
+	worlds := worldNames(stagingDir, destServerDir)
+	restored := 0
 	for _, e := range entries {
-		if !scopeWants(scope, e.Name(), destServerDir) {
+		if !scopeWants(scope, e.Name(), worlds) {
 			continue
 		}
+		restored++
 		src := filepath.Join(stagingDir, e.Name())
 		dst := filepath.Join(destServerDir, e.Name())
 		// replace atomically where possible: move old aside, then rename in
@@ -499,7 +525,15 @@ func (m *Manager) Restore(rec *Record, destServerDir string, scope string) error
 			os.Rename(old, dst) // roll back this entry
 			return err
 		}
+		// The replacement succeeded, so the displaced copy is no longer needed.
+		// The durable safety net is the emergency pre-restore backup, not this
+		// sidecar directory.
 		os.RemoveAll(old)
+	}
+	// A scoped restore that matched nothing has quietly done nothing at all,
+	// which looks identical to success from the outside. Say so instead.
+	if restored == 0 {
+		return fmt.Errorf("nothing in this backup matched the %s scope; no files were changed", scope)
 	}
 	return nil
 }

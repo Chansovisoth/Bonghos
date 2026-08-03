@@ -189,6 +189,10 @@ func (a *App) handleImportURL(w http.ResponseWriter, r *http.Request) {
 	opts.AllowInsecureHTTP = a.Cfg.AllowInsecureHTTPURL
 	opts.TrustedHosts = a.Cfg.TrustedDownloadHosts
 	opts.MaxBytes = a.Cfg.MaxArchiveBytes
+	// Without this the downloader falls back to its own default and the
+	// operator's configured reserve is ignored, so a large pack can fill the
+	// filesystem the server itself needs.
+	opts.FreeSpaceReserve = a.Cfg.FreeSpaceReserveMB << 20
 	pu, err := download.ValidateURL(req.URL, opts)
 	if err != nil {
 		writeErr(w, 400, err)
@@ -452,8 +456,9 @@ func (a *App) installArchive(opID string, inst *instance.Instance, archivePath, 
 
 	a.Operations.SetStage(opID, "extracting", "Extracting archive")
 	limits := files.Limits{
-		MaxBytes: a.Cfg.MaxArchiveBytes,
-		MaxFiles: a.Cfg.MaxArchiveFiles,
+		MaxBytes:         a.Cfg.MaxArchiveBytes,
+		MaxFiles:         a.Cfg.MaxArchiveFiles,
+		FreeSpaceReserve: a.Cfg.FreeSpaceReserveMB << 20,
 	}
 	var extracted int64
 	lastProg := time.Now()

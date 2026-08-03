@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,5 +133,32 @@ func TestFindServerRoot(t *testing.T) {
 	}
 	if root != inner {
 		t.Errorf("FindServerRoot = %q, want %q", root, inner)
+	}
+}
+
+func TestExtractRespectsFreeSpaceReserve(t *testing.T) {
+	src := writeZip(t, map[string]string{"pack/run.sh": "#!/bin/sh\n"})
+	dest := t.TempDir()
+
+	// A reserve larger than the whole filesystem can never be satisfied, so
+	// extraction must refuse rather than filling the disk.
+	huge := Limits{MaxBytes: 1 << 20, MaxFiles: 100, FreeSpaceReserve: 1 << 62}
+	if err := Extract(src, dest, huge, nil); !errors.Is(err, ErrDiskSpace) {
+		t.Errorf("Extract with an unsatisfiable reserve returned %v, want ErrDiskSpace", err)
+	}
+
+	// A reserve of zero disables the check entirely.
+	if err := Extract(src, t.TempDir(), Limits{MaxBytes: 1 << 20, MaxFiles: 100}, nil); err != nil {
+		t.Errorf("Extract without a reserve failed: %v", err)
+	}
+}
+
+func TestFreeSpaceReportsSomethingForARealDirectory(t *testing.T) {
+	if got := FreeSpace(t.TempDir()); got <= 0 {
+		t.Errorf("FreeSpace returned %d for a real directory", got)
+	}
+	// An unavailable statistic must be reported as zero, never as an error.
+	if got := FreeSpace("/definitely/not/a/real/path"); got != 0 {
+		t.Errorf("FreeSpace on a missing path returned %d, want 0", got)
 	}
 }
