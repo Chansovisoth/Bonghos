@@ -291,11 +291,9 @@ const PAGES = [
   ["configuration", "Configuration", "server.configuration.manage"],
   ["backups", "Backups", "server.backups.view"],
   ["schedules", "Schedules", "server.schedules.manage"],
-  ["performance", "Performance", "server.view"],
   ["servers", "Servers", "server.view"],
   ["activity", "Activity", "server.configuration.manage"],
   ["users", "Users", "users.manage"],
-  ["host", "Host", "server.configuration.manage"],
 ];
 
 function buildNav() {
@@ -377,6 +375,16 @@ async function pageOverview(main) {
   renderStatusPill();
   const s = d.sample || {};
   const inst = d.instance;
+
+  // Health, host and trends live here together. Knowing whether the server is
+  // healthy should not require visiting three tabs.
+  let host = null, events = [], history = [];
+  try { host = await api("/host"); } catch {}
+  try { events = (await api("/events?limit=25")).events || []; } catch {}
+  try { history = (await api("/metrics?hours=1")).samples || []; } catch {}
+
+  const memUsed = (host && host.mem_total) ? host.mem_total - host.mem_avail : 0;
+
   main.innerHTML = "";
   main.append(
     el("div", { class: "toolbar" },
@@ -384,24 +392,72 @@ async function pageOverview(main) {
       renderStatusPillNode(),
       el("div", { class: "spacer" }),
       lifecycleButtons()),
+
+    // What is happening right now.
     el("div", { class: "grid cols-4" },
-      statCard("Uptime", fmtDur(s.uptime_seconds), ""),
-      statCard("Players online", s.online_players ?? 0, ""),
+      statCard("Uptime", fmtDur(s.uptime_seconds), s.java_pid ? "Java PID " + s.java_pid : "not running"),
+      statCard("Players online", (s.online_players ?? 0) + (s.max_players ? " / " + s.max_players : ""), ""),
       statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)"),
       statCard("CPU", (s.cpu_percent ?? 0).toFixed(1) + "%", "of one core = 100%")),
-    el("div", { class: "grid cols-3", style: "margin-top:16px" },
+
+    // Host health, previously a separate tab.
+    el("div", { class: "grid cols-4", style: "margin-top:16px" },
+      statCard("Host memory", host ? fmtBytes(memUsed) : "—",
+        host ? "of " + fmtBytes(host.mem_total) : ""),
       statCard("Disk free", fmtBytes(s.disk_free), "of " + fmtBytes(s.disk_total)),
-      statCard("Last backup", d.last_backup ? fmtTime(d.last_backup.created_at) : "None yet",
-        d.last_backup ? d.last_backup.backup_type : ""),
-      statCard("Next schedule", d.next_schedule_at ? fmtTime(d.next_schedule_at) : "None", "")),
-    inst ? el("div", { class: "card", style: "margin-top:16px" },
-      el("h3", {}, "Project"),
-      el("dl", { class: "kv" },
-        el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
-        el("dt", {}, "Port"), el("dd", {}, d.port || "25565"),
-        el("dt", {}, "Modloader"), el("dd", {}, inst.modloader || "unknown"),
-        el("dt", {}, "Startup script"), el("dd", { class: "mono" }, inst.startup_script || "not selected"),
-        el("dt", {}, "Restart policy"), el("dd", {}, inst.restart_policy || "never"))) : null);
+      statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute"),
+      statCard("Services", serviceSummary(d, host), "")),
+
+    // Trends, previously the Performance tab.
+    el("div", { class: "grid cols-2", style: "margin-top:16px" },
+      trendCard("CPU", history, (x) => x.cpu_percent, (v) => v.toFixed(0) + "%"),
+      trendCard("Process memory", history, (x) => x.rss_bytes, fmtBytes)),
+
+    el("div", { class: "grid cols-2", style: "margin-top:16px" },
+      // The timeline: what the server did, in its own words.
+      el("div", { class: "card" },
+        el("h3", {}, "Recent activity"),
+        events.length
+          ? el("ul", { class: "timeline" }, ...events.map(eventRow))
+          : el("p", { class: "muted" }, "Nothing recorded yet.")),
+
+      el("div", { class: "card" },
+        el("h3", {}, "Project"),
+        inst ? el("dl", { class: "kv" },
+          el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
+          el("dt", {}, "Port"), el("dd", {}, d.port || "25565"),
+          el("dt", {}, "Modloader"), el("dd", {}, inst.modloader || "unknown"),
+          el("dt", {}, "Startup script"), el("dd", { class: "mono" }, inst.startup_script || "not selected"),
+          el("dt", {}, "Restart policy"), el("dd", {}, inst.restart_policy || "never"),
+          el("dt", {}, "Autostart"), el("dd", {}, inst.autostart_enabled ? "enabled" : "disabled"),
+          el("dt", {}, "Last backup"), el("dd", {},
+            d.last_backup ? fmtTime(d.last_backup.created_at) : "none yet"),
+          el("dt", {}, "Next schedule"), el("dd", {},
+            d.next_schedule_at ? fmtTime(d.next_schedule_at) : "none"))
+          : el("p", { class: "muted" }, "No active project selected."))));
+}
+
+function serviceSummary(d, host) {
+  const mc = (d.state && d.state !== "stopped") ? "running" : "stopped";
+  const cp = (host && host.services && host.services.control_plane) || "active";
+  return cp === "active" ? "Panel ok · " + mc : cp + " · " + mc;
+}
+
+// eventRow renders one timeline entry, coloured by severity.
+function eventRow(e) {
+  return el("li", { class: "timeline-item sev-" + (e.severity || "info") },
+    el("span", { class: "timeline-time mono" }, fmtTime(e.occurred_at)),
+    el("span", { class: "timeline-msg" }, e.message || e.event));
+}
+
+// trendCard draws a small sparkline plus the latest value.
+function trendCard(title, samples, pick, fmt) {
+  const values = (samples || []).map(pick).filter((v) => typeof v === "number");
+  const latest = values.length ? values[values.length - 1] : 0;
+  return el("div", { class: "card" },
+    el("h3", {}, title),
+    el("div", { class: "stat" }, fmt(latest), el("small", {}, " last hour")),
+    values.length > 1 ? sparklineNode(values) : el("p", { class: "muted" }, "Collecting samples…"));
 }
 
 function statCard(title, value, sub) {
@@ -520,6 +576,13 @@ function playerActions(p) {
 // ----- files ----------------------------------------------------------------
 let filePath = "";
 async function pageFiles(main, path = filePath) {
+  // A deep link from elsewhere (for example the Configuration page naming the
+  // file that owns the JVM settings) opens that file straight away.
+  if (S.pendingFileOpen) {
+    const target = S.pendingFileOpen;
+    S.pendingFileOpen = null;
+    return openFileEditor(main, target);
+  }
   filePath = path;
   const entries = await api("/files?path=" + encodeURIComponent(path));
   main.innerHTML = "";
@@ -618,6 +681,42 @@ function deleteEntry(main, path, name) {
 }
 
 // ----- configuration --------------------------------------------------------
+// jvmSourceNote explains which file actually controls the memory settings and
+// offers a direct route to it. Some packs regenerate their argument file at
+// launch, so saying "detected in user_jvm_args.txt" without that context leads
+// people to edit a file whose contents are discarded on the next restart.
+function jvmSourceNote(jvm) {
+  if (!jvm || !jvm.source_file) {
+    return el("p", { class: "muted" }, "No JVM configuration detected.");
+  }
+  const where = jvm.variable
+    ? `${jvm.variable} in ${jvm.source_file}`
+    : jvm.source_file;
+
+  const openBtn = el("button", {
+    class: "btn ghost small",
+    title: "Open this file in the file editor",
+    onclick: () => openFileInEditor(jvm.source_file),
+  }, "Open " + jvm.source_file);
+
+  return el("div", { class: "jvm-source" },
+    el("p", { class: "muted" },
+      `Controlled by ${where} (${(jvm.source_kind || "").replace(/_/g, " ")})`,
+      jvm.editable ? "" : " — not safely editable here"),
+    jvm.note ? el("p", { class: "notice" }, jvm.note) : null,
+    can("server.files.manage") ? openBtn : null);
+}
+
+// openFileInEditor jumps to the Files page with the given path already open,
+// so the authoritative file is one click away from where it is named.
+function openFileInEditor(path) {
+  if (!can("server.files.manage")) {
+    return toast("You do not have permission to edit files", "err");
+  }
+  S.pendingFileOpen = path;
+  navigate("files");
+}
+
 async function pageConfiguration(main) {
   const d = await api("/configuration");
   const inst = d.instance;
@@ -662,7 +761,7 @@ async function pageConfiguration(main) {
     el("div", { class: "grid cols-2" },
       el("div", { class: "card" },
         el("h3", {}, "JVM memory"),
-        d.jvm ? el("p", { class: "muted" }, `Detected in ${d.jvm.source_file} (${d.jvm.source_kind})${d.jvm.editable ? "" : " — not safely editable here"}`) : el("p", { class: "muted" }, "No JVM configuration detected."),
+        jvmSourceNote(d.jvm),
         el("div", { class: "field-row" }, el("label", {}, "Minimum (-Xms)", xms)),
         el("div", { class: "field-row" }, el("label", {}, "Maximum (-Xmx)", xmx)),
         el("button", { class: "btn primary", onclick: async () => {
@@ -900,6 +999,32 @@ function drawCharts() {
   sparkline("#chart-mem", S.perf.map((s) => s.rss_bytes || 0), fmtBytes);
   sparkline("#chart-players", S.perf.map((s) => s.online_players || 0));
   sparkline("#chart-disk", S.perf.map((s) => s.disk_free || 0), fmtBytes);
+}
+
+// sparklineNode returns a standalone SVG element, for callers building a card
+// rather than filling a pre-existing container.
+function sparklineNode(values) {
+  const W = 320, H = 56, pad = 2;
+  const max = Math.max(...values, 1), min = Math.min(...values, 0);
+  const span = (max - min) || 1;
+  const pts = values.map((v, i) => {
+    const x = pad + (i / Math.max(1, values.length - 1)) * (W - pad * 2);
+    const y = H - pad - ((v - min) / span) * (H - pad * 2);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "sparkline");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("role", "img");
+  const line = document.createElementNS(ns, "polyline");
+  line.setAttribute("points", pts);
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", "currentColor");
+  line.setAttribute("stroke-width", "2");
+  svg.appendChild(line);
+  return svg;
 }
 
 function sparkline(sel, values, fmt = (v) => v.toFixed(1)) {

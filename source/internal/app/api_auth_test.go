@@ -256,3 +256,28 @@ func TestTOTPEnrolmentIsNotAudited(t *testing.T) {
 		}
 	}
 }
+
+// The Activity page failed with "no such column: created_at" because the query
+// and the schema disagreed. It compiled fine and only broke when a user opened
+// the tab, so it needs a test that actually hits the endpoint.
+func TestActivityEndpointMatchesTheSchema(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	c := env.newClient()
+	c.mustLogin("owner", "correct horse battery", secret)
+
+	// The login above writes an audit row, so there is something to return.
+	var rows []map[string]any
+	status, body := c.do("GET", "/api/activity", nil, &rows)
+	if status != 200 {
+		t.Fatalf("GET /api/activity returned %d: %s", status, body)
+	}
+	if len(rows) == 0 {
+		t.Fatal("no audit rows returned; logging in should have recorded one")
+	}
+	for _, key := range []string{"action", "username", "at"} {
+		if _, ok := rows[0][key]; !ok {
+			t.Errorf("audit row is missing %q: %v", key, rows[0])
+		}
+	}
+}

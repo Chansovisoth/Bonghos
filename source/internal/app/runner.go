@@ -105,6 +105,9 @@ func (r *Runner) Start(ctx context.Context) error {
 		}
 	}
 	r.app.Instances.TouchStarted(inst.ID)
+	r.app.resetPhases()
+	r.app.recordEvent(inst.ID, CatLifecycle, "starting", SevInfo,
+		"Starting "+inst.DisplayName, nil)
 	r.app.broadcastStatus()
 
 	// Wait briefly for the supervisor to come alive.
@@ -176,6 +179,13 @@ func (r *Runner) spawnDetachedSupervisor() error {
 }
 
 // Stop performs a graceful stop through the supervisor.
+// noteStopped records a clean stop once the process has actually exited.
+func (r *Runner) noteStopped(reason string) {
+	if inst, err := r.app.activeInstance(); err == nil {
+		r.app.recordEvent(inst.ID, CatLifecycle, "stopped", SevInfo, reason, nil)
+	}
+}
+
 func (r *Runner) Stop(ctx context.Context) error {
 	release, err := r.acquire("stop")
 	if err != nil {
@@ -260,6 +270,9 @@ func (r *Runner) startNoLock(ctx context.Context) error {
 		return err
 	}
 	r.app.Instances.TouchStarted(inst.ID)
+	r.app.resetPhases()
+	r.app.recordEvent(inst.ID, CatLifecycle, "starting", SevInfo,
+		"Starting "+inst.DisplayName, nil)
 	r.app.broadcastStatus()
 	go r.attachConsole()
 	return nil
@@ -286,12 +299,33 @@ func (r *Runner) ForceStop() error {
 	}
 	if inst, err := r.app.activeInstance(); err == nil {
 		r.app.Instances.TouchStopped(inst.ID)
+		r.app.recordEvent(inst.ID, CatLifecycle, "force_stopped", SevWarning,
+			"Force stopped; recent world changes may be lost", nil)
 	}
 	r.app.broadcastStatus()
 	return nil
 }
 
 // SendCommand forwards a Minecraft console command through the supervisor.
+// SendInternalCommand issues a bookkeeping command (player polling) whose echo
+// and reply are hidden from the console stream but still parsed and logged.
+func (r *Runner) SendInternalCommand(cmd string) error {
+	r.mu.Lock()
+	c := r.console
+	r.mu.Unlock()
+	if c != nil {
+		if err := c.SendInternal(cmd); err == nil {
+			return nil
+		}
+	}
+	nc, err := console.Dial(r.app.Home)
+	if err != nil {
+		return errors.New("server console is not available (is the server running?)")
+	}
+	defer nc.Close()
+	return nc.SendInternal(cmd)
+}
+
 func (r *Runner) SendCommand(cmd string) error {
 	r.mu.Lock()
 	c := r.console
@@ -412,6 +446,15 @@ func (a *App) handleConsoleLine(line string, live bool) {
 			"at":   time.Now().UTC().Format(time.RFC3339),
 		})
 	}
+	// Classify startup progress and common failures into timeline events, so
+	// the interface can say what is happening instead of leaving the operator
+	// to read raw console output and guess.
+	if live {
+		if event, msg, ok := startupPhase(line); ok {
+			a.notePhase(event, msg)
+		}
+	}
+
 	ev := minecraft.ParseLogLine(line)
 	if ev == nil {
 		return
@@ -428,6 +471,8 @@ func (a *App) handleConsoleLine(line string, live bool) {
 		a.reconcileOnline(instID, ev.Online)
 		a.Hub.Broadcast("players", "list", map[string]any{"players": ev.Online})
 	case "done":
+		a.recordEvent(instID, CatLifecycle, "ready", SevInfo,
+			"Server is ready and accepting players", nil)
 		a.Hub.Broadcast("overview", "started", nil)
 	}
 }

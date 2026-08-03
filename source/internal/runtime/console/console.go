@@ -24,7 +24,7 @@ const maxFrame = 64 * 1024
 
 // Message types exchanged on the socket.
 type Message struct {
-	Type    string   `json:"type"` // hello | history | line | status | command | error | ok
+	Type    string   `json:"type"` // hello | history | line | status | command | internal_command | error | ok
 	Line    string   `json:"line,omitempty"`
 	Lines   []string `json:"lines,omitempty"`
 	State   string   `json:"state,omitempty"`
@@ -48,6 +48,45 @@ func writeFrame(w io.Writer, m *Message) error {
 	}
 	_, err = w.Write(data)
 	return err
+}
+
+// historyChunkBytes keeps each replayed history frame well inside maxFrame,
+// leaving room for the JSON envelope around the lines.
+const historyChunkBytes = maxFrame / 2
+
+// writeHistory replays buffered console lines in frames small enough to send.
+// A modded server's boot output does not fit in one frame: sending it as a
+// single message meant the write failed and the client silently received no
+// backlog at all. An over-long individual line is truncated rather than
+// dropping its chunk, because slightly clipped output beats an empty console.
+func writeHistory(conn net.Conn, history []string) error {
+	if len(history) == 0 {
+		return writeFrame(conn, &Message{Type: "history", Lines: nil})
+	}
+	chunk := make([]string, 0, 64)
+	size := 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		err := writeFrame(conn, &Message{Type: "history", Lines: chunk})
+		chunk = chunk[:0]
+		size = 0
+		return err
+	}
+	for _, line := range history {
+		if len(line) > historyChunkBytes {
+			line = line[:historyChunkBytes-16] + " …[truncated]"
+		}
+		if size+len(line)+8 > historyChunkBytes {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		chunk = append(chunk, line)
+		size += len(line) + 8 // rough JSON overhead per element
+	}
+	return flush()
 }
 
 func readFrame(r io.Reader) (*Message, error) {
@@ -155,7 +194,13 @@ func (s *Server) handle(conn net.Conn) {
 	defer cancel()
 
 	writeFrame(conn, &Message{Type: "status", State: string(s.Sup.State())})
-	writeFrame(conn, &Message{Type: "history", Lines: history})
+
+	// History is replayed in chunks. A single frame is capped, and a modded
+	// server's boot output does not fit in one: sending it as one frame meant
+	// the write failed and the client silently received no backlog at all.
+	if err := writeHistory(conn, history); err != nil {
+		return
+	}
 
 	// reader: console command input (only Minecraft commands, never a shell)
 	done := make(chan struct{})
@@ -169,6 +214,13 @@ func (s *Server) handle(conn net.Conn) {
 			switch m.Type {
 			case "command":
 				if err := s.Sup.SendCommand(m.Command); err != nil {
+					writeFrame(conn, &Message{Type: "error", Error: err.Error()})
+				}
+			case "internal_command":
+				// Bonghos bookkeeping (player polling). The supervisor only
+				// hides commands on its own closed list, so this cannot be
+				// used to run something invisibly.
+				if err := s.Sup.SendInternalCommand(m.Command); err != nil {
 					writeFrame(conn, &Message{Type: "error", Error: err.Error()})
 				}
 			case "control":
@@ -250,6 +302,12 @@ func (c *Client) Control(verb string) error {
 
 func (c *Client) Send(cmd string) error {
 	return writeFrame(c.conn, &Message{Type: "command", Command: cmd})
+}
+
+// SendInternal issues a Bonghos bookkeeping command whose echo and reply are
+// kept out of the operator's console.
+func (c *Client) SendInternal(cmd string) error {
+	return writeFrame(c.conn, &Message{Type: "internal_command", Command: cmd})
 }
 
 // Interactive attaches stdin/stdout of the current terminal to the console.

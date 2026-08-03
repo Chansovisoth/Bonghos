@@ -115,6 +115,10 @@ func (a *App) routes() http.Handler {
 
 	// --- activity / host ----------------------------------------------------
 	mux.HandleFunc("GET /api/activity", a.requirePerm(authorization.PermConfigManage, a.handleActivity))
+	// The server's own timeline. Unlike the audit trail this is what the
+	// server did rather than what a person did, so anyone who can see the
+	// dashboard can see it.
+	mux.HandleFunc("GET /api/events", a.requirePerm(authorization.PermServerView, a.handleEvents))
 	mux.HandleFunc("GET /api/host", a.requirePerm(authorization.PermConfigManage, a.handleHost))
 	mux.HandleFunc("GET /api/version", a.handleVersion)
 
@@ -795,9 +799,31 @@ func (a *App) handleVersion(w http.ResponseWriter, r *http.Request) {
 // activity
 // ---------------------------------------------------------------------------
 
+// handleEvents returns the recent server timeline: starting, loading mods,
+// ready, crashed, restarted, backups. It answers "what is happening now" and
+// "what happened recently" without the operator reading journalctl.
+func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
+	}
+	var instID int64
+	if inst, err := a.activeInstance(); err == nil {
+		instID = inst.ID
+	}
+	events, err := a.listEvents(instID, limit)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"events": events})
+}
+
 func (a *App) handleActivity(w http.ResponseWriter, r *http.Request) {
 	limit := 100
-	rows, err := a.DB.Query(`SELECT id, user_id, username, action, target, detail, remote_addr, created_at
+	rows, err := a.DB.Query(`SELECT id, user_id, username, action, target, detail, remote_addr, occurred_at
 		FROM audit_log ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		writeErr(w, 500, err)

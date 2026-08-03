@@ -210,7 +210,7 @@ func cmdSupervisor(home string) error {
 	}
 
 	var instID int64
-	if err := db.QueryRow(`SELECT active_instance_id FROM app_state WHERE id=1`).Scan(&instID); err != nil || instID == 0 {
+	if err := db.QueryRow(`SELECT instance_id FROM active_instance WHERE id=1`).Scan(&instID); err != nil || instID == 0 {
 		return fmt.Errorf("no active server project selected")
 	}
 	var slug, relDir, script, javaSel, restartPolicy string

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (reported from a live modded server)
+
+- The supervisor looked up its active project in an `app_state` table that does
+  not exist in the schema, so it could not find the project to run. A new test
+  now prepares every SQL statement in the tree against a migrated database, so
+  this whole class of drift fails at `go test` rather than in front of a user.
+- The Activity page failed with `no such column: created_at`; the column is
+  `occurred_at`. Caught by the same test, plus an API test for the endpoint.
+- Console history never replayed. History was bounded by lines (500) while the
+  frame limit is bytes (64 KiB), so a modded boot overflowed one frame and the
+  write error was ignored, leaving connecting clients with no backlog at all.
+  History is now bounded by bytes as well as lines and replayed in chunks.
+- Console output carried raw PTY escape sequences into the browser and the
+  stored history. They are now stripped, including carriage-return overwrites
+  from progress bars; Minecraft colour codes are preserved and the raw log file
+  keeps everything.
+- JVM detection treated a generated `user_jvm_args.txt` as authoritative for
+  ServerPackCreator packs, so edits were discarded when the pack regenerated it
+  at launch. Detection now recognises a script that regenerates its argument
+  file and uses the variable that actually owns the settings.
+- `-Xms(\S+)` swallowed the closing quote in `JAVA_ARGS="-Xmx4G -Xms4G"`,
+  corrupting the assignment when memory was saved.
+- `UpdateJVMArgFile` applied the second substitution to the original line,
+  discarding the first, so with both values on one line the Xms change was
+  silently lost.
+- CPU samples could record about 1.8e19 when the process tick counter went
+  backwards. The calculation now guards counter resets, PID reuse, unreadable
+  `/proc`, and NaN, and clamps to the available cores.
+- Player polling issued `list` every twelve seconds into the operator's
+  console. Bookkeeping commands are now suppressed from the console stream
+  while still being parsed and logged. The suppressible list is closed, so
+  nothing can be run invisibly.
+
 ### Added
 
 - TOTP enrolment now shows a scannable QR code: block characters in the
@@ -17,6 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   account creation. The QR is generated server-side, so the browser needs no
   JavaScript QR library and enrolment keeps working offline. The secret and URI
   are still never written to the audit trail or application logs.
+- A durable server event timeline (`server_events`, `GET /api/events`)
+  recording starting, startup progress, ready, stop, force stop, crashes,
+  backups and restores, plus recognised failures such as an unaccepted EULA, a
+  port already in use, the wrong Java version or too large a heap. Startup
+  phases are recorded once per run rather than once per matching log line.
+- Overview is now the single live dashboard: server state, Java PID, uptime,
+  CPU, process and host memory, disk, load, players, service status, CPU and
+  memory trends, and the recent timeline. Host and Performance are demoted to
+  detail views and no longer clutter the navigation.
+- The Configuration page names the file that actually controls the JVM
+  settings, explains when a pack regenerates its argument file, and links
+  straight to that file in the editor.
 - Vendored `rsc.io/qr` (BSD-3-Clause) under `source/third_party/qr`, consistent
   with the other vendored dependencies, so builds stay offline-reproducible.
 
