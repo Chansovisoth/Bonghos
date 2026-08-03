@@ -703,6 +703,13 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, err)
 		return
 	}
+	admin := minecraft.ReadAdminFiles(inst.AbsoluteDir(a.Home))
+	opNames := make(map[string]bool, len(admin.Ops))
+	opUUIDs := make(map[string]bool, len(admin.Ops))
+	for _, op := range admin.Ops {
+		opNames[strings.ToLower(op.Name)] = true
+		opUUIDs[strings.ToLower(strings.ReplaceAll(op.UUID, "-", ""))] = true
+	}
 	rows, err := a.DB.Query(`SELECT username, uuid, is_online, first_seen_at, last_seen_at,
 		last_joined_at, last_left_at, observed_playtime_seconds, current_session_started_at
 		FROM players WHERE instance_id=? ORDER BY is_online DESC, last_seen_at DESC`, inst.ID)
@@ -715,6 +722,7 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		Username         string `json:"username"`
 		UUID             string `json:"uuid,omitempty"`
 		Online           bool   `json:"online"`
+		OP               bool   `json:"op"`
 		FirstSeenAt      string `json:"first_seen_at"`
 		LastSeenAt       string `json:"last_seen_at"`
 		LastJoinedAt     string `json:"last_joined_at,omitempty"`
@@ -735,6 +743,8 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		if uuid != nil {
 			p.UUID = *uuid
 		}
+		p.OP = opNames[strings.ToLower(p.Username)] ||
+			opUUIDs[strings.ToLower(strings.ReplaceAll(p.UUID, "-", ""))]
 		if joined != nil {
 			p.LastJoinedAt = *joined
 		}

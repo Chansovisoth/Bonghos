@@ -10,6 +10,17 @@ The default radius is `0`. Buttons, inputs, cards, panels, dialogs, tables, tabs
 
 Avoid nested cards. Prefer flat regions, hairline dividers, tables, grids, clear labels, and alignment.
 
+## Spacing
+
+Spacing follows Material 3's 4px baseline grid while preserving Bonghos's dense operator-interface character. Use the named `--space-*` tokens in `source/web/src/style.css` instead of one-off pixel values.
+
+- `4px` and `8px` for tight relationships, icons, labels, and compact controls.
+- `12px` and `16px` for component padding, control groups, cards, tables, and grids.
+- `24px` and `32px` for sections, dialogs, page edges, and major layout separation.
+- Page gutters adapt from `32px` on expanded layouts to `24px` on medium layouts and `16px` on compact layouts.
+
+Keep spacing intentional and restrained. Material 3 supplies the rhythm; Bonghos's square shapes, flat regions, typography, and operational density remain authoritative.
+
 ## Color Tokens
 
 The implementation uses semantic OKLCH CSS tokens in `source/web/src/style.css`.
@@ -29,11 +40,13 @@ Do not use purple-to-blue gradients, generic cyan, glassmorphism, glow effects, 
 
 Preferred font stacks are defined as tokens:
 
-- Display: `Alumni Sans`, then condensed/system fallbacks.
+- Page and modal titles: the vendored `Projekt Blackbird v2` OpenType font, displayed in uppercase.
+- Bonghos logo: the vendored variable `Space Grotesk` font, displayed as the single-color `>BONGHOS` wordmark with its pixel symbol on the right.
+- Other display text: `Alumni Sans`, then condensed/system fallbacks.
 - Interface: `Albert Sans`, then system UI fallbacks.
 - Technical: `JetBrains Mono`, then system monospace fallbacks.
 
-No font files are currently vendored. This preserves the offline, dependency-free build. If Bonghos later vendors Alumni Sans, Albert Sans, or JetBrains Mono, place the assets under the embedded frontend source and document their source/license here.
+Projekt Blackbird is stored at `source/web/src/projekt-blackbird-v2.otf` so it remains available in offline, dependency-free builds. Its source and license statement are recorded in `source/web/FONT-LICENSES.md`. If Bonghos later vendors Alumni Sans, Albert Sans, or JetBrains Mono, place the assets under the embedded frontend source and document their source/license there.
 
 Use tabular numerals for metrics, timestamps, memory, storage, players, ports, JVM values, and technical metadata.
 
@@ -51,7 +64,7 @@ Core primitives live in vanilla CSS classes and small JavaScript helpers:
 - `status-label`, `status-square`, and `tag` for state.
 - `card`, `metric`, `table-wrap`, `kv`, `notice`, `alert`, `toast`, `modal`, `dropzone`, `progress`, `console-shell`, `console`, `breadcrumb`, `editor`, and `theme-choice`.
 
-Buttons remain text-first in this dependency-free build because no icon library is shipped. Do not add decorative icon tiles.
+Navigation and familiar button commands use a focused, vendored subset of Solar linear icons through the shared `solarIcon` helper. Icons support labels rather than replacing them, and decorative icon tiles remain out of scope. Source and attribution are recorded in `source/web/ICON-LICENSES.md`.
 
 ## Page Patterns
 

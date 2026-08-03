@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -48,6 +49,9 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/servers/{id}", a.requirePerm(authorization.PermConfigManage, a.handleServerUpdate))
 	mux.HandleFunc("DELETE /api/servers/{id}", a.requirePerm(authorization.PermImportManage, a.handleServerDelete))
 	mux.HandleFunc("POST /api/servers/{id}/select", a.requirePerm(authorization.PermConfigManage, a.handleServerSelect))
+	mux.HandleFunc("POST /api/servers/{id}/duplicate", a.requirePerm(authorization.PermImportManage, a.handleServerDuplicate))
+	mux.HandleFunc("POST /api/servers/{id}/world/reset", a.requirePerm(authorization.PermConfigManage, a.handleWorldReset))
+	mux.HandleFunc("GET /api/servers/{id}/world.zip", a.requirePerm(authorization.PermFilesManage, a.handleWorldDownload))
 	mux.HandleFunc("GET /api/servers/{id}/icon", a.requireAuth(a.handleIconGet))
 	mux.HandleFunc("POST /api/servers/{id}/icon", a.requirePerm(authorization.PermIconManage, a.handleIconUpload))
 	mux.HandleFunc("DELETE /api/servers/{id}/icon", a.requirePerm(authorization.PermIconManage, a.handleIconDelete))
@@ -708,6 +712,9 @@ func (a *App) handleCommand(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 	st, ps := a.Runner.State()
 	out := map[string]any{"state": st, "version": Version}
+	if ip := localLANIPv4(a.Cfg.BindAddress); ip != "" {
+		out["lan_ip"] = ip
+	}
 	if ps != nil {
 		out["supervisor"] = ps
 	}
@@ -745,6 +752,54 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, out)
+}
+
+func localLANIPv4(bindAddress string) string {
+	if ip := net.ParseIP(bindAddress); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return ipv4.String()
+		}
+	}
+	if conn, err := net.DialTimeout("udp", "8.8.8.8:80", 100*time.Millisecond); err == nil {
+		defer conn.Close()
+		if address, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+			if ipv4 := address.IP.To4(); ipv4 != nil && !ipv4.IsLoopback() && !ipv4.IsUnspecified() {
+				return ipv4.String()
+			}
+		}
+	}
+
+	var fallback string
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ip, _, err := net.ParseCIDR(address.String())
+			if err != nil || ip.IsLoopback() {
+				continue
+			}
+			ipv4 := ip.To4()
+			if ipv4 == nil || ipv4.IsLinkLocalUnicast() {
+				continue
+			}
+			if ipv4.IsPrivate() {
+				return ipv4.String()
+			}
+			if fallback == "" {
+				fallback = ipv4.String()
+			}
+		}
+	}
+	return fallback
 }
 
 func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {

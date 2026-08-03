@@ -5,6 +5,147 @@
 // tiny helpers
 // ---------------------------------------------------------------------------
 const $ = (sel, root = document) => root.querySelector(sel);
+
+let solarIconData = {};
+const INLINE_SOLAR_ICONS = {
+  "alt-arrow-left-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m15 5l-6 7l6 7"/>',
+  },
+  "alt-arrow-right-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m9 5l6 7l-6 7"/>',
+  },
+};
+const BUTTON_ICONS = {
+  "Activate": "check-circle-linear",
+  "Back": "undo-left-linear",
+  "Ban": "lock-keyhole-linear",
+  "Cancel": "close-circle-linear",
+  "Choose Archive": "folder-open-linear",
+  "Clear view": "trash-bin-trash-linear",
+  "Continue": "play-linear",
+  "Copy visible": "copy-linear",
+  "Deop": "key-linear",
+  "Disable": "close-circle-linear",
+  "Discard": "undo-left-linear",
+  "Download world": "download-linear",
+  "Duplicate": "copy-linear",
+  "Enable": "check-circle-linear",
+  "Force stop": "danger-triangle-linear",
+  "Generate authenticator secret": "key-linear",
+  "Invite user": "add-circle-linear",
+  "Kick": "close-circle-linear",
+  "Make active": "check-circle-linear",
+  "Op": "key-linear",
+  "Pause": "pause-linear",
+  "Pause autoscroll": "pause-linear",
+  "Refresh": "refresh-linear",
+  "Restart": "restart-linear",
+  "Resume": "play-linear",
+  "Reset world": "refresh-linear",
+  "Resume autoscroll": "play-linear",
+  "Revoke sessions": "logout-2-linear",
+  "Review & accept": "shield-check-linear",
+  "Role": "key-linear",
+  "Run now": "play-linear",
+  "Save changes": "diskette-linear",
+  "Servers": "server-square-linear",
+  "Sign out": "logout-2-linear",
+  "Start": "play-linear",
+  "Stop": "stop-linear",
+  "Verify": "shield-check-linear",
+  "list": "users-group-rounded-linear",
+  "save-all": "diskette-linear",
+};
+
+function buttonIconName(label) {
+  if (BUTTON_ICONS[label]) return BUTTON_ICONS[label];
+  if (/^Save\b/.test(label)) return "diskette-linear";
+  if (/^(Delete|Remove|Clear)\b/.test(label)) return "trash-bin-trash-linear";
+  if (/^(New|Create|Add)\b/.test(label)) return "add-circle-linear";
+  if (/^(Upload|Import)\b/.test(label)) return "upload-linear";
+  if (/^Download\b/.test(label)) return "download-linear";
+  if (/^Open\b/.test(label)) return "folder-open-linear";
+  if (/^Copy\b/.test(label)) return "copy-linear";
+  if (/^Edit\b/.test(label)) return "pen-new-square-linear";
+  if (/^Restore\b/.test(label)) return "archive-down-minimlistic-linear";
+  if (/^(Protect|Accept)\b/.test(label)) return "shield-check-linear";
+  if (/^Unprotect\b/.test(label)) return "shield-keyhole-linear";
+  if (/^Send\b/.test(label)) return "send-square-linear";
+  if (/^Rename\b/.test(label)) return "pen-new-square-linear";
+  return "";
+}
+
+function hydrateSolarIcon(svg) {
+  const data = solarIconData[svg.dataset.solarIcon] || INLINE_SOLAR_ICONS[svg.dataset.solarIcon];
+  if (data) svg.innerHTML = data.body;
+}
+
+function solarIcon(name, className = "") {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon" + (className ? " " + className : ""));
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.dataset.solarIcon = name;
+  hydrateSolarIcon(svg);
+  return svg;
+}
+
+let lifecycleLoadingIconId = 0;
+function lifecycleLoadingIcon() {
+  const id = `lifecycle-loading-${++lifecycleLoadingIconId}`;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon lifecycle-loading-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.innerHTML = `
+    <rect width="10" height="10" x="1" y="1" fill="currentColor" rx="1">
+      <animate id="${id}-a" fill="freeze" attributeName="x" begin="0;${id}-l.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-d" fill="freeze" attributeName="y" begin="${id}-c.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-g" fill="freeze" attributeName="x" begin="${id}-f.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-j" fill="freeze" attributeName="y" begin="${id}-i.end" dur="0.2s" values="13;1"/>
+    </rect>
+    <rect width="10" height="10" x="1" y="13" fill="currentColor" rx="1">
+      <animate id="${id}-b" fill="freeze" attributeName="y" begin="${id}-a.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-e" fill="freeze" attributeName="x" begin="${id}-d.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-h" fill="freeze" attributeName="y" begin="${id}-g.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-k" fill="freeze" attributeName="x" begin="${id}-j.end" dur="0.2s" values="13;1"/>
+    </rect>
+    <rect width="10" height="10" x="13" y="13" fill="currentColor" rx="1">
+      <animate id="${id}-c" fill="freeze" attributeName="x" begin="${id}-b.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-f" fill="freeze" attributeName="y" begin="${id}-e.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-i" fill="freeze" attributeName="x" begin="${id}-h.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-l" fill="freeze" attributeName="y" begin="${id}-k.end" dur="0.2s" values="1;13"/>
+    </rect>`;
+  return svg;
+}
+
+function decorateButton(button) {
+  if (button.querySelector(":scope > .icon")) return;
+  const name = buttonIconName(button.textContent.trim());
+  if (name) button.prepend(solarIcon(name));
+}
+
+function setButtonLabel(button, label) {
+  const textNode = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.nodeValue.trim());
+  if (textNode) textNode.nodeValue = label;
+  else button.append(document.createTextNode(label));
+}
+
+async function loadSolarIcons() {
+  document.querySelectorAll("button").forEach(decorateButton);
+  try {
+    const response = await fetch("/solar-icons.json", { credentials: "same-origin" });
+    if (!response.ok) throw new Error("icon asset returned " + response.status);
+    const collection = await response.json();
+    solarIconData = collection.icons || {};
+    document.querySelectorAll(".icon[data-solar-icon]").forEach(hydrateSolarIcon);
+  } catch (error) {
+    console.warn("Solar icons unavailable:", error);
+  }
+}
+
 const el = (tag, attrs = {}, ...children) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -16,8 +157,10 @@ const el = (tag, attrs = {}, ...children) => {
     if (c === null || c === undefined) continue;
     n.append(c.nodeType ? c : document.createTextNode(c));
   }
+  if (tag === "button") decorateButton(n);
   return n;
 };
+loadSolarIcons();
 const esc = (s) => String(s ?? "");
 const fmtBytes = (b) => {
   if (b === null || b === undefined || isNaN(b)) return "—";
@@ -42,18 +185,37 @@ function toast(msg, kind = "") {
   setTimeout(() => t.remove(), 6000);
 }
 
+let modalRestoreFocus = null;
+
+function closeActiveModal() {
+  const host = $("#modal-host");
+  if (!host || !host.firstElementChild) return false;
+  host.innerHTML = "";
+  const restoreFocus = modalRestoreFocus;
+  modalRestoreFocus = null;
+  if (restoreFocus && restoreFocus.isConnected) restoreFocus.focus();
+  return true;
+}
+
 function modal(title, bodyNodes, actions) {
   const host = $("#modal-host");
+  modalRestoreFocus = document.activeElement;
   host.innerHTML = "";
-  const close = () => (host.innerHTML = "");
+  const close = closeActiveModal;
   const m = el("div", { class: "overlay", onclick: (e) => { if (e.target === m) close(); } },
     el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": title },
       el("h2", {}, title),
       ...bodyNodes,
       el("div", { class: "actions" },
-        ...actions.map(([label, cls, fn]) =>
-          el("button", { class: "btn " + cls, onclick: () => fn(close) }, label)))));
+        ...actions.map(([label, cls, fn]) => {
+          const bottomAction = /^(Cancel|Discard)$/i.test(label);
+          return el("button", {
+            class: "btn " + cls + (bottomAction ? " modal-bottom-action" : ""),
+            onclick: () => fn(close),
+          }, label);
+        }))));
   host.append(m);
+  requestAnimationFrame(() => m.querySelector("input, select, textarea, button")?.focus());
   return close;
 }
 
@@ -105,8 +267,8 @@ const DEMO_PERMS = [
 ];
 const DEMO_ME = { id: 1, username: "demo-owner", role: "owner", permissions: DEMO_PERMS };
 const DEMO_SERVERS = [
-  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", modloader: "forge", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true },
-  { id: 2, slug: "creative-lab", display_name: "Creative Lab", modloader: "fabric", source_type: "archive-upload", external_directory: false },
+  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "forge", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, demo_icon: "demo-server-bio1.png" },
+  { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", source_type: "archive-upload", external_directory: false, demo_icon: "demo-server-creative-lab.png" },
 ];
 const DEMO_CONSOLE = [
   "[19:27:36] [Server thread/INFO]: Starting minecraft server version 1.20.1",
@@ -143,6 +305,18 @@ async function demoApi(path, opts = {}) {
       const name = (opts.json && opts.json.name) || "server";
       return { slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server" };
     }
+    const duplicateMatch = clean.match(/^\/servers\/(\d+)\/duplicate$/);
+    if (duplicateMatch) {
+      const source = DEMO_SERVERS.find((server) => server.id === Number(duplicateMatch[1]));
+      const displayName = (opts.json && opts.json.display_name) || ((source && source.display_name) || "Server") + " Copy";
+      const slugBase = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server-copy";
+      const clone = { ...source, id: Math.max(...DEMO_SERVERS.map((server) => server.id)) + 1, display_name: displayName, slug: slugBase, autostart_enabled: false };
+      DEMO_SERVERS.push(clone);
+      return { operation_id: "demo-duplicate", server: clone };
+    }
+    if (/^\/servers\/\d+\/world\/reset$/.test(clean)) {
+      return { ok: true, backup_id: "demo-pre-reset-world" };
+    }
     return { ok: true };
   }
   switch (clean) {
@@ -156,6 +330,7 @@ async function demoApi(path, opts = {}) {
       version: "0.1.1-demo",
       instance: DEMO_SERVERS[0],
       motd: "A precise Bonghos local demo",
+      lan_ip: "192.168.1.42",
       port: "25565",
       max_players: "20",
       last_backup: { created_at: new Date(Date.now() - 5 * 3600000).toISOString() },
@@ -177,14 +352,21 @@ async function demoApi(path, opts = {}) {
     ] };
     case "/metrics": return DEMO_METRICS;
     case "/players": return { players: [
-      { username: "Steve", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
+      { username: "iKlaude", online: true, op: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
       { username: "Alex", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 3922 },
-      { username: "Long_Name_With_Underscores", online: false, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 18422 },
+      { username: "Long_Name_With_Underscores", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 18422 },
+      { username: "OfflineMiner", online: false, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 7521 },
     ] };
     case "/files": return [
       { name: "world", is_dir: true, size: 0, mod_time: new Date(Date.now() - 3600000).toISOString() },
+      { name: "mods", is_dir: true, size: 0, mod_time: new Date(Date.now() - 4200000).toISOString() },
+      { name: "server-icon.png", is_dir: false, size: 12175, mod_time: new Date(Date.now() - 4800000).toISOString() },
       { name: "server.properties", is_dir: false, size: 914, mod_time: new Date(Date.now() - 7200000).toISOString() },
       { name: "user_jvm_args.txt", is_dir: false, size: 72, mod_time: new Date(Date.now() - 5400000).toISOString() },
+      { name: "eula.txt", is_dir: false, size: 9, mod_time: new Date(Date.now() - 8200000).toISOString() },
+      { name: "ops.json", is_dir: false, size: 328, mod_time: new Date(Date.now() - 9200000).toISOString() },
+      { name: "forge-1.20.1-47.3.0.jar", is_dir: false, size: 8427356, mod_time: new Date(Date.now() - 10200000).toISOString() },
+      { name: "run.sh", is_dir: false, size: 124, mod_time: new Date(Date.now() - 11200000).toISOString() },
     ];
     case "/files/content": return { content: "motd=A precise Bonghos local demo\nserver-port=25565\nmax-players=20\n" };
     case "/configuration": return {
@@ -247,6 +429,9 @@ const S = {
   status: { state: "stopped" },
   ws: null,
   page: "overview",
+  overviewReturn: false,
+  lifecyclePending: null,
+  onlinePlayerCount: null,
   consoleLines: [],
   consolePaused: false,
   consoleSearch: "",
@@ -329,13 +514,16 @@ function handleEvent(m) {
     appendConsoleLine(data.line);
   } else if (type === "status") {
     S.status = data || S.status;
+    const lifecycleSettled = S.lifecyclePending && S.status.state === S.lifecyclePending.target;
+    if (lifecycleSettled) S.lifecyclePending = null;
     renderStatusPill();
-    if (S.page === "overview") renderPage();
+    if (S.page === "overview" || (lifecycleSettled && S.page === "console")) renderPage();
   } else if (topic === "performance" && type === "sample") {
     S.perf.push(data);
     if (S.perf.length > 360) S.perf.shift();
     if (S.page === "performance" || S.page === "overview") updateLiveStats(data);
   } else if (topic === "players") {
+    refreshPlayerCount();
     if (S.page === "players" || S.page === "overview") renderPage();
   } else if (topic === "servers" && (type === "operation" || type === "installed")) {
     updateOperation(data, type);
@@ -351,7 +539,33 @@ function handleEvent(m) {
 // ---------------------------------------------------------------------------
 // auth flow
 // ---------------------------------------------------------------------------
+const mobileNavQuery = window.matchMedia("(max-width: 980px)");
+const sidebarToggle = $("#sidebar-toggle");
+sidebarToggle.append(solarIcon("hamburger-menu-linear"));
+
+function setSidebarOpen(open) {
+  const app = $("#app-view");
+  const next = !!open && mobileNavQuery.matches;
+  app.classList.toggle("sidebar-open", next);
+  document.body.classList.toggle("mobile-nav-open", next);
+  sidebarToggle.setAttribute("aria-expanded", String(next));
+  sidebarToggle.setAttribute("aria-label", next ? "Close navigation" : "Open navigation");
+}
+
+function closeMobileSidebar() {
+  if (!$("#app-view").classList.contains("sidebar-open")) return false;
+  setSidebarOpen(false);
+  sidebarToggle.focus();
+  return true;
+}
+
+sidebarToggle.addEventListener("click", () =>
+  setSidebarOpen(!$("#app-view").classList.contains("sidebar-open")));
+$("#sidebar-scrim").addEventListener("click", closeMobileSidebar);
+mobileNavQuery.addEventListener("change", (event) => { if (!event.matches) setSidebarOpen(false); });
+
 function showLogin() {
+  setSidebarOpen(false);
   S.me = null;
   if (S.ws) try { S.ws.close(); } catch {}
   $("#app-view").classList.add("hidden");
@@ -474,28 +688,29 @@ function enterApp() {
   $("#app-view").classList.remove("hidden");
   $("#whoami").textContent = `${S.me.username} · ${S.me.role}`;
   buildNav();
+  refreshPlayerCount();
   connectWS();
-  refreshServers().then(() => navigate(S.page));
+  refreshServers().then(() => navigate(hashPage() || S.page, { replaceHash: true }));
 }
 
 // ---------------------------------------------------------------------------
 // navigation
 // ---------------------------------------------------------------------------
 const PAGES = [
-  { section: "Operate", id: "overview", label: "Overview", icon: "01", perm: "server.view" },
-  { section: "Operate", id: "console", label: "Console", icon: ">", perm: "server.console.view" },
-  { section: "Operate", id: "performance", label: "Performance", icon: "%", perm: "server.view" },
-  { section: "Operate", id: "players", label: "Players", icon: "P", perm: "server.players.view" },
-  { section: "Manage", id: "servers", label: "Servers", icon: "S", perm: "server.view" },
-  { section: "Manage", id: "files", label: "Files", icon: "F", perm: "server.files.manage" },
-  { section: "Manage", id: "configuration", label: "Configuration", icon: "C", perm: "server.configuration.manage" },
-  { section: "Manage", id: "backups", label: "Backups", icon: "B", perm: "server.backups.view" },
-  { section: "Manage", id: "schedules", label: "Schedules", icon: "T", perm: "server.schedules.manage" },
-  { section: "System", id: "activity", label: "Activity", icon: "A", perm: "server.configuration.manage" },
-  { section: "System", id: "users", label: "Users", icon: "U", perm: "users.manage" },
-  { section: "System", id: "security", label: "Security", icon: "!", perm: "users.manage" },
-  { section: "System", id: "host", label: "Host", icon: "H", perm: "server.configuration.manage" },
-  { section: "System", id: "settings", label: "Settings", icon: "*", perm: "server.view" },
+  { section: "Operate", id: "overview", label: "Overview", icon: "home-2-linear", perm: "server.view" },
+  { section: "Operate", id: "console", label: "Console", icon: "command-linear", perm: "server.console.view" },
+  { section: "Operate", id: "performance", label: "Performance", icon: "chart-2-linear", perm: "server.view" },
+  { section: "Operate", id: "players", label: "Players", icon: "users-group-rounded-linear", perm: "server.players.view" },
+  { section: "Manage", id: "servers", label: "Servers", icon: "server-square-linear", perm: "server.view" },
+  { section: "Manage", id: "files", label: "Files", icon: "folder-with-files-linear", perm: "server.files.manage" },
+  { section: "Manage", id: "configuration", label: "Configuration", icon: "tuning-2-linear", perm: "server.configuration.manage" },
+  { section: "Manage", id: "backups", label: "Backups", icon: "archive-down-minimlistic-linear", perm: "server.backups.view" },
+  { section: "Manage", id: "schedules", label: "Schedules", icon: "calendar-linear", perm: "server.schedules.manage" },
+  { section: "System", id: "activity", label: "Activity", icon: "history-linear", perm: "server.configuration.manage" },
+  { section: "System", id: "users", label: "Users", icon: "users-group-two-rounded-linear", perm: "users.manage" },
+  { section: "System", id: "security", label: "Security", icon: "shield-keyhole-linear", perm: "users.manage" },
+  { section: "System", id: "host", label: "Host", icon: "server-2-linear", perm: "server.configuration.manage" },
+  { section: "System", id: "settings", label: "Settings", icon: "settings-linear", perm: "server.view" },
 ];
 
 function buildNav() {
@@ -507,19 +722,83 @@ function buildNav() {
       nav.append(el("div", { class: "nav-section" }, page.section));
       lastSection = page.section;
     }
+    const label = el("span", { class: "nav-item-label" }, page.label,
+      page.id === "players"
+        ? el("span", { class: "nav-player-count", id: "nav-player-count" }, `· ${S.onlinePlayerCount ?? "—"}`)
+        : null);
     nav.append(el("div", { class: "nav-item", "data-page": page.id, tabindex: "0", onclick: () => navigate(page.id), onkeydown: (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(page.id); }
-    } }, el("span", { class: "nav-icon", "aria-hidden": "true" }, page.icon), page.label));
+    } }, el("span", { class: "nav-icon", "aria-hidden": "true" }, solarIcon(page.icon)), label));
   }
 }
 
-function navigate(page) {
-  S.page = page;
-  syncPageSubscription(page);
+function setOnlinePlayerCount(players) {
+  S.onlinePlayerCount = (players || []).filter((player) => player.online).length;
+  const count = $("#nav-player-count");
+  if (count) count.textContent = `· ${S.onlinePlayerCount}`;
+}
+
+async function refreshPlayerCount() {
+  if (!can("server.players.view")) return;
+  try { setOnlinePlayerCount((await api("/players")).players || []); } catch {}
+}
+
+function pageAllowed(page) {
+  const entry = PAGES.find((p) => p.id === page);
+  return !!entry && (!entry.perm || can(entry.perm));
+}
+
+function defaultPage() {
+  return (PAGES.find((p) => !p.perm || can(p.perm)) || PAGES[0]).id;
+}
+
+function hashPage() {
+  let page = "";
+  try { page = decodeURIComponent((location.hash || "").replace(/^#/, "")).trim(); }
+  catch { page = ""; }
+  return pageAllowed(page) ? page : "";
+}
+
+function syncHash(page, replace) {
+  if (location.hash === "#" + page) return;
+  const url = new URL(location.href);
+  url.hash = page;
+  const fn = replace ? "replaceState" : "pushState";
+  history[fn](null, "", url);
+}
+
+function navigate(page, opts = {}) {
+  const next = pageAllowed(page) ? page : defaultPage();
+  S.page = next;
+  S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers");
+  setSidebarOpen(false);
+  if (!opts.fromHash) syncHash(next, !!opts.replaceHash);
+  syncPageSubscription(next);
   document.querySelectorAll(".nav-item").forEach((n) =>
-    n.classList.toggle("active", n.dataset.page === page));
+    n.classList.toggle("active", n.dataset.page === next));
   renderPage();
 }
+
+function navigateFromHash() {
+  if (!S.me) return;
+  const page = hashPage();
+  if (page) navigate(page, { fromHash: true });
+  else navigate(defaultPage(), { replaceHash: true });
+}
+
+window.addEventListener("hashchange", navigateFromHash);
+window.addEventListener("popstate", navigateFromHash);
+
+function escapeBack() {
+  if (!S.me || S.page !== "files" || !fileEscapeAction) return false;
+  fileEscapeAction();
+  return true;
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || event.defaultPrevented) return;
+  if (closeActiveModal() || closeMobileSidebar() || escapeBack()) event.preventDefault();
+});
 
 async function refreshServers() {
   try {
@@ -536,15 +815,18 @@ function renderServerPicker() {
   const host = $("#server-picker"); host.innerHTML = "";
   const active = S.servers.find((s) => s.id === S.activeId);
   host.append(
-    el("div", {},
-      el("div", { class: "muted", style: "margin-bottom:6px" }, "Active project"),
-      el("div", { class: "server-name" }, active ? active.display_name : "None selected")),
-    renderStatusPillNode());
+    el("div", { class: "server-picker-head" },
+      el("span", { class: "server-kicker" }, "Active project"),
+      renderStatusPillNode({ compact: true, id: "status-pill" })),
+    el("div", { class: "server-name", title: active ? active.display_name : "None selected" },
+      active ? active.display_name : "None selected"));
 }
 
-function renderStatusPillNode() {
+function renderStatusPillNode(opts = {}) {
   const st = S.status.state || "stopped";
-  return el("div", { class: "status-label " + st, id: "status-pill" },
+  const attrs = { class: "status-label " + st + (opts.compact ? " compact" : "") };
+  if (opts.id) attrs.id = opts.id;
+  return el("div", attrs,
     el("span", { class: "status-square", "aria-hidden": "true" }), st.charAt(0).toUpperCase() + st.slice(1));
 }
 function renderStatusPill() {
@@ -580,11 +862,26 @@ async function renderPage() {
   }
 }
 
-function pageHeader(title, subtitle, actions = []) {
+function overviewBackButton() {
+  if (!S.overviewReturn) return null;
+  return el("button", {
+    class: "btn ghost page-back-button", type: "button",
+    "aria-label": "Back to Overview", title: "Back to Overview",
+    onclick: () => navigate("overview"),
+  }, solarIcon("alt-arrow-left-linear"));
+}
+
+function pageHeader(title, subtitle, actions = [], leading = null) {
+  const heading = el("h1", {}, title);
+  const titleNode = leading
+    ? el("div", { class: "title has-leading" },
+        el("div", { class: "page-title-heading-row" }, leading, heading),
+        subtitle ? el("p", { class: "page-sub" }, subtitle) : null)
+    : el("div", { class: "title" },
+        heading,
+        subtitle ? el("p", { class: "page-sub" }, subtitle) : null);
   return el("div", { class: "page-header" },
-    el("div", { class: "title" },
-      el("h1", {}, title),
-      subtitle ? el("p", { class: "page-sub" }, subtitle) : null),
+    titleNode,
     el("div", { class: "spacer" }),
     actions.length ? el("div", { class: "actions" }, actions) : null);
 }
@@ -599,41 +896,45 @@ async function pageOverview(main) {
 
   // Health, host and trends live here together. Knowing whether the server is
   // healthy should not require visiting three tabs.
-  let host = null, events = [], history = [];
+  let host = null, events = [], history = [], players = null;
   try { host = await api("/host"); } catch {}
   try { events = (await api("/events?limit=25")).events || []; } catch {}
   try { history = await api("/metrics?hours=1") || []; } catch {}
+  try { players = (await api("/players")).players || []; } catch {}
+  if (players) setOnlinePlayerCount(players);
 
   const memUsed = (host && host.mem_total) ? host.mem_total - host.mem_available : 0;
+  const onlinePlayers = (players || []).filter((player) => player.online);
+  const onlineCount = players ? onlinePlayers.length : Number(s.online_players || 0);
+  const maxPlayers = Number(d.max_players || s.max_players || 20);
 
   main.innerHTML = "";
   main.append(
     pageHeader(inst ? inst.display_name : "Overview", "Server state, resource pressure, backups, and recent events for the active project.", [
-      renderStatusPillNode(),
-      lifecycleButtons(),
+      lifecycleButtons(true),
     ]),
 
     // What is happening right now.
-    el("div", { class: "grid cols-4" },
+    el("div", { class: "grid cols-4 overview-stat-grid" },
+      serverStatusCard(d.state, inst),
       statCard("Uptime", fmtDur(s.uptime_seconds), s.java_pid ? "Java PID " + s.java_pid : "not running"),
-      statCard("Players online", (s.online_players ?? 0) + (s.max_players ? " / " + s.max_players : ""), ""),
-      statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)"),
+      playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
       statCard("CPU", (s.cpu_percent ?? 0).toFixed(1) + "%", "of one core = 100%")),
 
     // Host health, previously a separate tab.
-    el("div", { class: "grid cols-4", style: "margin-top:16px" },
+    el("div", { class: "grid cols-4 flow-section overview-stat-grid" },
+      statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)"),
       statCard("Host memory", host ? fmtBytes(memUsed) : "—",
         host ? "of " + fmtBytes(host.mem_total) : ""),
       statCard("Disk free", fmtBytes(s.disk_free), "of " + fmtBytes(s.disk_total)),
-      statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute"),
-      statCard("Services", serviceSummary(d, host), "")),
+      statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute")),
 
     // Trends, previously the Performance tab.
-    el("div", { class: "grid cols-2", style: "margin-top:16px" },
+    el("div", { class: "grid cols-2 flow-section" },
       trendCard("CPU", history, (x) => x.cpu_percent, (v) => v.toFixed(0) + "%"),
       trendCard("Process memory", history, (x) => x.rss_bytes, fmtBytes)),
 
-    el("div", { class: "grid cols-2", style: "margin-top:16px" },
+    el("div", { class: "grid cols-2 flow-section" },
       // The timeline: what the server did, in its own words.
       el("div", { class: "card" },
         el("h3", {}, "Recent activity"),
@@ -645,6 +946,12 @@ async function pageOverview(main) {
         el("h3", {}, "Project"),
         inst ? el("dl", { class: "kv" },
           el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
+          el("dt", {}, "LAN IP"), el("dd", {},
+            d.lan_ip ? el("button", {
+              class: "copy-value mono", type: "button", title: "Copy LAN IP",
+              "aria-label": `Copy LAN IP ${d.lan_ip}`,
+              onclick: () => copyText(d.lan_ip, "LAN IP copied"),
+            }, el("span", {}, d.lan_ip), solarIcon("copy-linear")) : "—"),
           el("dt", {}, "Port"), el("dd", {}, d.port || "25565"),
           el("dt", {}, "Modloader"), el("dd", {}, inst.modloader || "unknown"),
           el("dt", {}, "Startup script"), el("dd", { class: "mono" }, inst.startup_script || "not selected"),
@@ -657,11 +964,18 @@ async function pageOverview(main) {
           : el("p", { class: "muted" }, "No active project selected."))));
 }
 
-function serviceSummary(d, host) {
-  const mc = (d.state && d.state !== "stopped") ? "running" : "stopped";
-  const cp = host && host.service_bonghos ? host.service_bonghos : "active";
-  const sup = host && host.service_minecraft ? host.service_minecraft : mc;
-  return cp === "active" ? "Panel ok · Minecraft " + sup : cp + " · Minecraft " + sup;
+async function copyText(value, successMessage) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    const input = el("textarea", { style: "position:fixed;opacity:0;pointer-events:none" });
+    input.value = value;
+    document.body.append(input);
+    input.select();
+    document.execCommand("copy");
+    input.remove();
+  }
+  toast(successMessage, "ok");
 }
 
 // eventRow renders one timeline entry, coloured by severity.
@@ -675,7 +989,7 @@ function eventRow(e) {
 function trendCard(title, samples, pick, fmt) {
   const values = (samples || []).map(pick).filter((v) => typeof v === "number");
   const latest = values.length ? values[values.length - 1] : 0;
-  return el("div", { class: "card" },
+  return el("div", { class: "card graph-card" },
     el("div", { class: "metric-label" }, title),
     el("div", { class: "metric-value" }, fmt(latest)),
     el("div", { class: "metric-note" }, "last hour"),
@@ -689,18 +1003,122 @@ function statCard(title, value, sub) {
     el("div", { class: "metric-note" }, sub || ""));
 }
 
-function lifecycleButtons() {
+function overviewPlayerFace(player, moreCount = 0) {
+  const username = player?.username || "MHF_Steve";
+  const fallback = el("span", { class: "overview-player-face-fallback", "aria-hidden": "true" },
+    String(username).charAt(0).toUpperCase());
+  const image = el("img", {
+    src: getPlayerFaceUrl(username), alt: "", width: "36", height: "36",
+    loading: "lazy", decoding: "async", referrerpolicy: "no-referrer",
+    onerror: () => image.replaceWith(fallback),
+  });
+  return el("span", {
+    class: "overview-player-face" + (moreCount ? " is-more" : ""),
+    title: moreCount ? `${moreCount} more online` : username,
+  }, image, moreCount ? el("span", { class: "overview-player-more" }, `+${moreCount}`) : null);
+}
+
+function playerFaceStack(players, capacity) {
+  if (!players.length) return null;
+  const nodes = [];
+  if (players.length <= capacity) {
+    nodes.push(...players.slice(0, capacity).map((player) => overviewPlayerFace(player)));
+  } else {
+    const normalCount = Math.max(0, capacity - 1);
+    nodes.push(...players.slice(0, normalCount).map((player) => overviewPlayerFace(player)));
+    nodes.push(overviewPlayerFace(players[normalCount], players.length - normalCount));
+  }
+  return el("span", { class: `player-face-stack capacity-${capacity}`, "aria-hidden": "true" }, ...nodes);
+}
+
+function playerSummaryCard(players, onlineCount, maxPlayers) {
+  const value = `${onlineCount} / ${maxPlayers}`;
+  return el("a", {
+    class: "card metric player-summary-card", href: "#players",
+    "aria-label": `${onlineCount} of ${maxPlayers} players online. Open players.`,
+    onclick: (event) => { event.preventDefault(); navigate("players", { fromOverview: true }); },
+  },
+  el("div", { class: "metric-label player-summary-label-row" },
+    "Players online", solarIcon("alt-arrow-right-linear", "player-summary-arrow")),
+  el("div", { class: "player-summary-main" },
+    el("div", { class: "metric-value player-summary-count" }, value),
+    el("span", { class: "player-face-variants" },
+      playerFaceStack(players, 6), playerFaceStack(players, 5), playerFaceStack(players, 4),
+      playerFaceStack(players, 3), playerFaceStack(players, 2), playerFaceStack(players, 1))),
+  el("div", { class: "metric-note" }, ""));
+}
+
+function serverStatusCard(state, server) {
+  const normalized = String(state || "stopped").toLowerCase();
+  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  const icon = server
+    ? el("span", { class: "server-status-icon" }, serverCardIcon(server))
+    : null;
+  return el("div", { class: "card metric " + normalized },
+    el("div", { class: "metric-label" }, "Server status"),
+    el("div", { class: "metric-value server-status-value" },
+      icon,
+      el("span", { class: "server-status-state" },
+        el("span", { class: "status-square", "aria-hidden": "true" }), label)),
+    el("div", { class: "metric-note" }, ""));
+}
+
+function lifecycleButtons(includeServers = false) {
   const st = S.status.state || "stopped";
   const running = st === "running" || st === "starting";
-  const wrap = el("div", { class: "row-actions" });
-  const act = async (path, label) => {
-    try { await api(path, { method: "POST", json: {} }); toast(label + " requested", "ok"); }
-    catch (e) { toast(e.message, "err"); }
+  const pending = S.lifecyclePending && S.lifecyclePending.target !== st ? S.lifecyclePending : null;
+  if (S.lifecyclePending && !pending) S.lifecyclePending = null;
+  const wrap = el("div", { class: "row-actions" + (includeServers ? " overview-lifecycle-actions" : "") });
+  const showLoading = (button) => {
+    const icon = button.querySelector(":scope > .icon");
+    const loadingIcon = lifecycleLoadingIcon();
+    if (icon) icon.replaceWith(loadingIcon);
+    else button.prepend(loadingIcon);
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
   };
+  const act = async (path, label, action = "", target = "", button = null) => {
+    if (action && target) S.lifecyclePending = { action, target };
+    if (button) showLoading(button);
+    try {
+      await api(path, { method: "POST", json: {} });
+      toast(label + " requested", "ok");
+      if (target && S.status.state === target) {
+        S.lifecyclePending = null;
+        if (S.page === "overview" || S.page === "console") renderPage();
+      }
+    } catch (e) {
+      if (action && S.lifecyclePending?.action === action) S.lifecyclePending = null;
+      toast(e.message, "err");
+      if (S.page === "overview" || S.page === "console") renderPage();
+    }
+  };
+  const lifecycleButton = (action, path, label, target, className) => {
+    const button = el("button", {
+      class: className,
+      onclick: (event) => act(path, label, action, target, event.currentTarget),
+    }, label);
+    if (pending?.action === action) showLoading(button);
+    return button;
+  };
+  const serversButton = () => el("button", { class: "btn", onclick: () => navigate("servers", { fromOverview: true }) },
+    solarIcon("server-square-linear"),
+    "Servers",
+    solarIcon("alt-arrow-right-linear", "redirect-icon"));
+  if (pending) {
+    if (includeServers && pending.action === "start") wrap.append(serversButton());
+    if (pending.action === "start" && can("server.start"))
+      wrap.append(lifecycleButton("start", "/server/start", "Start", "running", "btn primary"));
+    if (pending.action === "stop" && can("server.stop"))
+      wrap.append(lifecycleButton("stop", "/server/stop", "Stop", "stopped", "btn"));
+    if (includeServers && pending.action === "stop") wrap.append(serversButton());
+    return wrap;
+  }
+  if (includeServers && !running) wrap.append(serversButton());
   if (can("server.start") && !running)
-    wrap.append(el("button", { class: "btn primary", onclick: () => act("/server/start", "Start") }, "Start"));
+    wrap.append(lifecycleButton("start", "/server/start", "Start", "running", "btn primary"));
   if (can("server.stop") && running)
-    wrap.append(el("button", { class: "btn", onclick: () => act("/server/stop", "Stop") }, "Stop"));
+    wrap.append(lifecycleButton("stop", "/server/stop", "Stop", "stopped", "btn"));
   if (can("server.restart") && running)
     wrap.append(el("button", { class: "btn", onclick: () => act("/server/restart", "Restart") }, "Restart"));
   if (can("server.force_stop") && st !== "stopped")
@@ -710,6 +1128,7 @@ function lifecycleButtons() {
           try { await api("/server/force-stop", { method: "POST", json: { confirm: true } }); toast("Force stop sent", "ok"); }
           catch (e) { toast(e.message, "err"); }
         }) }, "Force stop"));
+  if (includeServers && running) wrap.append(serversButton());
   return wrap;
 }
 
@@ -752,15 +1171,20 @@ async function pageConsole(main) {
     el("div", { class: "console-shell" },
       el("div", { class: "console-toolbar" },
         search,
-        el("button", { class: "btn ghost", onclick: () => { S.consolePaused = !S.consolePaused; pageConsole(main); } }, S.consolePaused ? "Resume autoscroll" : "Pause autoscroll"),
-        el("button", { class: "btn ghost", onclick: async () => {
+        el("button", {
+          class: "btn ghost console-icon-control",
+          "aria-label": S.consolePaused ? "Resume console" : "Pause console",
+          title: S.consolePaused ? "Resume console" : "Pause console",
+          onclick: () => { S.consolePaused = !S.consolePaused; pageConsole(main); },
+        }, S.consolePaused ? "Resume" : "Pause"),
+        el("button", { class: "btn ghost console-icon-control", "aria-label": "Copy console", title: "Copy console", onclick: async () => {
           try { await navigator.clipboard.writeText(S.consoleLines.join("\n")); toast("Console buffer copied", "ok"); }
           catch { toast("Copy failed in this browser", "err"); }
         } }, "Copy"),
-        el("button", { class: "btn ghost", onclick: () => { box.innerHTML = ""; S.consoleLines = []; } }, "Clear view"),
-        el("span", { class: "status-label " + (DEMO_MODE || (S.ws && S.ws.readyState === WebSocket.OPEN) ? "running" : "stopped") },
+        el("button", { class: "btn ghost console-clear-control", onclick: () => { box.innerHTML = ""; S.consoleLines = []; } }, "Clear"),
+        !DEMO_MODE ? el("span", { class: "status-label " + (S.ws && S.ws.readyState === WebSocket.OPEN ? "running" : "stopped") },
           el("span", { class: "status-square", "aria-hidden": "true" }),
-          DEMO_MODE ? "Demo stream" : (S.ws && S.ws.readyState === WebSocket.OPEN ? "Connected" : "Reconnecting"))),
+          S.ws && S.ws.readyState === WebSocket.OPEN ? "Connected" : "Reconnecting") : null),
       box,
       el("div", { class: "console-input" },
         input,
@@ -801,6 +1225,7 @@ function appendConsoleLine(line) {
 async function pagePlayers(main) {
   const d = await api("/players");
   const players = d.players || [];
+  setOnlinePlayerCount(players);
   const search = el("input", { placeholder: "Search players", "aria-label": "Search players" });
   const tbody = el("tbody");
   const draw = () => {
@@ -812,27 +1237,48 @@ async function pagePlayers(main) {
   search.addEventListener("input", draw);
   main.innerHTML = "";
   main.append(
-    pageHeader("Players", "Observed online and recent players. Whitelist, operator, ban, and IP-ban lists are not exposed as separate read APIs yet.", [search]),
+    pageHeader("Players", "Observed online and recent players. Whitelist, operator, ban, and IP-ban lists are not exposed as separate read APIs yet.", [search], overviewBackButton()),
     el("div", { class: "toolbar" },
       el("span", { class: "status-label running" }, el("span", { class: "status-square" }), players.filter((p) => p.online).length + " online"),
       el("span", { class: "status-label" }, el("span", { class: "status-square" }), players.length + " observed")),
-    el("div", { class: "table-wrap" },
+    el("div", { class: "table-wrap players-table" },
       el("table", {},
         el("thead", {}, el("tr", {},
-          el("th", {}, "Player"), el("th", {}, "Status"), el("th", {}, "Last seen"),
-          el("th", {}, "Observed playtime"), el("th", {}, ""))),
+          el("th", {}, "Player"), el("th", {}, "Status"), el("th", { class: "mobile-hide" }, "Last seen"),
+          el("th", { class: "mobile-hide" }, "Observed playtime"), el("th", {}, ""))),
         tbody)));
   draw();
 }
 
 function playerRow(p) {
+  const fallback = el("span", { class: "player-avatar player-avatar-fallback", "aria-hidden": "true" },
+    String(p.username || "?").charAt(0).toUpperCase());
+  const avatar = el("img", {
+    class: "player-avatar",
+    src: getPlayerFaceUrl(p.username),
+    alt: "",
+    width: "32",
+    height: "32",
+    loading: "lazy",
+    decoding: "async",
+    referrerpolicy: "no-referrer",
+    onerror: () => avatar.replaceWith(fallback),
+  });
   return el("tr", {},
-    el("td", {}, el("span", { class: "pill " + (p.online ? "running" : "") },
-      el("span", { class: "dot" }), p.username)),
+    el("td", {}, el("div", { class: "player-identity" }, avatar,
+      el("span", { class: "player-name-block" },
+        el("span", { class: "player-name-line" },
+          el("strong", {}, p.username),
+          p.op ? el("span", { class: "player-op" }, "OP") : null),
+        el("span", { class: "mobile-only mobile-row-detail" }, p.online ? "Online" : "Offline")))),
     el("td", {}, p.online ? "Online" : "Offline"),
-    el("td", {}, fmtTime(p.last_seen_at)),
-    el("td", {}, fmtDur(p.observed_playtime_seconds)),
-    el("td", { class: "row-actions" }, can("server.players.manage") ? playerActions(p) : ""));
+    el("td", { class: "mobile-hide" }, fmtTime(p.last_seen_at)),
+    el("td", { class: "mobile-hide" }, fmtDur(p.observed_playtime_seconds)),
+    el("td", { class: "table-actions" }, can("server.players.manage") ? playerActions(p) : ""));
+}
+
+function getPlayerFaceUrl(username, size = 64) {
+  return `https://minotar.net/helm/${encodeURIComponent(String(username || "MHF_Steve"))}/${size}.png`;
 }
 
 function playerActions(p) {
@@ -849,17 +1295,58 @@ function playerActions(p) {
          } catch (e) { toast(e.message, "err"); }
        }]]);
   };
-  const wrap = el("div", { class: "row-actions" });
-  if (p.online) wrap.append(el("button", { class: "btn ghost", onclick: act("Kick", true) }, "Kick"));
-  wrap.append(
-    el("button", { class: "btn ghost", onclick: act("Ban", true) }, "Ban"),
-    el("button", { class: "btn ghost", onclick: act("Op", false) }, "Op"),
-    el("button", { class: "btn ghost", onclick: act("Deop", false) }, "Deop"));
-  return wrap;
+  const actions = [];
+  if (p.online) actions.push({ label: "Kick", icon: "close-circle-linear", danger: true, run: act("Kick", true) });
+  actions.push(
+    { label: "Ban", icon: "lock-keyhole-linear", danger: true, run: act("Ban", true) },
+    { label: "Op", icon: "key-linear", run: act("Op", false) },
+    { label: "Deop", icon: "key-linear", run: act("Deop", false) });
+  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+    ...actions.map((action) => el("button", { class: "btn ghost", onclick: action.run }, action.label)));
+  const mobile = overflowActionsMenu(`Actions for ${p.username}`,
+    actions.map((action) => el("button", {
+      class: "action-menu-item" + (action.danger ? " danger" : ""),
+      type: "button", role: "menuitem", onclick: action.run,
+    }, solarIcon(action.icon), action.label)), "mobile-row-actions");
+  return el("div", { class: "responsive-row-actions" }, desktop, mobile);
 }
 
 // ----- files ----------------------------------------------------------------
 let filePath = "";
+let fileEscapeAction = null;
+
+const FILE_ICON_GROUPS = [
+  ["archive-linear", new Set(["7z", "bz2", "gz", "jar", "rar", "tar", "tgz", "war", "xz", "zip"])],
+  ["gallery-linear", new Set(["avif", "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "webp"])],
+  ["music-note-linear", new Set(["aac", "flac", "m4a", "mp3", "ogg", "opus", "wav"])],
+  ["video-frame-linear", new Set(["avi", "m4v", "mkv", "mov", "mp4", "webm"])],
+  ["database-linear", new Set(["dat", "db", "mca", "mcr", "nbt", "sqlite", "sqlite3"])],
+  ["command-linear", new Set(["bat", "cmd", "mcfunction", "ps1", "sh", "zsh"])],
+  ["settings-linear", new Set(["cfg", "conf", "config", "ini", "json", "properties", "toml", "yaml", "yml"])],
+  ["code-file-linear", new Set(["c", "cc", "cpp", "cs", "css", "go", "h", "hpp", "htm", "html", "java", "js", "jsx", "kt", "kts", "less", "lua", "php", "py", "rb", "rs", "sass", "scss", "sql", "ts", "tsx", "xml"])],
+];
+
+function fileIconName(entry) {
+  if (entry.is_dir) return "folder-linear";
+  const name = String(entry.name || "").toLowerCase();
+  if (name === "eula.txt") return "shield-check-linear";
+  if (["banned-ips.json", "banned-players.json", "ops.json", "usercache.json", "whitelist.json"].includes(name)) {
+    return "users-group-rounded-linear";
+  }
+  if (name === "server-icon.png") return "gallery-linear";
+  const extension = name.includes(".") ? name.split(".").pop() : "";
+  for (const [icon, extensions] of FILE_ICON_GROUPS) {
+    if (extensions.has(extension)) return icon;
+  }
+  return "document-text-linear";
+}
+
+function fileIdentity(entry) {
+  return el("span", { class: "file-identity" },
+    el("span", { class: "file-type-icon", "aria-hidden": "true" }, solarIcon(fileIconName(entry))),
+    el("span", {}, entry.name));
+}
+
 async function pageFiles(main, path = filePath) {
   // A deep link from elsewhere (for example the Configuration page naming the
   // file that owns the JVM settings) opens that file straight away.
@@ -869,6 +1356,9 @@ async function pageFiles(main, path = filePath) {
     return openFileEditor(main, target);
   }
   filePath = path;
+  fileEscapeAction = path
+    ? () => pageFiles(main, path.split("/").filter(Boolean).slice(0, -1).join("/"))
+    : null;
   const entries = await api("/files?path=" + encodeURIComponent(path));
   main.innerHTML = "";
   const crumbs = el("div", { class: "breadcrumb" },
@@ -893,24 +1383,37 @@ async function pageFiles(main, path = filePath) {
     el("td", { class: "mono", style: "cursor:pointer", onclick: () => {
       if (e2.is_dir) pageFiles(main, (path ? path + "/" : "") + e2.name);
       else openFileEditor(main, (path ? path + "/" : "") + e2.name);
-    } }, (e2.is_dir ? "📁 " : "📄 ") + e2.name),
-    el("td", {}, e2.is_dir ? "—" : fmtBytes(e2.size)),
-    el("td", {}, fmtTime(e2.mod_time)),
-    el("td", { class: "row-actions" },
-      !e2.is_dir ? el("a", { class: "btn ghost", href: "/api/files/download?path=" + encodeURIComponent((path ? path + "/" : "") + e2.name) }, "Download") : "",
-      el("button", { class: "btn ghost", onclick: () => renameEntry(main, path, e2.name) }, "Rename"),
-      el("button", { class: "btn danger", onclick: () => deleteEntry(main, path, e2.name) }, "Delete"))));
+    } }, fileIdentity(e2)),
+    el("td", { class: "file-size-column" }, e2.is_dir ? "—" : fmtBytes(e2.size)),
+    el("td", { class: "mobile-hide" }, fmtTime(e2.mod_time)),
+    el("td", { class: "table-actions file-actions-cell" }, fileActions(main, path, e2))));
   main.append(
     pageHeader("Files", "Constrained file manager for the active server directory.", [
-      el("button", { class: "btn", onclick: () => upInput.click() }, "Upload"),
-      el("button", { class: "btn", onclick: () => mkdirPrompt(main, path) }, "New folder"),
+      el("button", { class: "btn", title: "Upload", onclick: () => upInput.click() }, solarIcon("upload-linear"), "Upload"),
+      el("button", { class: "btn", title: "New folder", onclick: () => mkdirPrompt(main, path) }, solarIcon("folder-linear"), "New folder"),
       upInput,
     ]),
     crumbs,
     el("div", { class: "file-list" },
       el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", {}, "Size"), el("th", {}, "Modified"), el("th", {}, ""))),
+        el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", { class: "file-size-column" }, "Size"), el("th", { class: "mobile-hide" }, "Modified"), el("th", {}, ""))),
         el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "4", class: "muted" }, "Empty directory"))))));
+}
+
+function fileActions(main, path, entry) {
+  const rel = (path ? path + "/" : "") + entry.name;
+  const download = !entry.is_dir ? "/api/files/download?path=" + encodeURIComponent(rel) : "";
+  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+    download ? el("a", { class: "btn ghost", href: download }, solarIcon("download-linear"), "Download") : "",
+    el("button", { class: "btn ghost", onclick: () => renameEntry(main, path, entry.name) }, "Rename"),
+    el("button", { class: "btn danger", onclick: () => deleteEntry(main, path, entry.name) }, "Delete"));
+  const items = [];
+  if (download) items.push(el("a", { class: "action-menu-item", role: "menuitem", href: download }, solarIcon("download-linear"), "Download"));
+  items.push(
+    el("button", { class: "action-menu-item", type: "button", role: "menuitem", onclick: () => renameEntry(main, path, entry.name) }, solarIcon("pen-new-square-linear"), "Rename"),
+    el("button", { class: "action-menu-item danger", type: "button", role: "menuitem", onclick: () => deleteEntry(main, path, entry.name) }, solarIcon("trash-bin-trash-linear"), "Delete"));
+  return el("div", { class: "responsive-row-actions" }, desktop,
+    overflowActionsMenu(`Actions for ${entry.name}`, items, "mobile-row-actions"));
 }
 
 async function openFileEditor(main, rel) {
@@ -920,17 +1423,27 @@ async function openFileEditor(main, rel) {
   main.innerHTML = "";
   const ta = el("textarea", { class: "editor", spellcheck: "false" });
   ta.value = data.content;
+  let baseline = data.content;
+  const leaveEditor = () => {
+    if (ta.value === baseline) {
+      pageFiles(main);
+      return;
+    }
+    confirmModal("Discard changes", `Discard unsaved changes to "${rel}"?`, "Discard", async () => pageFiles(main));
+  };
+  fileEscapeAction = leaveEditor;
   main.append(
     el("div", { class: "toolbar" },
       el("h1", { class: "mono", style: "font-size:1rem" }, rel),
       el("div", { class: "spacer" }),
-      el("button", { class: "btn ghost", onclick: () => pageFiles(main) }, "Back"),
-      el("button", { class: "btn primary", onclick: async () => {
+      el("button", { class: "btn ghost", title: "Back to files", onclick: leaveEditor }, solarIcon("folder-open-linear"), "Back"),
+      el("button", { class: "btn primary", title: "Save file", onclick: async () => {
         try {
           await api("/files/content", { method: "POST", json: { path: rel, content: ta.value } });
+          baseline = ta.value;
           toast("Saved (a .bonghos-backup copy of important files is kept)", "ok");
         } catch (e) { toast(e.message, "err"); }
-      } }, "Save")),
+      } }, solarIcon("diskette-linear"), "Save")),
     ta);
 }
 
@@ -1020,23 +1533,135 @@ async function pageConfiguration(main) {
 
   const props = d.properties || {};
   const commonProps = ["motd", "server-port", "max-players", "difficulty", "gamemode", "white-list", "pvp", "view-distance", "online-mode"];
+  const propInputs = {};
   const propRows = commonProps.filter((k) => k in props).map((k) => {
     const v = el("input", { value: props[k] });
-    return el("div", { class: "field-row" },
-      el("label", {}, k, v),
-      el("button", { class: "btn ghost", style: "align-self:flex-start", onclick: async () => {
-        try {
-          await api("/configuration/property", { method: "POST", json: { key: k, value: v.value } });
-          toast(k + " saved — restart required to apply", "ok");
-        } catch (e) { toast(e.message, "err"); }
-      } }, "Save"));
+    propInputs[k] = v;
+    return el("div", { class: "field-row" }, el("label", {}, k, v));
+  });
+
+  const auto = el("input", { type: "checkbox" }); auto.checked = !!inst.autostart_enabled;
+  const recover = el("input", { type: "checkbox" }); recover.checked = !!inst.recover_after_unclean_shutdown;
+  const delay = el("input", { type: "number", min: "0", value: inst.boot_delay_seconds || 0, style: "width:110px" });
+  const policy = el("select", {},
+    ...["never", "on-failure", "always"].map((p) => el("option", { value: p, selected: p === (inst.restart_policy || "never") ? "" : null }, p)));
+
+  const automationCard = el("div", { class: "card" },
+    el("div", { class: "field-row" }, el("label", { class: "check-row" }, auto, " Start this server when the machine boots")),
+    el("div", { class: "field-row" }, el("label", { class: "check-row" }, recover, " Recover after unclean shutdown (power loss)")),
+    el("div", { class: "field-row" }, el("label", {}, "Boot delay (seconds)", delay)),
+    el("div", { class: "field-row" }, el("label", {}, "Crash restart policy", policy),
+      el("span", { class: "hint" }, "Crash-loop protection pauses automatic restarts after repeated rapid crashes.")));
+
+  const currentState = () => ({
+    xms: xms.value,
+    xmx: xmx.value,
+    startupScript: scriptSel.value,
+    javaSelection: javaSel.value,
+    properties: Object.fromEntries(Object.entries(propInputs).map(([key, input]) => [key, input.value])),
+    autostartEnabled: auto.checked,
+    recoverAfterUncleanShutdown: recover.checked,
+    bootDelaySeconds: delay.value,
+    restartPolicy: policy.value,
+  });
+  let baseline = currentState();
+  let saving = false;
+
+  const saveButtons = [];
+  const discardButtons = [];
+  const bottomActions = el("div", { class: "configuration-action-bar hidden" });
+
+  function isDirty() {
+    return JSON.stringify(currentState()) !== JSON.stringify(baseline);
+  }
+
+  function updateActions() {
+    const dirty = isDirty();
+    saveButtons.forEach((button) => {
+      button.disabled = saving || !dirty;
+      setButtonLabel(button, saving ? "Saving..." : "Save changes");
+    });
+    discardButtons.forEach((button) => { button.disabled = saving || !dirty; });
+    bottomActions.classList.toggle("hidden", !dirty);
+  }
+
+  function discardChanges() {
+    xms.value = baseline.xms;
+    xmx.value = baseline.xmx;
+    scriptSel.value = baseline.startupScript;
+    javaSel.value = baseline.javaSelection;
+    Object.entries(propInputs).forEach(([key, input]) => { input.value = baseline.properties[key]; });
+    auto.checked = baseline.autostartEnabled;
+    recover.checked = baseline.recoverAfterUncleanShutdown;
+    delay.value = baseline.bootDelaySeconds;
+    policy.value = baseline.restartPolicy;
+    updateActions();
+  }
+
+  async function saveChanges() {
+    if (saving || !isDirty()) return;
+    const next = currentState();
+    saving = true;
+    updateActions();
+    try {
+      let restartRequired = false;
+      if (next.xms !== baseline.xms || next.xmx !== baseline.xmx) {
+        await api("/configuration/jvm", { method: "POST", json: { xms: next.xms, xmx: next.xmx } });
+        restartRequired = true;
+      }
+      if (next.startupScript !== baseline.startupScript) {
+        await api("/configuration/startup-script", { method: "POST", json: { script: next.startupScript } });
+      }
+
+      const instanceChanges = {};
+      if (next.javaSelection !== baseline.javaSelection) instanceChanges.java_selection = next.javaSelection;
+      if (next.autostartEnabled !== baseline.autostartEnabled) instanceChanges.autostart_enabled = next.autostartEnabled;
+      if (next.recoverAfterUncleanShutdown !== baseline.recoverAfterUncleanShutdown) instanceChanges.recover_after_unclean_shutdown = next.recoverAfterUncleanShutdown;
+      if (next.bootDelaySeconds !== baseline.bootDelaySeconds) instanceChanges.boot_delay_seconds = Number(next.bootDelaySeconds);
+      if (next.restartPolicy !== baseline.restartPolicy) instanceChanges.restart_policy = next.restartPolicy;
+      if (Object.keys(instanceChanges).length) {
+        await api(`/servers/${inst.id}`, { method: "PATCH", json: instanceChanges });
+      }
+
+      for (const [key, value] of Object.entries(next.properties)) {
+        if (value === baseline.properties[key]) continue;
+        await api("/configuration/property", { method: "POST", json: { key, value } });
+        restartRequired = true;
+      }
+
+      baseline = currentState();
+      toast("Configuration saved" + (restartRequired ? " - restart required to apply some changes" : ""), "ok");
+    } catch (e) {
+      toast(e.message, "err");
+    } finally {
+      saving = false;
+      updateActions();
+    }
+  }
+
+  function actionButton(label, className, handler, collection) {
+    const button = el("button", { class: "btn " + className, onclick: handler, disabled: "" }, label);
+    collection.push(button);
+    return button;
+  }
+
+  const headerDiscard = actionButton("Discard", "ghost", discardChanges, discardButtons);
+  const headerSave = actionButton("Save changes", "primary", saveChanges, saveButtons);
+  const bottomDiscard = actionButton("Discard", "ghost", discardChanges, discardButtons);
+  const bottomSave = actionButton("Save changes", "primary", saveChanges, saveButtons);
+  bottomActions.append(bottomDiscard, bottomSave);
+
+  const controls = [xms, xmx, scriptSel, javaSel, auto, recover, delay, policy, ...Object.values(propInputs)];
+  controls.forEach((control) => {
+    control.addEventListener("input", updateActions);
+    control.addEventListener("change", updateActions);
   });
 
   main.append(
-    pageHeader("Configuration", "Startup, Java, memory, Minecraft properties, and recovery policy for the active project."),
+    pageHeader("Configuration", "Startup, Java, memory, Minecraft properties, and recovery policy for the active project.", [headerDiscard, headerSave]),
     d.eula ? null : el("div", { class: "notice" },
       "The Minecraft EULA has not been accepted for this project. The server will not start until it is. ",
-      el("button", { class: "btn", style: "margin-left:8px", onclick: () =>
+      el("button", { class: "btn inline-offset", onclick: () =>
         confirmModal("Accept Minecraft EULA",
           "By accepting you agree to the Minecraft End User License Agreement (https://aka.ms/MinecraftEULA). Bonghos never accepts it silently on your behalf.",
           "I accept the EULA", async () => {
@@ -1048,83 +1673,53 @@ async function pageConfiguration(main) {
         el("h3", {}, "JVM memory"),
         jvmSourceNote(d.jvm),
         el("div", { class: "field-row" }, el("label", {}, "Minimum (-Xms)", xms)),
-        el("div", { class: "field-row" }, el("label", {}, "Maximum (-Xmx)", xmx)),
-        el("button", { class: "btn primary", onclick: async () => {
-          try {
-            await api("/configuration/jvm", { method: "POST", json: { xms: xms.value, xmx: xmx.value } });
-            toast("Memory saved — restart required to apply", "ok");
-          } catch (e) { toast(e.message, "err"); }
-        } }, "Save memory")),
+        el("div", { class: "field-row" }, el("label", {}, "Maximum (-Xmx)", xmx))),
       el("div", { class: "card" },
         el("h3", {}, "Startup"),
         el("div", { class: "field-row" }, el("label", {}, "Startup script", scriptSel)),
-        el("button", { class: "btn", onclick: async () => {
-          try { await api("/configuration/startup-script", { method: "POST", json: { script: scriptSel.value } }); toast("Startup script saved", "ok"); }
-          catch (e) { toast(e.message, "err"); }
-        } }, "Save script"),
-        el("div", { class: "field-row", style: "margin-top:14px" }, el("label", {}, "Java installation", javaSel)),
-        el("button", { class: "btn", onclick: async () => {
-          try { await api(`/servers/${inst.id}`, { method: "PATCH", json: { java_selection: javaSel.value } }); toast("Java selection saved", "ok"); }
-          catch (e) { toast(e.message, "err"); }
-        } }, "Save Java"))),
+        el("div", { class: "field-row flow-section" }, el("label", {}, "Java installation", javaSel)))),
     el("h2", {}, "server.properties"),
     el("div", { class: "card" }, propRows.length ? propRows : el("p", { class: "muted" }, "No server.properties found yet (it is created on first start).")),
     el("h2", {}, "Automation"),
-    autoCard(inst));
-}
+    automationCard,
+    bottomActions);
 
-function autoCard(inst) {
-  const auto = el("input", { type: "checkbox" }); auto.checked = !!inst.autostart_enabled;
-  const recover = el("input", { type: "checkbox" }); recover.checked = !!inst.recover_after_unclean_shutdown;
-  const delay = el("input", { type: "number", min: "0", value: inst.boot_delay_seconds || 0, style: "width:110px" });
-  const policy = el("select", {},
-    ...["never", "on-failure", "always"].map((p) => el("option", { value: p, selected: p === (inst.restart_policy || "never") ? "" : null }, p)));
-  return el("div", { class: "card" },
-    el("div", { class: "field-row" }, el("label", { style: "flex-direction:row; align-items:center; gap:10px" }, auto, " Start this server when the machine boots")),
-    el("div", { class: "field-row" }, el("label", { style: "flex-direction:row; align-items:center; gap:10px" }, recover, " Recover after unclean shutdown (power loss)")),
-    el("div", { class: "field-row" }, el("label", {}, "Boot delay (seconds)", delay)),
-    el("div", { class: "field-row" }, el("label", {}, "Crash restart policy", policy),
-      el("span", { class: "hint" }, "Crash-loop protection pauses automatic restarts after repeated rapid crashes.")),
-    el("button", { class: "btn primary", onclick: async () => {
-      try {
-        await api(`/servers/${inst.id}`, { method: "PATCH", json: {
-          autostart_enabled: auto.checked, recover_after_unclean_shutdown: recover.checked,
-          boot_delay_seconds: Number(delay.value), restart_policy: policy.value } });
-        toast("Automation settings saved", "ok");
-      } catch (e) { toast(e.message, "err"); }
-    } }, "Save automation"));
+  updateActions();
 }
 
 // ----- backups --------------------------------------------------------------
 async function pageBackups(main) {
   const list = await api("/backups");
   main.innerHTML = "";
-  const mkBtn = (type, label) => el("button", { class: "btn", onclick: async () => {
+  const createBackup = async (type, label) => {
     try { await api("/backups", { method: "POST", json: { type } }); toast(label + " backup started", "ok"); }
     catch (e) { toast(e.message, "err"); }
+  };
+  const backupConfirmation = {
+    world: "Create a backup of the world and player data? Online backups briefly pause world saving while a consistent archive is created.",
+    full: "Create a full server backup? This includes the world, player data, configuration, mods, and other server files. Online backups briefly pause world saving.",
+  };
+  const mkBtn = (type, label) => el("button", { class: "btn backup-create-button", onclick: () => {
+    const message = backupConfirmation[type];
+    if (!message) return createBackup(type, label);
+    confirmModal(
+      label,
+      message,
+      `Create ${label.toLowerCase()}`,
+      () => createBackup(type, label),
+      false,
+    );
   } }, label);
   const rows = (list || []).map((b) => el("tr", {},
-    el("td", { class: "mono" }, b.backup_id),
+    el("td", { class: "mono" },
+      el("span", {}, b.backup_id),
+      el("span", { class: "mobile-only mobile-row-detail" }, `${b.backup_type.replace(/_/g, " ")} · ${fmtBytes(b.compressed_size)}`)),
     el("td", {}, b.backup_type.replace(/_/g, " ")),
-    el("td", {}, b.consistency_mode + " / " + b.trigger_type),
+    el("td", { class: "mobile-hide" }, b.consistency_mode + " / " + b.trigger_type),
     el("td", {}, fmtBytes(b.compressed_size)),
-    el("td", {}, b.verification_status || "—"),
-    el("td", {}, fmtTime(b.created_at)),
-    el("td", { class: "row-actions" },
-      can("server.backups.restore") ? el("button", { class: "btn ghost", onclick: () => restoreBackup(b) }, "Restore") : "",
-      el("button", { class: "btn ghost", onclick: async () => {
-        try { await api(`/backups/${b.backup_id}/verify`, { method: "POST", json: {} }); toast("Verified", "ok"); renderPage(); }
-        catch (e) { toast(e.message, "err"); }
-      } }, "Verify"),
-      el("button", { class: "btn ghost", onclick: async () => {
-        try { await api(`/backups/${b.backup_id}/protect`, { method: "POST", json: { protected: !b.protected } }); renderPage(); }
-        catch (e) { toast(e.message, "err"); }
-      } }, b.protected ? "Unprotect" : "Protect"),
-      el("button", { class: "btn danger", onclick: () =>
-        confirmModal("Delete backup", `Delete backup ${b.backup_id}?` + (b.protected ? " It is PROTECTED." : ""), "Delete", async () => {
-          try { await api(`/backups/${b.backup_id}`, { method: "DELETE" }); renderPage(); }
-          catch (e) { toast(e.message, "err"); }
-        }) }, "Delete"))));
+    el("td", { class: "mobile-hide" }, b.verification_status || "—"),
+    el("td", { class: "mobile-hide" }, fmtTime(b.created_at)),
+    el("td", { class: "table-actions" }, backupActions(b))));
   main.append(
     pageHeader("Backups", "Verified archives, retention decisions, and restore controls. Online backups briefly pause world saving.", [
       can("server.backups.create") ? mkBtn("world", "World backup") : null,
@@ -1132,10 +1727,40 @@ async function pageBackups(main) {
       can("server.backups.create") ? mkBtn("configuration", "Config backup") : null,
     ]),
     el("div", { class: "progress hidden", id: "backup-progress" }, el("div", { style: "width:0%" })),
-    el("div", { class: "table-wrap" },
+    el("div", { class: "table-wrap backups-table" },
       el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", {}, "Mode"), el("th", {}, "Size"), el("th", {}, "Verified"), el("th", {}, "Created"), el("th", {}, ""))),
+        el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", { class: "mobile-hide" }, "Mode"), el("th", {}, "Size"), el("th", { class: "mobile-hide" }, "Verified"), el("th", { class: "mobile-hide" }, "Created"), el("th", {}, ""))),
         el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "7", class: "muted" }, "No backups yet."))))));
+}
+
+function backupActions(backup) {
+  const actions = [];
+  if (can("server.backups.restore")) actions.push({
+    label: "Restore", icon: "archive-down-minimlistic-linear", run: () => restoreBackup(backup),
+  });
+  actions.push(
+    { label: "Verify", icon: "shield-check-linear", run: async () => {
+      try { await api(`/backups/${backup.backup_id}/verify`, { method: "POST", json: {} }); toast("Verified", "ok"); renderPage(); }
+      catch (error) { toast(error.message, "err"); }
+    } },
+    { label: backup.protected ? "Unprotect" : "Protect", icon: backup.protected ? "shield-keyhole-linear" : "shield-check-linear", run: async () => {
+      try { await api(`/backups/${backup.backup_id}/protect`, { method: "POST", json: { protected: !backup.protected } }); renderPage(); }
+      catch (error) { toast(error.message, "err"); }
+    } },
+    { label: "Delete", icon: "trash-bin-trash-linear", danger: true, run: () =>
+      confirmModal("Delete backup", `Delete backup ${backup.backup_id}?` + (backup.protected ? " It is PROTECTED." : ""), "Delete", async () => {
+        try { await api(`/backups/${backup.backup_id}`, { method: "DELETE" }); renderPage(); }
+        catch (error) { toast(error.message, "err"); }
+      }) });
+
+  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+    ...actions.map((action) => el("button", { class: "btn " + (action.danger ? "danger" : "ghost"), onclick: action.run }, action.label)));
+  const mobile = overflowActionsMenu(`Actions for backup ${backup.backup_id}`,
+    actions.map((action) => el("button", {
+      class: "action-menu-item" + (action.danger ? " danger" : ""),
+      type: "button", role: "menuitem", onclick: action.run,
+    }, solarIcon(action.icon), action.label)), "mobile-row-actions");
+  return el("div", { class: "responsive-row-actions" }, desktop, mobile);
 }
 
 function updateBackupProgress(d) {
@@ -1187,7 +1812,7 @@ async function pageSchedules(main) {
   const list = await api("/schedules");
   main.innerHTML = "";
   const rows = (list || []).map((s) => el("tr", {},
-    el("td", {}, s.name, s.enabled ? "" : el("span", { class: "tag", style: "margin-left:8px" }, "disabled")),
+    el("td", {}, s.name, s.enabled ? "" : el("span", { class: "tag inline-offset" }, "disabled")),
     el("td", {}, s.action.replace(/_/g, " ")),
     el("td", { class: "mono" }, s.schedule_type + ": " + s.schedule_expression + " (" + (s.timezone || "UTC") + ")"),
     el("td", {}, fmtTime(s.next_run_at)),
@@ -1213,55 +1838,186 @@ async function pageSchedules(main) {
         el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "6", class: "muted" }, "No schedules yet."))))));
 }
 
+function timezoneOffsetMinutes(timeZone, date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date).reduce((out, part) => {
+    if (part.type !== "literal") out[part.type] = part.value;
+    return out;
+  }, {});
+  return Math.round((Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute) - date.getTime()) / 60000);
+}
+
+function timezoneSelect(selected) {
+  const local = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const zones = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [local, "UTC"];
+  const unique = [...new Set(["UTC", selected, local, ...zones].filter(Boolean))];
+  const now = new Date();
+  now.setSeconds(0, 0);
+  const records = unique.map((zone) => {
+    let offset = 0;
+    try { offset = timezoneOffsetMinutes(zone, now); } catch { return null; }
+    const sign = offset >= 0 ? "+" : "-";
+    const absolute = Math.abs(offset);
+    const gmt = `GMT${sign}${String(Math.floor(absolute / 60)).padStart(2, "0")}:${String(absolute % 60).padStart(2, "0")}`;
+    const segments = zone.split("/");
+    const city = segments[segments.length - 1].replace(/_/g, " ");
+    return { zone, offset, label: `${gmt} - ${city}${segments.length > 1 ? ` (${zone})` : ""}` };
+  }).filter(Boolean).sort((a, b) => a.offset - b.offset || a.label.localeCompare(b.label));
+  return el("select", { "aria-label": "Timezone" },
+    ...records.map((record) => el("option", { value: record.zone, selected: record.zone === selected ? "" : null }, record.label)));
+}
+
 function scheduleForm(s) {
-  const name = el("input", { value: s ? s.name : "" });
+  const typeAliases = { interval: "fixed_interval", cron: "advanced_cron" };
+  const offlineAliases = { skip: "skip_when_offline", start_first: "start_then_execute", run_anyway: "skip_when_offline" };
+  const missedAliases = { skip: "skip_missed_run", run_once_on_boot: "run_once_after_startup" };
+  const initialType = typeAliases[s?.schedule_type] || s?.schedule_type || "daily";
+  const initialAction = s?.action === "backup" ? "create_backup" : (s?.action || "restart_server");
+  const initialOffline = offlineAliases[s?.offline_policy] || s?.offline_policy || "skip_when_offline";
+  const initialMissed = missedAliases[s?.missed_run_policy] || s?.missed_run_policy || "skip_missed_run";
+  let initialPayload = s?.action_payload || {};
+  if (typeof initialPayload === "string") {
+    try { initialPayload = JSON.parse(initialPayload); } catch { initialPayload = {}; }
+  }
+
+  const name = el("input", { value: s ? s.name : "", required: "", maxlength: "120" });
+  const description = el("input", { value: s?.description || "", maxlength: "240", placeholder: "Optional" });
   const type = el("select", {},
-    ...[["daily", "Daily at a time"], ["weekly", "Weekly"], ["interval", "Every N minutes"], ["cron", "Cron expression"]]
-      .map(([v, l]) => el("option", { value: v, selected: s && s.schedule_type === v ? "" : null }, l)));
-  const expr = el("input", { value: s ? s.schedule_expression : "04:00", placeholder: "e.g. 04:00 · sun 04:00 · 30 · 0 4 * * *" });
-  const tz = el("input", { value: s ? s.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone });
+    ...[["once", "Once"], ["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"],
+      ["monthly", "Monthly"], ["fixed_interval", "Fixed interval"], ["advanced_cron", "Advanced cron"]]
+      .map(([value, label]) => el("option", { value, selected: initialType === value ? "" : null }, label)));
+  const expressionHost = el("div", { class: "schedule-expression" });
+  const expressionCache = { [initialType]: s?.schedule_expression || "" };
+  let renderedType = initialType;
+  let readExpression = () => "";
+
+  const renderExpression = (scheduleType) => {
+    expressionHost.innerHTML = "";
+    const saved = expressionCache[scheduleType] || "";
+    if (scheduleType === "once") {
+      const input = el("input", { type: "datetime-local", value: saved.replace(" ", "T") });
+      expressionHost.append(el("label", {}, "Date and time", input));
+      readExpression = () => input.value.replace("T", " ");
+    } else if (scheduleType === "hourly") {
+      const input = el("input", { type: "number", min: "0", max: "59", step: "1", value: saved || "0" });
+      expressionHost.append(el("label", {}, "Minute of each hour", input));
+      readExpression = () => input.value;
+    } else if (scheduleType === "daily") {
+      const input = el("input", { type: "time", value: saved || "04:00" });
+      expressionHost.append(el("label", {}, "Time", input));
+      readExpression = () => input.value;
+    } else if (scheduleType === "weekly") {
+      const [savedDay = "MON", savedTime = "04:00"] = saved.toUpperCase().split(/\s+/);
+      const day = el("select", {}, ...[["MON", "Monday"], ["TUE", "Tuesday"], ["WED", "Wednesday"], ["THU", "Thursday"], ["FRI", "Friday"], ["SAT", "Saturday"], ["SUN", "Sunday"]]
+        .map(([value, label]) => el("option", { value, selected: savedDay === value ? "" : null }, label)));
+      const time = el("input", { type: "time", value: savedTime || "04:00" });
+      expressionHost.append(el("div", { class: "grid cols-2" }, el("label", {}, "Day", day), el("label", {}, "Time", time)));
+      readExpression = () => `${day.value} ${time.value}`;
+    } else if (scheduleType === "monthly") {
+      const [savedDay = "1", savedTime = "04:00"] = saved.split(/\s+/);
+      const day = el("input", { type: "number", min: "1", max: "31", step: "1", value: savedDay || "1" });
+      const time = el("input", { type: "time", value: savedTime || "04:00" });
+      expressionHost.append(el("div", { class: "grid cols-2" }, el("label", {}, "Day of month", day), el("label", {}, "Time", time)));
+      readExpression = () => `${day.value} ${time.value}`;
+    } else if (scheduleType === "fixed_interval") {
+      const seconds = Math.max(60, Number(saved) || 3600);
+      const choices = [[86400, "days"], [3600, "hours"], [60, "minutes"]];
+      const [factor, selectedUnit] = choices.find(([value]) => seconds % value === 0) || [60, "minutes"];
+      const amount = el("input", { type: "number", min: "1", step: "1", value: String(Math.max(1, seconds / factor)) });
+      const unit = el("select", {}, ...choices.map(([value, label]) => el("option", { value: String(value), selected: label === selectedUnit ? "" : null }, label)));
+      expressionHost.append(el("div", { class: "grid cols-2" }, el("label", {}, "Every", amount), el("label", {}, "Unit", unit)));
+      readExpression = () => String(Math.round(Number(amount.value) * Number(unit.value)));
+    } else {
+      const input = el("input", { value: saved || "0 4 * * *", placeholder: "0 4 * * *", spellcheck: "false" });
+      expressionHost.append(el("label", {}, "Five-field cron expression", input));
+      readExpression = () => input.value.trim();
+    }
+    renderedType = scheduleType;
+  };
+  renderExpression(initialType);
+  type.addEventListener("change", () => {
+    expressionCache[renderedType] = readExpression();
+    renderExpression(type.value);
+  });
+
+  const selectedZone = s?.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const timezone = timezoneSelect(selectedZone);
   const action = el("select", {},
-    ...[["restart_server", "Restart server"], ["backup", "Create backup"], ["stop_server", "Stop server"],
-        ["start_server", "Start server"], ["send_console_command", "Console command"], ["broadcast_message", "Broadcast message"], ["save_all", "Save all"]]
-      .map(([v, l]) => el("option", { value: v, selected: s && s.action === v ? "" : null }, l)));
-  const payload = el("input", { value: s && s.action_payload ? (typeof s.action_payload === "string" ? s.action_payload : JSON.stringify(s.action_payload)) : "", placeholder: 'command/message or {"type":"world"}' });
+    ...[["restart_server", "Restart server"], ["stop_server", "Stop server"], ["start_server", "Start server"],
+      ["send_console_command", "Run console command"], ["broadcast_message", "Broadcast message"],
+      ["save_all", "Save world"], ["create_backup", "Create backup"]]
+      .map(([value, label]) => el("option", { value, selected: initialAction === value ? "" : null }, label)));
+  const actionDetailHost = el("div", { class: "schedule-action-detail" });
+  const command = el("input", { value: initialPayload.command || "", placeholder: "say Server restart in 5 minutes", spellcheck: "false" });
+  const message = el("input", { value: initialPayload.message || "", placeholder: "Server maintenance starts soon" });
+  const backupAliases = { world: "world_and_player_data", configuration: "configuration_only", full: "full_server" };
+  const initialBackupType = backupAliases[initialPayload.backup_type || initialPayload.type] || initialPayload.backup_type || "full_server";
+  const backupType = el("select", {},
+    ...[["full_server", "Full server"], ["world_and_player_data", "World and player data"], ["configuration_only", "Configuration only"]]
+      .map(([value, label]) => el("option", { value, selected: initialBackupType === value ? "" : null }, label)));
   const offline = el("select", {},
-    ...[["skip", "Skip if server offline"], ["start_first", "Start server first"], ["run_anyway", "Run anyway"]]
-      .map(([v, l]) => el("option", { value: v, selected: s && s.offline_policy === v ? "" : null }, l)));
+    ...[["skip_when_offline", "Skip when server is offline"], ["start_then_execute", "Start server, then run"], ["wait_until_online", "Wait up to 10 minutes"]]
+      .map(([value, label]) => el("option", { value, selected: initialOffline === value ? "" : null }, label)));
+  const offlineRow = el("div", { class: "field-row" }, el("label", {}, "If server is offline", offline));
+  const renderActionDetail = () => {
+    actionDetailHost.innerHTML = "";
+    if (action.value === "send_console_command") actionDetailHost.append(el("div", { class: "field-row" }, el("label", {}, "Command", command)));
+    if (action.value === "broadcast_message") actionDetailHost.append(el("div", { class: "field-row" }, el("label", {}, "Message", message)));
+    if (action.value === "create_backup") actionDetailHost.append(el("div", { class: "field-row" }, el("label", {}, "Backup scope", backupType)));
+    offlineRow.classList.toggle("hidden", !["send_console_command", "broadcast_message", "save_all"].includes(action.value));
+  };
+  action.addEventListener("change", renderActionDetail);
+
   const missed = el("select", {},
-    ...[["skip", "Skip missed runs"], ["run_once_on_boot", "Run once after boot"]]
-      .map(([v, l]) => el("option", { value: v, selected: s && s.missed_run_policy === v ? "" : null }, l)));
-  const enabled = el("input", { type: "checkbox" }); enabled.checked = s ? !!s.enabled : true;
+    ...[["skip_missed_run", "Skip the missed run"], ["run_once_after_startup", "Run once after Bonghos starts"]]
+      .map(([value, label]) => el("option", { value, selected: initialMissed === value ? "" : null }, label)));
+  const conflict = el("select", {},
+    ...[["skip", "Skip this run"], ["retry_later", "Retry after 2 minutes"]]
+      .map(([value, label]) => el("option", { value, selected: (s?.conflict_policy || "skip") === value ? "" : null }, label)));
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = s ? !!s.enabled : true;
+  renderActionDetail();
 
   modal(s ? "Edit schedule" : "New schedule", [
+    el("h3", {}, "Schedule"),
     el("div", { class: "field-row" }, el("label", {}, "Name", name)),
-    el("div", { class: "field-row" }, el("label", {}, "Type", type)),
-    el("div", { class: "field-row" }, el("label", {}, "Expression", expr),
-      el("span", { class: "hint" }, "daily: HH:MM · weekly: day HH:MM · interval: minutes · cron: five fields")),
-    el("div", { class: "field-row" }, el("label", {}, "Timezone", tz)),
+    el("div", { class: "field-row" }, el("label", {}, "Description", description)),
+    el("div", { class: "field-row" }, el("label", {}, "Repeats", type)),
+    el("div", { class: "field-row" }, expressionHost),
+    el("div", { class: "field-row" }, el("label", {}, "Timezone", timezone)),
+    el("h3", {}, "Minecraft action"),
     el("div", { class: "field-row" }, el("label", {}, "Action", action)),
-    el("div", { class: "field-row" }, el("label", {}, "Payload", payload)),
-    el("div", { class: "field-row" }, el("label", {}, "If server is offline", offline)),
-    el("div", { class: "field-row" }, el("label", {}, "Missed while machine was off", missed)),
-    el("div", { class: "field-row" }, el("label", { style: "flex-direction:row; gap:10px; align-items:center" }, enabled, " Enabled")),
+    actionDetailHost,
+    el("h3", {}, "Run behavior"),
+    offlineRow,
+    el("div", { class: "field-row" }, el("label", {}, "If a run was missed", missed)),
+    el("div", { class: "field-row" }, el("label", {}, "If another operation is running", conflict)),
+    el("div", { class: "field-row" }, el("label", { class: "check-row" }, enabled, " Enabled")),
   ], [
-    ["Cancel", "ghost", (c) => c()],
-    ["Save", "primary", async (c) => {
-      let ap = payload.value.trim();
-      if (action.value === "backup" && ap && !ap.startsWith("{")) ap = JSON.stringify({ type: ap });
-      if (ap && !ap.startsWith("{") && !ap.startsWith("\"")) ap = JSON.stringify(ap);
+    ["Cancel", "ghost", (close) => close()],
+    ["Save", "primary", async (close) => {
+      const expression = readExpression().trim();
+      if (!name.value.trim()) { toast("Schedule name is required", "err"); name.focus(); return; }
+      if (!expression) { toast("Schedule time is required", "err"); return; }
+      if (action.value === "send_console_command" && !command.value.trim()) { toast("Console command is required", "err"); command.focus(); return; }
+      if (action.value === "broadcast_message" && !message.value.trim()) { toast("Broadcast message is required", "err"); message.focus(); return; }
+      let actionPayload = null;
+      if (action.value === "send_console_command") actionPayload = { command: command.value.trim() };
+      if (action.value === "broadcast_message") actionPayload = { message: message.value.trim() };
+      if (action.value === "create_backup") actionPayload = { backup_type: backupType.value };
       const body = {
-        name: name.value, schedule_type: type.value, schedule_expression: expr.value,
-        timezone: tz.value, action: action.value,
-        action_payload: ap ? JSON.parse(ap) : null,
-        offline_policy: offline.value, missed_run_policy: missed.value,
-        conflict_policy: "wait", enabled: enabled.checked, description: "",
+        name: name.value.trim(), description: description.value.trim(), enabled: enabled.checked,
+        schedule_type: type.value, schedule_expression: expression, timezone: timezone.value,
+        action: action.value, action_payload: actionPayload,
+        offline_policy: offline.value, missed_run_policy: missed.value, conflict_policy: conflict.value,
       };
       try {
         if (s) await api(`/schedules/${s.id}`, { method: "PATCH", json: body });
         else await api("/schedules", { method: "POST", json: body });
-        c(); renderPage();
-      } catch (e) { toast(e.message, "err"); }
+        close(); renderPage();
+      } catch (error) { toast(error.message, "err"); }
     }]]);
 }
 
@@ -1273,10 +2029,10 @@ async function pagePerformance(main) {
   main.append(
     pageHeader("Performance", "One-hour process and host history. Process memory is Java RSS, not configured heap."),
     el("div", { class: "grid cols-2" },
-      el("div", { class: "card" }, el("h3", {}, "CPU (% of one core)"), el("div", { class: "chart", id: "chart-cpu" })),
-      el("div", { class: "card" }, el("h3", {}, "Process memory"), el("div", { class: "chart", id: "chart-mem" })),
-      el("div", { class: "card" }, el("h3", {}, "Players online"), el("div", { class: "chart", id: "chart-players" })),
-      el("div", { class: "card" }, el("h3", {}, "Disk free"), el("div", { class: "chart", id: "chart-disk" }))));
+      el("div", { class: "card graph-card" }, el("h3", {}, "CPU (% of one core)"), el("div", { class: "chart", id: "chart-cpu" })),
+      el("div", { class: "card graph-card" }, el("h3", {}, "Process memory"), el("div", { class: "chart", id: "chart-mem" })),
+      el("div", { class: "card graph-card" }, el("h3", {}, "Players online"), el("div", { class: "chart", id: "chart-players" })),
+      el("div", { class: "card graph-card" }, el("h3", {}, "Disk free"), el("div", { class: "chart", id: "chart-disk" }))));
   drawCharts();
 }
 
@@ -1327,42 +2083,238 @@ function sparkline(sel, values, fmt = (v) => v.toFixed(1)) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
   host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <polyline points="${pts}" fill="none" stroke="var(--accent-2)" stroke-width="2"/>
+    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"/>
   </svg><div class="muted">now: ${fmt(values[values.length - 1])} · peak: ${fmt(max)}</div>`;
 }
 
 // ----- servers (projects + import) ------------------------------------------
+function serverCardIcon(server) {
+  const fallback = el("div", { class: "server-card-icon server-card-icon-fallback", "aria-hidden": "true" },
+    solarIcon("server-square-linear"));
+  const revision = encodeURIComponent(server.icon_revision || 0);
+  const icon = el("img", {
+    class: "server-card-icon",
+    src: DEMO_MODE ? server.demo_icon : `/api/servers/${server.id}/icon?v=${revision}`,
+    alt: "",
+    width: 64,
+    height: 64,
+    loading: "lazy",
+    decoding: "async",
+  });
+  icon.addEventListener("error", () => icon.replaceWith(fallback), { once: true });
+  return icon;
+}
+
+const PROVIDER_ICONS = {
+  forge: {
+    viewBox: "0 0 24 24",
+    body: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="m18.66 8.286l.368-.368c.342-.343.514-.514.617-.692a1.56 1.56 0 0 0 0-1.562c-.103-.178-.275-.35-.617-.692s-.514-.514-.692-.616a1.56 1.56 0 0 0-1.562 0c-.178.102-.35.274-.692.616l-.368.368m-4.419 10.31l-5.523 5.524c-.343.343-.514.514-.692.617a1.56 1.56 0 0 1-1.562 0c-.179-.103-.35-.274-.692-.617c-.343-.342-.514-.514-.617-.692a1.56 1.56 0 0 1 0-1.562c.103-.178.274-.35.617-.692l5.523-5.523m-.736-.737l4.419 4.42c1.735 1.735 2.603 2.603 3.682 2.603s1.946-.868 3.682-2.604S22 13.783 22 12.705c0-1.079-.868-1.947-2.604-3.682l-4.419-4.42C13.242 2.869 12.374 2 11.295 2s-1.946.868-3.682 2.604s-2.604 2.604-2.604 3.682c0 1.079.868 1.947 2.604 3.682Z"/>',
+  },
+  fabric: {
+    viewBox: "0 0 16 16",
+    body: '<g fill-rule="evenodd" stroke-linejoin="round"><path fill="#38342a" d="M8 1v1H7v2H6v1H5v1H4v1H3v1H2v1H1v2h1v1h1v1h1v1h1v1h2v-1h1v-2h1v-1h1v-1h1V9h2V8h1V6h-1V5h-1V4h-1V3h-1V2H9V1z"/><path fill="#dbd0b4" d="M8 2v1h1v1h1v1h1v1h1V5h-1V4h-1V3H9V2zM7 4v2H5v1H4v1H3v2h1v1h1v1h2v-2H6V9h2v1h1V8H8V7h2V6H9V5H8V4z"/><path fill="#38342a" d="M8 4v1h1v1h1v1h1V6h-1V5H9V4z"/><path fill="#bcb29c" d="M9 4v1h1V4zm1 1v1h1V5zm1 1v1h1V6zm0 1h-1v1H9v2h1V9h1zm-2 3H7v2h1v-1h1zm-2 2H6v1h1z"/><path fill="#807a6d" d="M12 7v1h1V7z"/><path fill="#aea694" d="M2 9v1h1v1h1v1h1v1h1v-1H5v-1H4v-1H3V9z"/><path fill="#9a927e" d="M2 10v1h1v-1zm1 1v1h1v-1zm1 1v1h1v-1zm1 1v1h1v-1z"/><path fill="#c6bca5" d="M8 3v1h1V3zM6 5v1h1V5zm1 1v1h1V6zm1 1v1h2V7zM5 8v1h1V8zm1 1v1h2V9z"/></g>',
+  },
+};
+
+const PROVIDER_FAVICONS = {
+  curseforge: "curseforge-favicon.ico",
+  modrinth: "modrinth-favicon.ico",
+};
+
+function serverProviderLabel(server) {
+  const sourceHint = `${server.source_provider || ""} ${server.source_url_host || ""} ${server.source_type || ""}`.toLowerCase();
+  const inferredProvider = sourceHint.includes("curseforge") ? "curseforge"
+    : sourceHint.includes("modrinth") ? "modrinth" : "";
+  const raw = String(server.provider || inferredProvider || server.modloader || "unknown").trim();
+  const key = raw.toLowerCase().replace(/[\s_-]+/g, "");
+  const iconData = PROVIDER_ICONS[key === "neoforge" ? "forge" : key];
+  const favicon = PROVIDER_FAVICONS[key];
+  const icon = favicon
+    ? el("img", { class: "provider-icon", src: favicon, alt: "", width: "18", height: "18" })
+    : iconData
+      ? document.createElementNS("http://www.w3.org/2000/svg", "svg")
+      : solarIcon("server-square-linear", "provider-icon");
+  if (iconData && !favicon) {
+    icon.setAttribute("class", "provider-icon");
+    icon.setAttribute("viewBox", iconData.viewBox);
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = iconData.body;
+  }
+  const names = { forge: "Forge", neoforge: "NeoForge", fabric: "Fabric", modrinth: "Modrinth", curseforge: "CurseForge" };
+  return el("span", { class: "server-provider" }, icon, names[key] || raw);
+}
+
+function worldDownloadMenuItem(server) {
+  const href = DEMO_MODE ? "demo-world.zip" : `/api/servers/${server.id}/world.zip`;
+  return el("a", { class: "action-menu-item", role: "menuitem", href, download: `${server.slug}-world.zip` },
+    solarIcon("download-linear"), "Download world");
+}
+
+function closeActionMenus(except = null) {
+  document.querySelectorAll(".action-menu:not([hidden])").forEach((menu) => {
+    if (menu === except) return;
+    closeActionMenu(menu);
+  });
+}
+
+function closeActionMenu(menu) {
+  menu.hidden = true;
+  menu.actionTrigger?.setAttribute("aria-expanded", "false");
+  menu.removeAttribute("style");
+  menu.actionOwner?.append(menu);
+}
+
+function positionActionMenu(menu, trigger) {
+  const triggerRect = trigger.getBoundingClientRect();
+  const gap = 4;
+  const edge = 8;
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  const left = Math.max(edge, Math.min(window.innerWidth - width - edge, triggerRect.right - width));
+  let top = triggerRect.bottom + gap;
+  if (top + height > window.innerHeight - edge) top = Math.max(edge, triggerRect.top - height - gap);
+  Object.assign(menu.style, { position: "fixed", left: left + "px", right: "auto", top: top + "px" });
+}
+
+function overflowActionsMenu(label, items, className = "") {
+  if (!items.length) return null;
+  const menu = el("div", { class: "action-menu", role: "menu", hidden: "" }, ...items);
+  const trigger = el("button", {
+    class: "btn ghost small icon-button action-menu-trigger",
+    type: "button",
+    title: label,
+    "aria-label": label,
+    "aria-haspopup": "menu",
+    "aria-expanded": "false",
+    onclick: (event) => {
+      event.stopPropagation();
+      const open = menu.hidden;
+      if (!open) {
+        closeActionMenu(menu);
+        return;
+      }
+      closeActionMenus();
+      document.body.append(menu);
+      menu.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+      positionActionMenu(menu, trigger);
+      menu.querySelector('[role="menuitem"]')?.focus();
+    },
+  }, solarIcon("menu-dots-bold"));
+
+  menu.addEventListener("click", () => closeActionMenus());
+  menu.addEventListener("keydown", (event) => {
+    const options = [...menu.querySelectorAll('[role="menuitem"]')];
+    const index = options.indexOf(document.activeElement);
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeActionMenus();
+      trigger.focus();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? 0
+      : event.key === "End" ? options.length - 1
+        : (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+    options[next]?.focus();
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || menu.hidden) return;
+    event.preventDefault();
+    closeActionMenus();
+  });
+
+  const owner = el("div", { class: "overflow-actions" + (className ? " " + className : "") }, trigger, menu);
+  menu.actionOwner = owner;
+  menu.actionTrigger = trigger;
+  return owner;
+}
+
+function serverActionsMenu(server) {
+  const items = [];
+  if (can("server.files.manage")) items.push(worldDownloadMenuItem(server));
+  if (can("server.import.manage")) items.push(
+    el("button", { class: "action-menu-item", type: "button", role: "menuitem", onclick: () => duplicateProject(server) },
+      solarIcon("copy-linear"), "Duplicate"));
+  if (can("server.configuration.manage")) items.push(
+    el("button", { class: "action-menu-item danger", type: "button", role: "menuitem", onclick: () => resetWorld(server) },
+      solarIcon("refresh-linear"), "Reset world"));
+  if (can("server.import.manage")) items.push(
+    el("button", { class: "action-menu-item danger", type: "button", role: "menuitem", onclick: () => deleteProject(server) },
+      solarIcon("trash-bin-trash-linear"), "Delete"));
+  return overflowActionsMenu(`Actions for ${server.display_name}`, items, "server-actions");
+}
+
+document.addEventListener("click", () => closeActionMenus());
+
+function duplicateProject(server) {
+  const name = el("input", { value: server.display_name + " Copy", maxlength: "120" });
+  modal("Duplicate server", [
+    el("p", { class: "muted" }, "Copies the complete server into a new managed project. Autostart stays disabled on the copy."),
+    el("div", { class: "field-row" }, el("label", {}, "New server name", name)),
+  ], [
+    ["Cancel", "ghost", (close) => close()],
+    ["Duplicate", "primary", async (close) => {
+      try {
+        const displayName = name.value.trim();
+        if (!displayName) throw new Error("Enter a name for the duplicate.");
+        await api(`/servers/${server.id}/duplicate`, { method: "POST", json: { display_name: displayName } });
+        close();
+        toast("Server duplication started", "ok");
+        renderPage();
+      } catch (error) { toast(error.message, "err"); }
+    }],
+  ]);
+}
+
+function resetWorld(server) {
+  confirmModal("Reset world",
+    `Reset the world for "${server.display_name}"? Bonghos creates a verified safety backup first, then removes the current world so Minecraft generates a new one on the next start. The server must be stopped.`,
+    "Reset world", async () => {
+      try {
+        const result = await api(`/servers/${server.id}/world/reset`, { method: "POST", json: { confirm: true } });
+        toast("World reset. Safety backup: " + (result.backup_id || "created"), "ok");
+      } catch (error) { toast(error.message, "err"); }
+    });
+}
+
 async function pageServers(main) {
   await refreshServers();
   const ops = await api("/operations?active=true").catch(() => []);
   main.innerHTML = "";
-  const cards = S.servers.map((s2) => el("div", { class: "card" },
-    el("div", { class: "toolbar", style: "margin-bottom:8px" },
-      el("strong", {}, s2.display_name),
-      s2.id === S.activeId ? el("span", { class: "tag" }, "active") : "",
-      s2.external_directory ? el("span", { class: "tag" }, "external link") : "",
-      el("div", { class: "spacer" })),
-    el("div", { class: "muted mono" }, s2.slug),
-    el("div", { class: "muted" }, (s2.modloader || "unknown modloader") + " · imported via " + s2.source_type),
-    el("div", { class: "row-actions", style: "margin-top:12px" },
-      s2.id !== S.activeId && can("server.configuration.manage")
-        ? el("button", { class: "btn", onclick: async () => {
-            try { await api(`/servers/${s2.id}/select`, { method: "POST", json: {} }); toast("Active project changed", "ok"); refreshServers().then(renderPage); }
-            catch (e) { toast(e.message, "err"); }
-          } }, "Make active") : "",
-      can("server.import.manage") ? el("button", { class: "btn danger", onclick: () => deleteProject(s2) }, "Delete") : "")));
+  const cards = S.servers.map((s2) => el("div", { class: "card server-card" },
+    serverCardIcon(s2),
+    s2.id === S.activeId ? el("span", { class: "tag server-card-active-mobile" }, "active") : null,
+    el("div", { class: "server-card-body" },
+      el("div", { class: "toolbar compact" },
+        el("strong", {}, s2.display_name),
+        s2.id === S.activeId ? el("span", { class: "tag server-card-active-desktop" }, "active") : "",
+        s2.external_directory ? el("span", { class: "tag" }, "external link") : "",
+        el("div", { class: "spacer" })),
+      el("div", { class: "muted mono" }, s2.slug),
+      el("div", { class: "server-provider-row muted" },
+        serverProviderLabel(s2), el("span", { "aria-hidden": "true" }, "·"), "imported via " + s2.source_type),
+      el("div", { class: "row-actions action-row-spaced server-card-actions" },
+        el("div", { class: "spacer" }),
+        s2.id !== S.activeId && can("server.configuration.manage")
+          ? el("button", { class: "btn small", onclick: async () => {
+              try { await api(`/servers/${s2.id}/select`, { method: "POST", json: {} }); toast("Active project changed", "ok"); refreshServers().then(renderPage); }
+              catch (e) { toast(e.message, "err"); }
+            } }, "Make active") : "",
+        serverActionsMenu(s2)))));
   main.append(
     pageHeader("Servers", "Project inventory, active-project selection, and persistent import progress.", [
       can("server.import.manage") ? el("button", { class: "btn primary", onclick: importWizard }, "Import server") : null,
-    ]),
+    ], overviewBackButton()),
     el("div", { id: "ops-host" }, ...(ops || []).map(opCard)),
     el("div", { class: "grid cols-2" }, cards.length ? cards : el("p", { class: "muted" }, "No servers imported yet — use “Import server”.")));
 }
 
 function opCard(op) {
   const pct = op.total_bytes > 0 ? Math.min(100, (op.bytes_processed / op.total_bytes) * 100) : null;
-  return el("div", { class: "card", "data-op": op.id, style: "margin-bottom:14px" },
-    el("div", { class: "toolbar", style: "margin-bottom:8px" },
+  return el("div", { class: "card list-card", "data-op": op.id },
+    el("div", { class: "toolbar compact" },
       el("strong", {}, op.kind), el("span", { class: "tag" }, op.stage.replace(/_/g, " ")),
       el("div", { class: "spacer" }),
       ["completed", "failed", "cancelled"].includes(op.stage) ? "" :
@@ -1371,7 +2323,7 @@ function opCard(op) {
         } }, "Cancel")),
     el("div", { class: "progress" + (pct === null ? " indeterminate" : "") },
       el("div", { style: `width:${pct === null ? 35 : pct}%` })),
-    el("div", { class: "muted", style: "margin-top:6px" },
+    el("div", { class: "muted detail-note" },
       op.message || "", pct !== null ? ` ${fmtBytes(op.bytes_processed)} / ${fmtBytes(op.total_bytes)}` : ` ${fmtBytes(op.bytes_processed || 0)}`),
     op.error ? el("div", { class: "error" }, op.error) : "");
 }
@@ -1390,7 +2342,7 @@ function deleteProject(s2) {
   const delFiles = el("input", { type: "checkbox" });
   modal("Delete project", [
     el("p", {}, `Delete "${s2.display_name}"? Backups are kept unless removed separately.`),
-    el("label", { style: "flex-direction:row; gap:10px; align-items:center" }, delFiles, " Also delete the server files on disk"),
+    el("label", { class: "check-row" }, delFiles, " Also delete the server files on disk"),
   ], [
     ["Cancel", "ghost", (c) => c()],
     ["Delete", "danger", async (c) => {
@@ -1411,11 +2363,11 @@ function uploadArchive(file, displayName) {
   let lastTime = started, lastLoaded = 0, instantRate = 0;
 
   const bar = el("div", { style: "width:0%" });
-  const line = el("div", { class: "muted", style: "margin-top:6px" }, "Preparing upload…");
+  const line = el("div", { class: "muted detail-note" }, "Preparing upload…");
   const xhr = new XMLHttpRequest();
   const cancelBtn = el("button", { class: "btn ghost", onclick: () => xhr.abort() }, "Cancel");
-  const card = el("div", { class: "card", style: "margin-bottom:14px" },
-    el("div", { class: "toolbar", style: "margin-bottom:8px" },
+  const card = el("div", { class: "card list-card" },
+    el("div", { class: "toolbar compact" },
       el("strong", {}, "Uploading " + file.name),
       el("span", { class: "tag" }, "browser → host"),
       el("div", { class: "spacer" }), cancelBtn),
@@ -1595,33 +2547,49 @@ async function pageUsers(main) {
   const users = await api("/users");
   main.innerHTML = "";
   const rows = (users || []).map((u) => el("tr", {},
-    el("td", {}, u.Username),
+    el("td", {}, el("div", { class: "user-identity" },
+      el("strong", {}, u.Username),
+      el("span", { class: "mobile-only mobile-row-detail" }, `${u.Role} · ${u.Disabled ? "Disabled" : "Active"}`))),
     el("td", {}, el("span", { class: "tag" }, u.Role)),
     el("td", {}, u.Disabled ? "Disabled" : "Active"),
-    el("td", { class: "row-actions" },
-      u.ID !== S.me.id ? [
-        el("button", { class: "btn ghost", onclick: () => changeRole(u) }, "Role"),
-        el("button", { class: "btn ghost", onclick: async () => {
-          try { await api(`/users/${u.ID}/disable`, { method: "POST", json: { disabled: !u.Disabled } }); renderPage(); }
-          catch (e) { toast(e.message, "err"); }
-        } }, u.Disabled ? "Enable" : "Disable"),
-        el("button", { class: "btn ghost", onclick: async () => {
-          try { await api(`/users/${u.ID}/revoke-sessions`, { method: "POST", json: {} }); toast("Sessions revoked", "ok"); }
-          catch (e) { toast(e.message, "err"); }
-        } }, "Revoke sessions"),
-        el("button", { class: "btn danger", onclick: () =>
-          confirmModal("Delete user", `Delete account "${u.Username}"?`, "Delete", async () => {
-            try { await api(`/users/${u.ID}`, { method: "DELETE" }); renderPage(); } catch (e) { toast(e.message, "err"); }
-          }) }, "Delete"),
-      ] : el("span", { class: "muted" }, "you"))));
+    el("td", { class: "table-actions" }, userActions(u))));
   main.append(
     pageHeader("Users", "Accounts, roles, invitations, sessions, and final-Owner protection.", [
       el("button", { class: "btn primary", onclick: inviteUser }, "Invite user"),
     ]),
-    el("div", { class: "table-wrap" },
+    el("div", { class: "table-wrap users-table" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "Username"), el("th", {}, "Role"), el("th", {}, "Status"), el("th", {}, ""))),
         el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "4", class: "muted" }, "No users returned by the API."))))));
+}
+
+function userActions(user) {
+  if (user.ID === S.me.id) return el("span", { class: "muted" }, "you");
+  const toggleDisabled = async () => {
+    try { await api(`/users/${user.ID}/disable`, { method: "POST", json: { disabled: !user.Disabled } }); renderPage(); }
+    catch (error) { toast(error.message, "err"); }
+  };
+  const revokeSessions = async () => {
+    try { await api(`/users/${user.ID}/revoke-sessions`, { method: "POST", json: {} }); toast("Sessions revoked", "ok"); }
+    catch (error) { toast(error.message, "err"); }
+  };
+  const deleteUser = () => confirmModal("Delete user", `Delete account "${user.Username}"?`, "Delete", async () => {
+    try { await api(`/users/${user.ID}`, { method: "DELETE" }); renderPage(); }
+    catch (error) { toast(error.message, "err"); }
+  });
+  const actions = [
+    { label: "Role", icon: "key-linear", run: () => changeRole(user) },
+    { label: user.Disabled ? "Enable" : "Disable", icon: user.Disabled ? "check-circle-linear" : "close-circle-linear", run: toggleDisabled },
+    { label: "Revoke sessions", icon: "logout-2-linear", run: revokeSessions },
+    { label: "Delete", icon: "trash-bin-trash-linear", danger: true, run: deleteUser },
+  ];
+  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+    ...actions.map((action) => el("button", { class: "btn " + (action.danger ? "danger" : "ghost"), onclick: action.run }, action.label)));
+  const mobile = overflowActionsMenu(`Actions for ${user.Username}`,
+    actions.map((action) => el("button", {
+      class: "action-menu-item" + (action.danger ? " danger" : ""), type: "button", role: "menuitem", onclick: action.run,
+    }, solarIcon(action.icon), action.label)), "mobile-row-actions");
+  return el("div", { class: "responsive-row-actions" }, desktop, mobile);
 }
 
 function inviteUser() {
@@ -1670,7 +2638,7 @@ async function pageHost(main) {
       statCard("Memory available", fmtBytes(d.mem_available), "of " + fmtBytes(d.mem_total)),
       statCard("Disk free", fmtBytes(d.disk_free), "of " + fmtBytes(d.disk_total)),
       statCard("Load (1m)", (d.load1 || 0).toFixed(2), "")),
-    el("div", { class: "card", style: "margin-top:16px" },
+    el("div", { class: "card flow-section" },
       el("h3", {}, "Services & panel"),
       el("dl", { class: "kv" },
         el("dt", {}, "Panel address"), el("dd", { class: "mono" }, `${d.bind_address}:${d.port}`),
@@ -1693,7 +2661,7 @@ async function pageSecurity(main) {
       statCard("Signed in as", S.me.username, S.me.role),
       statCard("Active accounts", activeUsers, disabledUsers + " disabled"),
       statCard("TOTP policy", "Mandatory", "enforced at setup and invitation activation")),
-    el("div", { class: "grid cols-2", style: "margin-top:14px" },
+    el("div", { class: "grid cols-2 flow-section" },
       el("div", { class: "card" },
         el("h3", {}, "Current session"),
         el("dl", { class: "kv" },
