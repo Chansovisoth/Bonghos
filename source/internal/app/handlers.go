@@ -44,6 +44,13 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/users/{id}/revoke-sessions", a.requirePerm(authorization.PermUsersManage, a.handleUserRevoke))
 	mux.HandleFunc("DELETE /api/users/{id}", a.requirePerm(authorization.PermUsersManage, a.handleUserDelete))
 
+	// --- notification bots -------------------------------------------------
+	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotList))
+	mux.HandleFunc("POST /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotCreate))
+	mux.HandleFunc("PATCH /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotUpdate))
+	mux.HandleFunc("DELETE /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotDelete))
+	mux.HandleFunc("POST /api/bots/{id}/test", a.requirePerm(authorization.PermSecurityManage, a.handleBotTest))
+
 	// --- servers ------------------------------------------------------------
 	mux.HandleFunc("GET /api/servers", a.requirePerm(authorization.PermServerView, a.handleServerList))
 	mux.HandleFunc("POST /api/servers", a.requirePerm(authorization.PermImportManage, a.handleServerCreate))

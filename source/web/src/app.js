@@ -315,6 +315,10 @@ const DEMO_SERVERS = [
   { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "neoforge", modloader_version: "21.1.228", minecraft_version: "1.21.1", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, demo_icon: "demo-server-bio1.png" },
   { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", external_directory: false, demo_icon: "demo-server-creative-lab.png" },
 ];
+const DEMO_BOTS = [
+  { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
+  { id: 2, name: "Staff channel", provider: "discord", destination_id: "123456789012345678", enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
+];
 const DEMO_CONSOLE = [
   "[19:27:36] [Server thread/INFO]: Starting minecraft server version 1.20.1",
   "[19:27:43] [Server thread/INFO]: Loading Forge mods from /home/klaude/bonghos/servers/minecraft-java/modded/bio1/mods",
@@ -378,6 +382,28 @@ async function demoApi(path, opts = {}) {
       const name = (opts.json && opts.json.name) || "server";
       return { slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server" };
     }
+    if (method === "POST" && clean === "/bots") {
+      const created = { id: Math.max(0, ...DEMO_BOTS.map((bot) => bot.id)) + 1, ...opts.json, token_configured: true };
+      delete created.token;
+      DEMO_BOTS.push(created);
+      return { ...created };
+    }
+    const botMatch = clean.match(/^\/bots\/(\d+)$/);
+    if (botMatch) {
+      const index = DEMO_BOTS.findIndex((bot) => bot.id === Number(botMatch[1]));
+      if (index < 0) throw new Error("Notification bot not found");
+      if (method === "DELETE") {
+        DEMO_BOTS.splice(index, 1);
+        return { ok: true };
+      }
+      if (method === "PATCH") {
+        const next = { ...opts.json };
+        delete next.token;
+        Object.assign(DEMO_BOTS[index], next);
+        return { ...DEMO_BOTS[index] };
+      }
+    }
+    if (method === "POST" && /^\/bots\/\d+\/test$/.test(clean)) return { ok: true };
     const updateMatch = clean.match(/^\/servers\/(\d+)$/);
     if (method === "PATCH" && updateMatch) {
       const server = DEMO_SERVERS.find((entry) => entry.id === Number(updateMatch[1]));
@@ -407,6 +433,7 @@ async function demoApi(path, opts = {}) {
   switch (clean) {
     case "/auth/csrf": return { csrf: "demo-csrf-token" };
     case "/auth/me": return DEMO_ME;
+    case "/bots": return DEMO_BOTS.map((bot) => ({ ...bot }));
     case "/version": return { version: "0.1.1-demo" };
     case "/servers": return { servers: DEMO_SERVERS, active_id: 1 };
     case "/server/status": return S.status;
@@ -4103,8 +4130,206 @@ async function pageSecurity(main) {
           el("td", { class: "mono" }, a2.target || "")))))));
 }
 
+const BOT_EVENT_FIELDS = [
+  ["notify_server_started", "Server started", "After Minecraft is fully ready"],
+  ["notify_server_stopped", "Server stopped", "After the process fully exits"],
+  ["notify_player_joined", "Player joins", "Includes player and server names"],
+  ["notify_player_left", "Player leaves", "Includes player and server names"],
+];
+
+function botProviderName(provider) {
+  return provider === "telegram" ? "Telegram" : "Discord";
+}
+
+function botProviderMark(provider) {
+  return el("span", { class: `bot-provider-mark ${provider}`, "aria-hidden": "true" },
+    provider === "telegram" ? "TG" : "DC");
+}
+
+async function patchBot(bot, patch, control = null) {
+  if (control) control.disabled = true;
+  try {
+    const updated = await api(`/bots/${bot.id}`, { method: "PATCH", json: patch });
+    Object.assign(bot, updated);
+    return updated;
+  } finally {
+    if (control) control.disabled = false;
+  }
+}
+
+function botEventToggle(bot, field, label, note) {
+  const input = el("input", { type: "checkbox", "aria-label": `${label} for ${bot.name}` });
+  input.checked = !!bot[field];
+  input.addEventListener("change", async () => {
+    const previous = !input.checked;
+    try {
+      await patchBot(bot, { [field]: input.checked }, input);
+      toast(`${label} notifications ${input.checked ? "enabled" : "disabled"}`, "ok");
+    } catch (error) {
+      input.checked = previous;
+      toast(error.message, "err");
+    }
+  });
+  return el("label", { class: "bot-event-option check-row" },
+    el("span", { class: "bot-event-copy" }, el("strong", {}, label), el("small", {}, note)),
+    input);
+}
+
+function botPowerButton(bot) {
+  const button = el("button", {
+    class: "bot-power" + (bot.enabled ? " is-on" : ""),
+    type: "button",
+    "aria-pressed": String(!!bot.enabled),
+    "aria-label": `${bot.enabled ? "Turn off" : "Turn on"} ${bot.name}`,
+    onclick: async () => {
+      const next = !bot.enabled;
+      try {
+        await patchBot(bot, { enabled: next }, button);
+        button.classList.toggle("is-on", next);
+        button.closest(".bot-card")?.classList.toggle("is-disabled", !next);
+        button.setAttribute("aria-pressed", String(next));
+        button.setAttribute("aria-label", `${next ? "Turn off" : "Turn on"} ${bot.name}`);
+        button.querySelector(".bot-power-label").textContent = next ? "On" : "Off";
+        toast(`${bot.name} turned ${next ? "on" : "off"}`, "ok");
+      } catch (error) { toast(error.message, "err"); }
+    },
+  }, el("span", { class: "bot-power-track", "aria-hidden": "true" }, el("span", {})),
+  el("span", { class: "bot-power-label" }, bot.enabled ? "On" : "Off"));
+  return button;
+}
+
+function botCard(bot) {
+  const destinationLabel = bot.provider === "telegram" ? "Chat" : "Channel";
+  return el("article", { class: "card bot-card" + (bot.enabled ? "" : " is-disabled") },
+    el("div", { class: "bot-card-head" },
+      botProviderMark(bot.provider),
+      el("div", { class: "bot-card-identity" },
+        el("strong", {}, bot.name),
+        el("span", { class: "muted" }, botProviderName(bot.provider))),
+      botPowerButton(bot)),
+    el("div", { class: "bot-destination" },
+      el("span", {}, destinationLabel),
+      el("code", {}, bot.destination_id)),
+    el("div", { class: "bot-events-title" }, "Notify when"),
+    el("div", { class: "bot-event-grid" },
+      ...BOT_EVENT_FIELDS.map(([field, label, note]) => botEventToggle(bot, field, label, note))),
+    el("div", { class: "bot-card-actions" },
+      el("button", { class: "btn ghost small", onclick: () => botEditor(bot) }, "Edit"),
+      el("button", { class: "btn ghost small", onclick: async (event) => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await api(`/bots/${bot.id}/test`, { method: "POST", json: {} });
+          toast(`Test sent through ${bot.name}`, "ok");
+        } catch (error) { toast(error.message, "err"); }
+        finally { button.disabled = false; }
+      } }, "Send test"),
+      el("div", { class: "spacer" }),
+      el("button", { class: "btn danger small", onclick: () => removeBot(bot) }, "Remove")));
+}
+
+function botEditor(existing = null) {
+  const name = el("input", { value: existing?.name || "", maxlength: "80", autocomplete: "off", placeholder: "Server alerts" });
+  const provider = el("select", {},
+    el("option", { value: "telegram" }, "Telegram"),
+    el("option", { value: "discord" }, "Discord"));
+  provider.value = existing?.provider || "telegram";
+  const token = el("input", {
+    type: "password", autocomplete: "new-password", spellcheck: "false",
+    placeholder: existing ? "Leave blank to keep the current token" : "Paste the bot token",
+  });
+  const destination = el("input", { value: existing?.destination_id || "", autocomplete: "off", spellcheck: "false" });
+  const destinationTitle = el("span", {});
+  const destinationHint = el("p", { class: "hint" });
+  const enabled = el("input", { type: "checkbox" });
+  enabled.checked = existing ? !!existing.enabled : true;
+  const eventInputs = {};
+  const renderDestination = () => {
+    const telegram = provider.value === "telegram";
+    destinationTitle.textContent = telegram ? "Chat ID" : "Channel ID";
+    destination.placeholder = telegram ? "-1001234567890 or @channel" : "123456789012345678";
+    destinationHint.textContent = telegram
+      ? "Add the bot to the chat first. Private chats, groups, and channels use a numeric chat ID; public channels may use @username."
+      : "Invite the bot to the Discord server and grant Send Messages in this channel.";
+  };
+  provider.addEventListener("change", renderDestination);
+  renderDestination();
+
+  const notificationRows = BOT_EVENT_FIELDS.map(([field, label, note]) => {
+    const input = el("input", { type: "checkbox" });
+    input.checked = existing ? !!existing[field] : true;
+    eventInputs[field] = input;
+    return el("label", { class: "bot-modal-event check-row" }, input,
+      el("span", {}, el("strong", {}, label), el("small", {}, note)));
+  });
+
+  modal(existing ? "Edit bot" : "Add bot", [
+    el("p", { class: "muted" }, "Tokens are encrypted on this machine and are never shown again after saving."),
+    el("div", { class: "field-row" }, el("label", {}, "Name", name)),
+    el("div", { class: "field-row" }, el("label", {}, "Provider", provider)),
+    el("div", { class: "field-row" }, el("label", {}, existing ? "New bot token (optional)" : "Bot token", token),
+      existing ? el("p", { class: "hint" }, "Leave blank to keep the encrypted token already stored.") : null),
+    el("div", { class: "field-row" }, el("label", {}, destinationTitle, destination), destinationHint),
+    el("label", { class: "check-row bot-enabled-row" }, enabled, " Bot enabled"),
+    el("h3", { class: "bot-modal-heading" }, "Notifications"),
+    el("div", { class: "bot-modal-events" }, notificationRows),
+  ], [
+    ["Cancel", "ghost", (close) => close()],
+    [existing ? "Save changes" : "Add bot", "primary", async (close) => {
+      const providerChanged = existing && provider.value !== existing.provider;
+      if (!name.value.trim()) { toast("Bot name is required", "err"); name.focus(); return; }
+      if (!token.value.trim() && (!existing || providerChanged)) {
+        toast(providerChanged ? "Enter the token for the new provider" : "Bot token is required", "err");
+        token.focus(); return;
+      }
+      if (!destination.value.trim()) { toast("Destination is required", "err"); destination.focus(); return; }
+      const body = {
+        name: name.value.trim(), provider: provider.value,
+        destination_id: destination.value.trim(), enabled: enabled.checked,
+      };
+      BOT_EVENT_FIELDS.forEach(([field]) => { body[field] = eventInputs[field].checked; });
+      if (token.value.trim()) body.token = token.value.trim();
+      try {
+        if (existing) await api(`/bots/${existing.id}`, { method: "PATCH", json: body });
+        else await api("/bots", { method: "POST", json: body });
+        close();
+        toast(existing ? "Bot updated" : "Bot added", "ok");
+        await renderPage();
+      } catch (error) { toast(error.message, "err"); }
+    }],
+  ]);
+}
+
+function removeBot(bot) {
+  confirmModal("Remove bot", `Remove “${bot.name}”? Its encrypted token and notification settings will be deleted.`,
+    "Remove", async () => {
+      try {
+        await api(`/bots/${bot.id}`, { method: "DELETE" });
+        toast("Bot removed", "ok");
+        await renderPage();
+      } catch (error) { toast(error.message, "err"); }
+    });
+}
+
+function botsSettingsSection(bots) {
+  return el("section", { class: "bots-settings", "aria-labelledby": "bots-settings-title" },
+    el("div", { class: "bots-section-head" },
+      el("div", {}, el("h2", { id: "bots-settings-title" }, "Bots"),
+        el("p", { class: "muted" }, "Send server and player activity to Telegram or Discord.")),
+      el("button", { class: "btn primary", onclick: () => botEditor() }, "Add bot")),
+    bots.length
+      ? el("div", { class: "bot-grid" }, ...bots.map(botCard))
+      : el("div", { class: "card bot-empty" }, solarIcon("send-square-linear"),
+        el("strong", {}, "No notification bots yet"),
+        el("p", { class: "muted" }, "Add a Telegram or Discord bot to receive server alerts."),
+        el("button", { class: "btn", onclick: () => botEditor() }, "Add bot")));
+}
+
 async function pageSettings(main) {
-  const version = await api("/version").catch(() => ({ version: "unknown" }));
+  const [version, bots] = await Promise.all([
+    api("/version").catch(() => ({ version: "unknown" })),
+    can("security.manage") ? api("/bots") : Promise.resolve([]),
+  ]);
   const makeThemeButton = (value, label) => el("button", {
     class: "btn ghost" + (themeChoice() === value ? " active" : ""),
     "data-theme-choice": value,
@@ -4112,7 +4337,7 @@ async function pageSettings(main) {
   }, label);
   main.innerHTML = "";
   main.append(
-    pageHeader("Settings", "Local UI preferences and application metadata."),
+    pageHeader("Settings", "Local preferences, notification bots, and application metadata."),
     el("div", { class: "card" },
       el("div", { class: "settings-row" },
         el("div", {}, el("h3", {}, "Theme"), el("p", { class: "muted" }, "System follows the operating-system color scheme and reacts to changes.")),
@@ -4129,7 +4354,8 @@ async function pageSettings(main) {
         el("div", {}, el("h3", {}, "Application"), el("p", { class: "muted" }, "Runtime settings not exposed by the API are shown honestly rather than mocked.")),
         el("dl", { class: "kv" },
           el("dt", {}, "Version"), el("dd", { class: "mono" }, version.version),
-          el("dt", {}, "Frontend"), el("dd", {}, "Dependency-free vanilla HTML, CSS, and JavaScript embedded in the Go binary")))));
+          el("dt", {}, "Frontend"), el("dd", {}, "Dependency-free vanilla HTML, CSS, and JavaScript embedded in the Go binary")))),
+    can("security.manage") ? botsSettingsSection(bots) : null);
 }
 
 // ---------------------------------------------------------------------------

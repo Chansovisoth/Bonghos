@@ -18,6 +18,7 @@ import (
 
 	"github.com/Chansovisoth/Bonghos/internal/auth"
 	"github.com/Chansovisoth/Bonghos/internal/backup"
+	"github.com/Chansovisoth/Bonghos/internal/bot"
 	"github.com/Chansovisoth/Bonghos/internal/config"
 	"github.com/Chansovisoth/Bonghos/internal/database"
 	"github.com/Chansovisoth/Bonghos/internal/instance"
@@ -45,6 +46,8 @@ type App struct {
 	Operations *operations.Store
 	OpLock     *operations.Lock
 	Backups    *backup.Manager
+	Bots       *bot.Store
+	BotNotify  *bot.Dispatcher
 	Sched      *scheduler.Scheduler
 	Hub        *websocket.Hub
 	Runner     *Runner
@@ -58,6 +61,10 @@ type App struct {
 	storageMu       sync.RWMutex
 	storageSnapshot monitoring.StorageSnapshot
 	uploadMu        sync.Mutex
+	botLifecycleMu  sync.Mutex
+	botSawOnline    bool
+	botReadySent    bool
+	botStoppedSent  bool
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
@@ -111,6 +118,8 @@ func New(home string, webFS fs.FS) (*App, error) {
 	a.Operations = operations.NewStore(db)
 	a.OpLock = operations.NewLock(home)
 	a.Backups = &backup.Manager{Home: home, DB: db}
+	a.Bots = &bot.Store{DB: db, SecretKey: key}
+	a.BotNotify = &bot.Dispatcher{Store: a.Bots, Sender: bot.NewSender(), Logf: a.Logf}
 	a.Hub = websocket.NewHub()
 	a.Runner = newRunner(a)
 	a.Collector = monitoring.NewCollector()
@@ -428,6 +437,7 @@ func (a *App) broadcastStatus() {
 	}
 	a.Hub.Broadcast("overview", "status", payload)
 	a.Hub.Broadcast("console", "status", payload)
+	a.observeBotLifecycle(st)
 }
 
 // ActiveInstance is the exported accessor used by the CLI.

@@ -78,7 +78,7 @@ func TestUnauthenticatedRequestsAreRejected(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/servers", "/api/server/status", "/api/configuration",
-		"/api/backups", "/api/schedules", "/api/users", "/api/activity",
+		"/api/backups", "/api/schedules", "/api/users", "/api/activity", "/api/bots",
 	} {
 		if status, body := c.do("GET", path, nil, nil); status != 401 {
 			t.Errorf("GET %s returned %d (%s), want 401", path, status, body)

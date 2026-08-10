@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Chansovisoth/Bonghos/internal/backup"
+	"github.com/Chansovisoth/Bonghos/internal/bot"
 	"github.com/Chansovisoth/Bonghos/internal/config"
 	"github.com/Chansovisoth/Bonghos/internal/instance"
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
@@ -442,9 +443,15 @@ func (a *App) handleConsoleLine(line string, live bool) {
 	case "joined":
 		a.recordPlayerJoin(instID, ev.Player)
 		a.Hub.Broadcast("players", "joined", map[string]any{"username": ev.Player})
+		if live {
+			a.notifyBotEvent(bot.EventPlayerJoined, instID, ev.Player)
+		}
 	case "left":
 		a.recordPlayerLeave(instID, ev.Player)
 		a.Hub.Broadcast("players", "left", map[string]any{"username": ev.Player})
+		if live {
+			a.notifyBotEvent(bot.EventPlayerLeft, instID, ev.Player)
+		}
 	case "list":
 		a.reconcileOnline(instID, ev.Online)
 		a.Hub.Broadcast("players", "list", map[string]any{"players": ev.Online})
@@ -452,6 +459,9 @@ func (a *App) handleConsoleLine(line string, live bool) {
 		a.recordEvent(instID, CatLifecycle, "ready", SevInfo,
 			"Server is ready and accepting players", nil)
 		a.Hub.Broadcast("overview", "started", nil)
+		if live {
+			a.markBotReady(instID)
+		}
 	}
 }
 

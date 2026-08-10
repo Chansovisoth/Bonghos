@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Settings can now manage encrypted Telegram and Discord notification bots,
+  including a master enable switch, independent ready/stopped/player-join/
+  player-leave switches, a test-message action, and removal. Ready alerts are
+  emitted only after Minecraft reports that it is fully started, and every
+  lifecycle or player alert names the active server pack.
 - TOTP enrolment now shows a scannable QR code: block characters in the
   terminal during `bonghos setup` and `bonghos admin create`, and an SVG on the
   Web UI activation page. The QR encodes the same `otpauth://` URI as before.
