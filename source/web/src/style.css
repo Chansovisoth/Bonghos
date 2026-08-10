@@ -253,6 +253,8 @@ h3 { font-size: 0.82rem; margin-bottom: var(--space-2); color: var(--muted); fon
 .provider-icon { width: 18px; height: 18px; display: block; flex: 0 0 18px; object-fit: contain; color: var(--accent); }
 .server-card-actions { min-width: 0; flex-wrap: nowrap; justify-content: flex-end; margin-top: auto; padding-top: var(--space-3); }
 .server-card-actions .spacer { min-width: 0; }
+.server-card-quick-action, .server-card-actions .action-menu-trigger { width: 32px; height: 32px; min-height: 32px; flex: 0 0 32px; padding: 0; }
+.server-card-quick-action .icon { width: 18px; height: 18px; }
 .overflow-actions { position: relative; flex: 0 0 auto; }
 .action-menu-trigger { width: 32px; padding-inline: var(--space-1); }
 .action-menu { position: absolute; top: calc(100% + var(--space-1)); right: 0; z-index: 30; min-width: 190px; padding: var(--space-1); border: 1px solid var(--border-strong); background: var(--surface-2); box-shadow: var(--shadow); }

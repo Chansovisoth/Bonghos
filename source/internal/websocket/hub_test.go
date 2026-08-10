@@ -17,11 +17,11 @@ func testClient(topic string, interval time.Duration) *client {
 func TestMinimumIntervalUsesFastestSubscriber(t *testing.T) {
 	h := NewHub()
 	h.clients[testClient("performance", 5*time.Second)] = true
-	h.clients[testClient("performance", 2*time.Second)] = true
-	h.clients[testClient("overview", time.Second)] = true
+	h.clients[testClient("performance", time.Second)] = true
+	h.clients[testClient("overview", 500*time.Millisecond)] = true
 
-	if got := h.MinimumInterval("performance", 10*time.Second); got != 2*time.Second {
-		t.Fatalf("MinimumInterval() = %v, want 2s", got)
+	if got := h.MinimumInterval("performance", 10*time.Second); got != time.Second {
+		t.Fatalf("MinimumInterval() = %v, want 1s", got)
 	}
 }
 

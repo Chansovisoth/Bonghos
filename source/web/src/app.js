@@ -349,6 +349,7 @@ async function demoApi(path, opts = {}) {
   await demoDelay();
   const method = opts.method || "GET";
   const clean = path.split("?")[0];
+  const query = new URL(path, "http://bonghos.demo").searchParams;
   if (method !== "GET") {
     if (clean === "/server/start") { S.status = { state: "running" }; return { ok: true }; }
     if (clean === "/server/stop") { S.status = { state: "stopped" }; return { ok: true }; }
@@ -460,7 +461,7 @@ async function demoApi(path, opts = {}) {
     case "/files/content": return { content: "motd=A precise Bonghos local demo\nserver-port=25565\nmax-players=20\n" };
     case "/configuration": return {
       eula: true,
-      instance: DEMO_SERVERS[0],
+      instance: DEMO_SERVERS.find((server) => server.id === Number(query.get("server_id"))) || DEMO_SERVERS[0],
       jvm: { xms: "2G", xmx: "6G", source_file: "user_jvm_args.txt", source_kind: "jvm_args_file", editable: true },
       scripts: [{ path: "run.sh", modloader: "forge", score: 98 }],
       java: [{ path: "/usr/lib/jvm/java-21-openjdk/bin/java", version: "21" }],
@@ -531,8 +532,9 @@ const S = {
   perfStorage: null,
   performanceTarget: "",
   serverTargetId: null,
+  managedServerId: null,
   perfDefaultIntervalSeconds: 10,
-  perfIntervalSeconds: 0,
+  perfIntervalSeconds: 2,
   uptimeBase: null,
 };
 const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
@@ -582,15 +584,17 @@ const PAGE_TOPICS = {
 };
 let currentPageTopic = null;
 const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
-const PERFORMANCE_INTERVAL_OPTIONS = [2, 5, 10, 30, 60];
+const PERFORMANCE_INTERVAL_OPTIONS = [1, 2, 3, 5, 10, 30, 60];
 let demoPerformanceTimer = null;
 let performanceStorageRequest = 0;
 let navigationJumpStartTimer = null;
 let navigationJumpTimer = null;
 
 function savedPerformanceInterval() {
-  const seconds = Number(localStorage.getItem(PERFORMANCE_INTERVAL_KEY) || 0);
-  return PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 0;
+  const saved = localStorage.getItem(PERFORMANCE_INTERVAL_KEY);
+  if (saved === null) return 2;
+  const seconds = Number(saved);
+  return seconds === 0 || PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 2;
 }
 
 S.perfIntervalSeconds = savedPerformanceInterval();
@@ -929,6 +933,7 @@ function navigate(page, opts = {}) {
   S.page = next;
   S.performanceTarget = next === "performance" ? (opts.performanceTarget || "") : "";
   S.serverTargetId = next === "servers" ? (opts.serverTargetId ?? null) : null;
+  S.managedServerId = next === "files" || next === "configuration" ? (opts.serverId ?? null) : null;
   S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers");
   setSidebarOpen(false);
   if (!opts.fromHash) syncHash(next, !!opts.replaceHash);
@@ -936,6 +941,11 @@ function navigate(page, opts = {}) {
   document.querySelectorAll(".nav-item").forEach((n) =>
     n.classList.toggle("active", n.dataset.page === next));
   renderPage();
+}
+
+function serverScopedPath(path) {
+  if (!S.managedServerId) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}server_id=${encodeURIComponent(S.managedServerId)}`;
 }
 
 function navigateFromHash() {
@@ -1634,7 +1644,7 @@ async function pageFiles(main, path = filePath) {
   fileEscapeAction = path
     ? () => pageFiles(main, path.split("/").filter(Boolean).slice(0, -1).join("/"))
     : null;
-  const entries = await api("/files?path=" + encodeURIComponent(path));
+  const entries = await api(serverScopedPath("/files?path=" + encodeURIComponent(path)));
   main.innerHTML = "";
   const crumbs = el("div", { class: "breadcrumb" },
     el("span", { onclick: () => pageFiles(main, "") }, "root"));
@@ -1649,7 +1659,7 @@ async function pageFiles(main, path = filePath) {
     const fd = new FormData();
     for (const f of upInput.files) fd.append("file", f);
     try {
-      await fetch("/api/files/upload?path=" + encodeURIComponent(path),
+      await fetch("/api" + serverScopedPath("/files/upload?path=" + encodeURIComponent(path)),
         { method: "POST", body: fd, headers: { "X-Bonghos-CSRF": csrfToken }, credentials: "same-origin" });
       toast("Uploaded", "ok"); pageFiles(main, path);
     } catch (e) { toast(e.message, "err"); }
@@ -1663,7 +1673,8 @@ async function pageFiles(main, path = filePath) {
     el("td", { class: "mobile-hide" }, fmtTime(e2.mod_time)),
     el("td", { class: "table-actions file-actions-cell" }, fileActions(main, path, e2))));
   main.append(
-    pageHeader("Files", "Constrained file manager for the active server directory.", [
+    pageHeader("Files", `Constrained file manager for the “${(S.servers.find((server) => server.id === S.managedServerId)
+      || S.servers.find((server) => server.id === S.activeId))?.display_name || "active"}” server directory.`, [
       el("button", { class: "btn", title: "Upload", onclick: () => upInput.click() }, solarIcon("upload-linear"), "Upload"),
       el("button", { class: "btn", title: "New folder", onclick: () => mkdirPrompt(main, path) }, solarIcon("folder-linear"), "New folder"),
       upInput,
@@ -1677,7 +1688,7 @@ async function pageFiles(main, path = filePath) {
 
 function fileActions(main, path, entry) {
   const rel = (path ? path + "/" : "") + entry.name;
-  const download = !entry.is_dir ? "/api/files/download?path=" + encodeURIComponent(rel) : "";
+  const download = !entry.is_dir ? "/api" + serverScopedPath("/files/download?path=" + encodeURIComponent(rel)) : "";
   const desktop = el("div", { class: "row-actions desktop-row-actions" },
     download ? el("a", { class: "btn ghost", href: download }, solarIcon("download-linear"), "Download") : "",
     el("button", { class: "btn ghost", onclick: () => renameEntry(main, path, entry.name) }, "Rename"),
@@ -1693,7 +1704,7 @@ function fileActions(main, path, entry) {
 
 async function openFileEditor(main, rel) {
   let data;
-  try { data = await api("/files/content?path=" + encodeURIComponent(rel)); }
+  try { data = await api(serverScopedPath("/files/content?path=" + encodeURIComponent(rel))); }
   catch (e) { toast(e.message, "err"); return; }
   main.innerHTML = "";
   const ta = el("textarea", { class: "editor", spellcheck: "false" });
@@ -1714,7 +1725,7 @@ async function openFileEditor(main, rel) {
       el("button", { class: "btn ghost", title: "Back to files", onclick: leaveEditor }, solarIcon("folder-open-linear"), "Back"),
       el("button", { class: "btn primary", title: "Save file", onclick: async () => {
         try {
-          await api("/files/content", { method: "POST", json: { path: rel, content: ta.value } });
+          await api(serverScopedPath("/files/content"), { method: "POST", json: { path: rel, content: ta.value } });
           baseline = ta.value;
           toast("Saved (a .bonghos-backup copy of important files is kept)", "ok");
         } catch (e) { toast(e.message, "err"); }
@@ -1728,7 +1739,7 @@ function mkdirPrompt(main, path) {
     ["Cancel", "ghost", (c) => c()],
     ["Create", "primary", async (c) => {
       c();
-      try { await api("/files/mkdir", { method: "POST", json: { path: (path ? path + "/" : "") + inp.value } }); pageFiles(main, path); }
+      try { await api(serverScopedPath("/files/mkdir"), { method: "POST", json: { path: (path ? path + "/" : "") + inp.value } }); pageFiles(main, path); }
       catch (e) { toast(e.message, "err"); }
     }]]);
 }
@@ -1741,7 +1752,7 @@ function renameEntry(main, path, name) {
       c();
       const from = (path ? path + "/" : "") + name;
       const to = (path ? path + "/" : "") + inp.value;
-      try { await api("/files/rename", { method: "POST", json: { from, to } }); pageFiles(main, path); }
+      try { await api(serverScopedPath("/files/rename"), { method: "POST", json: { from, to } }); pageFiles(main, path); }
       catch (e) { toast(e.message, "err"); }
     }]]);
 }
@@ -1749,7 +1760,7 @@ function renameEntry(main, path, name) {
 function deleteEntry(main, path, name) {
   const rel = (path ? path + "/" : "") + name;
   confirmModal("Delete", `Delete ${rel}? This cannot be undone.`, "Delete", async () => {
-    try { await api("/files/delete", { method: "POST", json: { path: rel, confirm: true } }); pageFiles(main, path); }
+    try { await api(serverScopedPath("/files/delete"), { method: "POST", json: { path: rel, confirm: true } }); pageFiles(main, path); }
     catch (e) { toast(e.message, "err"); }
   });
 }
@@ -1788,7 +1799,7 @@ function openFileInEditor(path) {
     return toast("You do not have permission to edit files", "err");
   }
   S.pendingFileOpen = path;
-  navigate("files");
+  navigate("files", { serverId: S.managedServerId });
 }
 
 const SERVER_ICON_MAX_BYTES = 10 * 1024 * 1024;
@@ -1964,7 +1975,7 @@ function serverIconConfigurationCard(server, onChange) {
 }
 
 async function pageConfiguration(main) {
-  const d = await api("/configuration");
+  const d = await api(serverScopedPath("/configuration"));
   const inst = d.instance;
   main.innerHTML = "";
 
@@ -2065,11 +2076,11 @@ async function pageConfiguration(main) {
     try {
       let restartRequired = false;
       if (next.xms !== baseline.xms || next.xmx !== baseline.xmx) {
-        await api("/configuration/jvm", { method: "POST", json: { xms: next.xms, xmx: next.xmx } });
+        await api(serverScopedPath("/configuration/jvm"), { method: "POST", json: { xms: next.xms, xmx: next.xmx } });
         restartRequired = true;
       }
       if (next.startupScript !== baseline.startupScript) {
-        await api("/configuration/startup-script", { method: "POST", json: { script: next.startupScript } });
+        await api(serverScopedPath("/configuration/startup-script"), { method: "POST", json: { script: next.startupScript } });
       }
 
       const instanceChanges = {};
@@ -2084,7 +2095,7 @@ async function pageConfiguration(main) {
 
       for (const [key, value] of Object.entries(next.properties)) {
         if (value === baseline.properties[key]) continue;
-        await api("/configuration/property", { method: "POST", json: { key, value } });
+        await api(serverScopedPath("/configuration/property"), { method: "POST", json: { key, value } });
         restartRequired = true;
       }
 
@@ -2139,14 +2150,14 @@ async function pageConfiguration(main) {
   });
 
   main.append(
-    pageHeader("Configuration", "Startup, Java, memory, Minecraft properties, and recovery policy for the active project.", [headerDiscard, headerSave]),
+    pageHeader("Configuration", `Startup, Java, memory, Minecraft properties, and recovery policy for ${inst.display_name}.`, [headerDiscard, headerSave]),
     d.eula ? null : el("div", { class: "notice" },
       "The Minecraft EULA has not been accepted for this project. The server will not start until it is. ",
       el("button", { class: "btn inline-offset", onclick: () =>
         confirmModal("Accept Minecraft EULA",
           "By accepting you agree to the Minecraft End User License Agreement (https://aka.ms/MinecraftEULA). Bonghos never accepts it silently on your behalf.",
           "I accept the EULA", async () => {
-            try { await api("/configuration/eula", { method: "POST", json: { accept: true } }); toast("EULA accepted", "ok"); renderPage(); }
+            try { await api(serverScopedPath("/configuration/eula"), { method: "POST", json: { accept: true } }); toast("EULA accepted", "ok"); renderPage(); }
             catch (e) { toast(e.message, "err"); }
           }, false) }, "Review & accept")),
     el("div", { class: "grid cols-2" },
@@ -2612,8 +2623,7 @@ function formatInterval(seconds) {
 
 function setPerformanceInterval(seconds) {
   S.perfIntervalSeconds = PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 0;
-  if (S.perfIntervalSeconds) localStorage.setItem(PERFORMANCE_INTERVAL_KEY, String(S.perfIntervalSeconds));
-  else localStorage.removeItem(PERFORMANCE_INTERVAL_KEY);
+  localStorage.setItem(PERFORMANCE_INTERVAL_KEY, String(S.perfIntervalSeconds));
   wsSend(performanceSubscription());
   syncDemoPerformanceStream();
   updatePerformanceFreshness();
@@ -2958,7 +2968,9 @@ function storageDonutChart({ id = "", title, description, total, segments, times
   const detail = el("div", { class: "performance-donut-detail mono" }, `${fmtBytes(total)} total · ${fmtTime(timestamp)}`);
   let offset = 0;
   const entries = [];
+  let activeEntry = null;
   const showTotal = () => {
+    activeEntry = null;
     entries.forEach((entry) => {
       if (entry.circle) svg.append(entry.circle);
       entry.circle?.classList.remove("is-active");
@@ -2969,6 +2981,8 @@ function storageDonutChart({ id = "", title, description, total, segments, times
     detail.textContent = `${fmtBytes(total)} total · ${fmtTime(timestamp)}`;
   };
   const showEntry = (entry) => {
+    if (activeEntry === entry) return;
+    activeEntry = entry;
     // SVG uses paint order for stacking. Re-append the active slice so its
     // scale and shadow render above every neighboring segment.
     if (entry.circle) svg.append(entry.circle);
@@ -3000,12 +3014,27 @@ function storageDonutChart({ id = "", title, description, total, segments, times
       el("span", { class: "mono" }, percent.toFixed(1) + "%"));
     const entry = { segment, circle, row };
     entries.push(entry);
+    row.addEventListener("pointerenter", () => showEntry(entry));
+    row.addEventListener("pointerleave", showTotal);
     [row, circle].filter(Boolean).forEach((target) => {
-      target.addEventListener("pointerenter", () => showEntry(entry));
-      target.addEventListener("pointerleave", showTotal);
       target.addEventListener("focus", () => showEntry(entry));
       target.addEventListener("blur", showTotal);
     });
+  });
+  // The active SVG slice is re-appended for correct paint order. Delegating
+  // pointer tracking to the stable SVG prevents that DOM move from swallowing
+  // the slice's pointerleave event and leaving it visually selected.
+  const entryHasVisibleFocus = (entry) => [entry?.circle, entry?.row]
+    .filter(Boolean).some((target) => target === document.activeElement && target.matches(":focus-visible"));
+  svg.addEventListener("pointermove", (event) => {
+    const entry = entries.find((candidate) => candidate.circle === event.target);
+    if (entry) showEntry(entry);
+    else if (activeEntry && !entryHasVisibleFocus(activeEntry)) showTotal();
+  });
+  svg.addEventListener("pointerleave", () => {
+    const focused = entries.find(entryHasVisibleFocus);
+    if (focused) showEntry(focused);
+    else showTotal();
   });
   return el("div", attrs, heading,
     el("div", { class: "performance-donut-layout" },
@@ -3506,6 +3535,23 @@ function serverActionsMenu(server) {
   return overflowActionsMenu(`Actions for ${server.display_name}`, items, "server-actions");
 }
 
+function serverManagementButton(server, page, label, icon) {
+  return el("button", {
+    class: "btn ghost icon-button server-card-quick-action",
+    type: "button",
+    title: label,
+    "aria-label": `${label} for ${server.display_name}`,
+    onclick: () => {
+      if (page === "files") {
+        filePath = "";
+        fileEscapeAction = null;
+        S.pendingFileOpen = null;
+      }
+      navigate(page, { serverId: server.id });
+    },
+  }, solarIcon(icon));
+}
+
 document.addEventListener("click", () => closeActionMenus());
 
 function renameProject(server) {
@@ -3584,6 +3630,10 @@ async function pageServers(main) {
               try { await api(`/servers/${s2.id}/select`, { method: "POST", json: {} }); toast("Active project changed", "ok"); refreshServers().then(renderPage); }
               catch (e) { toast(e.message, "err"); }
             } }, "Make active") : "",
+        can("server.files.manage")
+          ? serverManagementButton(s2, "files", "Files", "folder-with-files-linear") : "",
+        can("server.configuration.manage")
+          ? serverManagementButton(s2, "configuration", "Configuration", "tuning-2-linear") : "",
         serverActionsMenu(s2)))));
   main.append(
     pageHeader("Servers", "Project inventory, active-project selection, and persistent import progress.", [

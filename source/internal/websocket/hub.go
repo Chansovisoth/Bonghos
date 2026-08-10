@@ -220,8 +220,8 @@ func (c *client) readLoop(h *Hub, onCommand func(string)) {
 				interval := time.Duration(0)
 				if msg.Topic == "performance" && msg.IntervalSeconds > 0 {
 					seconds := msg.IntervalSeconds
-					if seconds < 2 {
-						seconds = 2
+					if seconds < 1 {
+						seconds = 1
 					}
 					if seconds > 60 {
 						seconds = 60
