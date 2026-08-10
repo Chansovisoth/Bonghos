@@ -2549,9 +2549,10 @@ async function pagePerformance(main) {
     id: "performance-interval",
     onchange: (event) => setPerformanceInterval(Number(event.target.value)),
   },
-  el("option", { value: "0" }, `Default (${formatInterval(S.perfDefaultIntervalSeconds)})`),
+  el("option", { value: "0" }, `Server default (${formatInterval(S.perfDefaultIntervalSeconds)})`),
   ...PERFORMANCE_INTERVAL_OPTIONS.map((seconds) =>
-    el("option", { value: String(seconds) }, `Every ${formatInterval(seconds)}`)));
+    el("option", { value: String(seconds) },
+      `Every ${formatInterval(seconds)}${seconds === 2 ? " (Default)" : ""}`)));
   intervalSelect.value = String(S.perfIntervalSeconds);
 
   main.innerHTML = "";
