@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Chansovisoth/Bonghos/internal/auth"
 	"github.com/Chansovisoth/Bonghos/internal/authorization"
@@ -42,6 +44,13 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/users/{id}/revoke-sessions", a.requirePerm(authorization.PermUsersManage, a.handleUserRevoke))
 	mux.HandleFunc("DELETE /api/users/{id}", a.requirePerm(authorization.PermUsersManage, a.handleUserDelete))
 
+	// --- notification bots -------------------------------------------------
+	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotList))
+	mux.HandleFunc("POST /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotCreate))
+	mux.HandleFunc("PATCH /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotUpdate))
+	mux.HandleFunc("DELETE /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotDelete))
+	mux.HandleFunc("POST /api/bots/{id}/test", a.requirePerm(authorization.PermSecurityManage, a.handleBotTest))
+
 	// --- servers ------------------------------------------------------------
 	mux.HandleFunc("GET /api/servers", a.requirePerm(authorization.PermServerView, a.handleServerList))
 	mux.HandleFunc("POST /api/servers", a.requirePerm(authorization.PermImportManage, a.handleServerCreate))
@@ -49,6 +58,9 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/servers/{id}", a.requirePerm(authorization.PermConfigManage, a.handleServerUpdate))
 	mux.HandleFunc("DELETE /api/servers/{id}", a.requirePerm(authorization.PermImportManage, a.handleServerDelete))
 	mux.HandleFunc("POST /api/servers/{id}/select", a.requirePerm(authorization.PermConfigManage, a.handleServerSelect))
+	mux.HandleFunc("POST /api/servers/{id}/duplicate", a.requirePerm(authorization.PermImportManage, a.handleServerDuplicate))
+	mux.HandleFunc("POST /api/servers/{id}/world/reset", a.requirePerm(authorization.PermConfigManage, a.handleWorldReset))
+	mux.HandleFunc("GET /api/servers/{id}/world.zip", a.requirePerm(authorization.PermFilesManage, a.handleWorldDownload))
 	mux.HandleFunc("GET /api/servers/{id}/icon", a.requireAuth(a.handleIconGet))
 	mux.HandleFunc("POST /api/servers/{id}/icon", a.requirePerm(authorization.PermIconManage, a.handleIconUpload))
 	mux.HandleFunc("DELETE /api/servers/{id}/icon", a.requirePerm(authorization.PermIconManage, a.handleIconDelete))
@@ -57,6 +69,9 @@ func (a *App) routes() http.Handler {
 
 	// --- imports ------------------------------------------------------------
 	mux.HandleFunc("POST /api/imports/upload", a.requirePerm(authorization.PermImportManage, a.handleImportUpload))
+	mux.HandleFunc("POST /api/imports/upload/start", a.requirePerm(authorization.PermImportManage, a.handleImportUploadStart))
+	mux.HandleFunc("PUT /api/imports/upload/{id}/chunk", a.requirePerm(authorization.PermImportManage, a.handleImportUploadChunk))
+	mux.HandleFunc("POST /api/imports/upload/{id}/finish", a.requirePerm(authorization.PermImportManage, a.handleImportUploadFinish))
 	mux.HandleFunc("POST /api/imports/url", a.requirePerm(authorization.PermImportManage, a.handleImportURL))
 	mux.HandleFunc("POST /api/imports/local-archive", a.requirePerm(authorization.PermImportManage, a.handleImportLocal))
 	mux.HandleFunc("POST /api/imports/existing-directory", a.requirePerm(authorization.PermImportManage, a.handleImportExisting))
@@ -69,14 +84,18 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/server/restart", a.requirePerm(authorization.PermServerRestart, a.handleRestart))
 	mux.HandleFunc("POST /api/server/force-stop", a.requirePerm(authorization.PermServerForceStop, a.handleForceStop))
 	mux.HandleFunc("GET /api/server/status", a.requirePerm(authorization.PermServerView, a.handleStatus))
+	mux.HandleFunc("GET /api/server/console/history", a.requirePerm(authorization.PermConsoleView, a.handleConsoleHistory))
 	mux.HandleFunc("POST /api/server/command", a.requirePerm(authorization.PermConsoleUse, a.handleCommand))
 
 	// --- players ------------------------------------------------------------
 	mux.HandleFunc("GET /api/players", a.requirePerm(authorization.PermPlayersView, a.handlePlayerList))
+	mux.HandleFunc("GET /api/players/avatar", a.requirePerm(authorization.PermPlayersView, a.handlePlayerAvatar))
 	mux.HandleFunc("POST /api/players/action", a.requirePerm(authorization.PermPlayersManage, a.handlePlayerAction))
 
 	// --- monitoring ---------------------------------------------------------
 	mux.HandleFunc("GET /api/metrics", a.requirePerm(authorization.PermServerView, a.handleMetrics))
+	mux.HandleFunc("GET /api/metrics/config", a.requirePerm(authorization.PermServerView, a.handleMetricsConfig))
+	mux.HandleFunc("GET /api/metrics/storage", a.requirePerm(authorization.PermServerView, a.handleMetricsStorage))
 	mux.HandleFunc("GET /api/overview", a.requirePerm(authorization.PermServerView, a.handleOverview))
 
 	// --- files --------------------------------------------------------------
@@ -402,8 +421,40 @@ func (a *App) handleServerList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	// Older imports may predate version detection. Refresh only metadata that
+	// can be confirmed from the pack and persist changes so known loaders do
+	// not need to be rescanned on later requests.
+	for _, inst := range list {
+		a.refreshServerMetadata(inst)
+	}
 	activeID, _ := a.Instances.ActiveID()
 	writeJSON(w, 200, map[string]any{"servers": list, "active_id": activeID})
+}
+
+func (a *App) refreshServerMetadata(inst *instance.Instance) {
+	if inst.MinecraftVersion != "" && inst.Modloader != "" && inst.ModloaderVersion != "" {
+		return
+	}
+	meta, err := minecraft.DetectServerMetadata(inst.AbsoluteDir(a.Home))
+	if err != nil {
+		return
+	}
+	changed := false
+	if meta.MinecraftVersion != "" && meta.MinecraftVersion != inst.MinecraftVersion {
+		inst.MinecraftVersion = meta.MinecraftVersion
+		changed = true
+	}
+	if meta.Modloader != "" && meta.Modloader != inst.Modloader {
+		inst.Modloader = meta.Modloader
+		changed = true
+	}
+	if meta.ModloaderVersion != "" && meta.ModloaderVersion != inst.ModloaderVersion {
+		inst.ModloaderVersion = meta.ModloaderVersion
+		changed = true
+	}
+	if changed {
+		_ = a.Instances.Update(inst)
+	}
 }
 
 func (a *App) handleSlugPreview(w http.ResponseWriter, r *http.Request) {
@@ -480,6 +531,7 @@ func (a *App) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, err)
 		return
 	}
+	previousDisplayName := inst.DisplayName
 	var req struct {
 		DisplayName                 *string `json:"display_name"`
 		StartupScript               *string `json:"startup_script"`
@@ -494,8 +546,17 @@ func (a *App) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("invalid request"))
 		return
 	}
-	if req.DisplayName != nil && strings.TrimSpace(*req.DisplayName) != "" {
-		inst.DisplayName = strings.TrimSpace(*req.DisplayName)
+	if req.DisplayName != nil {
+		displayName := strings.TrimSpace(*req.DisplayName)
+		if displayName == "" {
+			writeErr(w, 400, errors.New("display name is required"))
+			return
+		}
+		if utf8.RuneCountInString(displayName) > 120 {
+			writeErr(w, 400, errors.New("display name must be 120 characters or fewer"))
+			return
+		}
+		inst.DisplayName = displayName
 	}
 	if req.StartupScript != nil {
 		rel := filepath.ToSlash(filepath.Clean(*req.StartupScript))
@@ -537,7 +598,11 @@ func (a *App) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	a.audit(u.ID, u.Username, "project_updated", inst.Slug, "", remoteIP(r))
+	detail := ""
+	if inst.DisplayName != previousDisplayName {
+		detail = fmt.Sprintf("display_name=%q -> %q", previousDisplayName, inst.DisplayName)
+	}
+	a.audit(u.ID, u.Username, "project_updated", inst.Slug, detail, remoteIP(r))
 	writeJSON(w, 200, inst)
 }
 
@@ -616,10 +681,12 @@ func (a *App) handleServerDetect(w http.ResponseWriter, r *http.Request) {
 	} else if len(scripts) > 0 {
 		jvm, _ = minecraft.DetectJVMConfig(dir, scripts[0].Path)
 	}
+	metadata, _ := minecraft.DetectServerMetadata(dir)
 	writeJSON(w, 200, map[string]any{
-		"scripts": scripts,
-		"jvm":     jvm,
-		"java":    minecraft.DiscoverJava(),
+		"scripts":  scripts,
+		"jvm":      jvm,
+		"java":     minecraft.DiscoverJava(),
+		"metadata": metadata,
 	})
 }
 
@@ -718,6 +785,9 @@ func (a *App) handleCommand(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 	st, ps := a.Runner.State()
 	out := map[string]any{"state": st, "version": Version}
+	if ip := localLANIPv4(a.Cfg.BindAddress); ip != "" {
+		out["lan_ip"] = ip
+	}
 	if ps != nil {
 		out["supervisor"] = ps
 	}
@@ -757,6 +827,54 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
+func localLANIPv4(bindAddress string) string {
+	if ip := net.ParseIP(bindAddress); ip != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return ipv4.String()
+		}
+	}
+	if conn, err := net.DialTimeout("udp", "8.8.8.8:80", 100*time.Millisecond); err == nil {
+		defer conn.Close()
+		if address, ok := conn.LocalAddr().(*net.UDPAddr); ok {
+			if ipv4 := address.IP.To4(); ipv4 != nil && !ipv4.IsLoopback() && !ipv4.IsUnspecified() {
+				return ipv4.String()
+			}
+		}
+	}
+
+	var fallback string
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ip, _, err := net.ParseCIDR(address.String())
+			if err != nil || ip.IsLoopback() {
+				continue
+			}
+			ipv4 := ip.To4()
+			if ipv4 == nil || ipv4.IsLinkLocalUnicast() {
+				continue
+			}
+			if ipv4.IsPrivate() {
+				return ipv4.String()
+			}
+			if fallback == "" {
+				fallback = ipv4.String()
+			}
+		}
+	}
+	return fallback
+}
+
 func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	hours := 1
 	if h, err := strconv.Atoi(r.URL.Query().Get("hours")); err == nil && h > 0 && h <= 24*14 {
@@ -770,17 +888,29 @@ func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, samples)
 }
 
+func (a *App) handleMetricsConfig(w http.ResponseWriter, r *http.Request) {
+	interval := a.Cfg.MetricsIntervalSec
+	if interval < 2 {
+		interval = 10
+	}
+	writeJSON(w, 200, map[string]int{"interval_seconds": interval})
+}
+
+func (a *App) handleMetricsStorage(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, a.collectStorageSnapshot())
+}
+
 func (a *App) handleHost(w http.ResponseWriter, r *http.Request) {
 	memT, memA := monitoring.HostMemory()
-	diskT, diskF := monitoring.DiskUsage(a.Home)
+	storage := a.cachedStorageSnapshot()
 	out := map[string]any{
 		"bind_address":      a.Cfg.BindAddress,
 		"port":              a.Cfg.Port,
 		"home":              a.Home,
 		"mem_total":         memT,
 		"mem_available":     memA,
-		"disk_total":        diskT,
-		"disk_free":         diskF,
+		"disk_total":        storage.DiskTotal,
+		"disk_free":         storage.DiskFree,
 		"load1":             monitoring.LoadAvg(),
 		"systemd":           systemd.Available(),
 		"service_bonghos":   systemd.Status(systemd.ServiceControlPlane),

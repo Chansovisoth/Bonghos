@@ -18,9 +18,11 @@ import (
 
 	"github.com/Chansovisoth/Bonghos/internal/auth"
 	"github.com/Chansovisoth/Bonghos/internal/backup"
+	"github.com/Chansovisoth/Bonghos/internal/bot"
 	"github.com/Chansovisoth/Bonghos/internal/config"
 	"github.com/Chansovisoth/Bonghos/internal/database"
 	"github.com/Chansovisoth/Bonghos/internal/instance"
+	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/monitoring"
 	"github.com/Chansovisoth/Bonghos/internal/operations"
 	"github.com/Chansovisoth/Bonghos/internal/scheduler"
@@ -44,14 +46,25 @@ type App struct {
 	Operations *operations.Store
 	OpLock     *operations.Lock
 	Backups    *backup.Manager
+	Bots       *bot.Store
+	BotNotify  *bot.Dispatcher
 	Sched      *scheduler.Scheduler
 	Hub        *websocket.Hub
 	Runner     *Runner
 
 	// Startup phases already reported for the current server run.
-	phaseMu    sync.Mutex
-	seenPhases map[string]bool
-	Collector  *monitoring.Collector
+	phaseMu         sync.Mutex
+	seenPhases      map[string]bool
+	consoleMu       sync.Mutex
+	consoleHistory  []string
+	Collector       *monitoring.Collector
+	storageMu       sync.RWMutex
+	storageSnapshot monitoring.StorageSnapshot
+	uploadMu        sync.Mutex
+	botLifecycleMu  sync.Mutex
+	botSawOnline    bool
+	botReadySent    bool
+	botStoppedSent  bool
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
@@ -105,6 +118,8 @@ func New(home string, webFS fs.FS) (*App, error) {
 	a.Operations = operations.NewStore(db)
 	a.OpLock = operations.NewLock(home)
 	a.Backups = &backup.Manager{Home: home, DB: db}
+	a.Bots = &bot.Store{DB: db, SecretKey: key}
+	a.BotNotify = &bot.Dispatcher{Store: a.Bots, Sender: bot.NewSender(), Logf: a.Logf}
 	a.Hub = websocket.NewHub()
 	a.Runner = newRunner(a)
 	a.Collector = monitoring.NewCollector()
@@ -209,36 +224,57 @@ func (a *App) bootAutostart(ctx context.Context) {
 }
 
 func (a *App) metricsLoop(ctx context.Context) {
-	interval := time.Duration(a.Cfg.MetricsIntervalSec) * time.Second
-	if interval < 2*time.Second {
-		interval = 10 * time.Second
+	historyInterval := time.Duration(a.Cfg.MetricsIntervalSec) * time.Second
+	if historyInterval < 2*time.Second {
+		historyInterval = 10 * time.Second
 	}
-	slow := time.NewTicker(interval)
-	defer slow.Stop()
+	pulse := time.NewTicker(1 * time.Second)
+	defer pulse.Stop()
 	pruneT := time.NewTicker(1 * time.Hour)
 	defer pruneT.Stop()
+	var lastSampleAt time.Time
+	var lastHistoryAt time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-pruneT.C:
 			monitoring.Prune(a.DB, time.Duration(a.Cfg.MetricsRetentionDays)*24*time.Hour)
-		case <-slow.C:
-			// Sample at a lower rate when nobody is watching.
-			watching := a.Hub.SubscriberCount("performance") > 0 || a.Hub.SubscriberCount("overview") > 0
-			s := a.collectSample()
-			instID := a.activeInstanceIDQuiet()
-			monitoring.StoreSample(a.DB, instID, s)
-			if watching {
-				a.Hub.Broadcast("performance", "sample", s)
-				a.Hub.Broadcast("overview", "sample", s)
+		case now := <-pulse.C:
+			// Temporarily collect faster when an open Performance view asks for a
+			// more responsive feed. Persisted history stays on the configured
+			// cadence so a live dashboard does not multiply database writes.
+			effective := historyInterval
+			if a.Hub.SubscriberCount("performance") > 0 {
+				effective = a.Hub.MinimumInterval("performance", historyInterval)
 			}
+			if !lastSampleAt.IsZero() && now.Sub(lastSampleAt)+250*time.Millisecond < effective {
+				continue
+			}
+			s := a.collectSample()
+			if lastHistoryAt.IsZero() || now.Sub(lastHistoryAt)+250*time.Millisecond >= historyInterval {
+				instID := a.activeInstanceIDQuiet()
+				monitoring.StoreSample(a.DB, instID, s)
+				lastHistoryAt = now
+			}
+			lastSampleAt = now
+			a.Hub.BroadcastDue("performance", "sample", s, historyInterval)
+			a.Hub.BroadcastDue("overview", "sample", s, historyInterval)
 		}
 	}
 }
 
 func (a *App) collectSample() *monitoring.Sample {
 	s := &monitoring.Sample{CollectedAt: time.Now().UTC().Format(time.RFC3339)}
+	s.HostCPUPercent, s.CPUCores = a.Collector.HostCPU()
+	var coreTemperatures map[int]float64
+	s.CPUTempCelsius, coreTemperatures = monitoring.CPUTemperatures()
+	for index := range s.CPUCores {
+		if temperature, ok := coreTemperatures[s.CPUCores[index].Index]; ok {
+			temperatureCopy := temperature
+			s.CPUCores[index].TempCelsius = &temperatureCopy
+		}
+	}
 	_, ps := a.Runner.State()
 	if ps != nil && ps.JavaPID > 0 {
 		s.JavaPID = ps.JavaPID
@@ -250,13 +286,45 @@ func (a *App) collectSample() *monitoring.Sample {
 	}
 	s.HostMemTotal, s.HostMemAvail = monitoring.HostMemory()
 	s.Load1 = monitoring.LoadAvg()
-	s.DiskTotal, s.DiskFree = monitoring.DiskUsage(a.Home)
+	storage := a.cachedStorageSnapshot()
+	s.DiskTotal = storage.DiskTotal
+	s.DiskFree = storage.DiskFree
+	s.BonghosDirBytes = storage.BonghosDirBytes
+	s.ServerDirBytes = storage.ServerDirBytes
+	s.BackupDirBytes = storage.BackupDirBytes
+	s.SystemDirBytes = storage.SystemDirBytes
 	var online int
-	if id := a.activeInstanceIDQuiet(); id != 0 {
-		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, id).Scan(&online)
+	if inst, err := a.activeInstance(); err == nil {
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, inst.ID).Scan(&online)
+		s.JVMXmsBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXms)
+		s.JVMXmxBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXmx)
 	}
 	s.OnlinePlayers = online
 	return s
+}
+
+func (a *App) cachedStorageSnapshot() monitoring.StorageSnapshot {
+	a.storageMu.RLock()
+	defer a.storageMu.RUnlock()
+	return a.storageSnapshot
+}
+
+func (a *App) collectStorageSnapshot() monitoring.StorageSnapshot {
+	diskTotal, diskFree := monitoring.DiskUsage(a.Home)
+	homeSize, directories := monitoring.DirectoryBreakdown(a.Home)
+	snapshot := monitoring.StorageSnapshot{
+		CollectedAt:     time.Now().UTC().Format(time.RFC3339),
+		DiskTotal:       diskTotal,
+		DiskFree:        diskFree,
+		BonghosDirBytes: homeSize,
+		ServerDirBytes:  directories[config.DirServers],
+		BackupDirBytes:  directories[config.DirBackups],
+		SystemDirBytes:  directories[config.DirSystem],
+	}
+	a.storageMu.Lock()
+	a.storageSnapshot = snapshot
+	a.storageMu.Unlock()
+	return snapshot
 }
 
 // playerPollLoop issues `list` periodically while relevant pages are open.
@@ -374,6 +442,7 @@ func (a *App) broadcastStatus() {
 	}
 	a.Hub.Broadcast("overview", "status", payload)
 	a.Hub.Broadcast("console", "status", payload)
+	a.observeBotLifecycle(st)
 }
 
 // ActiveInstance is the exported accessor used by the CLI.

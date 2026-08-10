@@ -22,9 +22,27 @@ import (
 // listed and downloadable, they just cannot be opened in the editor.
 const maxTextEditBytes = 2 << 20 // 2 MiB
 
-// activeFiles returns a path-jailed file manager for the active project.
-func (a *App) activeFiles() (*files.Manager, *instance.Instance, error) {
-	inst, err := a.activeInstance()
+// requestInstance resolves an explicitly scoped server project when supplied,
+// while preserving active-project behavior for existing clients.
+func (a *App) requestInstance(r *http.Request) (*instance.Instance, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("server_id"))
+	if raw == "" {
+		return a.activeInstance()
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return nil, errors.New("invalid server_id")
+	}
+	inst, err := a.Instances.ByID(id)
+	if err != nil {
+		return nil, errors.New("server project not found")
+	}
+	return inst, nil
+}
+
+// requestFiles returns a path-jailed file manager for the requested project.
+func (a *App) requestFiles(r *http.Request) (*files.Manager, *instance.Instance, error) {
+	inst, err := a.requestInstance(r)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -41,7 +59,7 @@ func (a *App) activeFiles() (*files.Manager, *instance.Instance, error) {
 // ---------------------------------------------------------------------------
 
 func (a *App) handleFileList(w http.ResponseWriter, r *http.Request) {
-	fm, _, err := a.activeFiles()
+	fm, _, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -64,7 +82,7 @@ func (a *App) handleFileList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleFileRead(w http.ResponseWriter, r *http.Request) {
-	fm, _, err := a.activeFiles()
+	fm, _, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -79,7 +97,7 @@ func (a *App) handleFileRead(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleFileWrite(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	fm, inst, err := a.activeFiles()
+	fm, inst, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -101,7 +119,7 @@ func (a *App) handleFileWrite(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleFileMkdir(w http.ResponseWriter, r *http.Request) {
-	fm, _, err := a.activeFiles()
+	fm, _, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -122,7 +140,7 @@ func (a *App) handleFileMkdir(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleFileRename(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	fm, inst, err := a.activeFiles()
+	fm, inst, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -145,7 +163,7 @@ func (a *App) handleFileRename(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	fm, inst, err := a.activeFiles()
+	fm, inst, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -168,7 +186,7 @@ func (a *App) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	fm, inst, err := a.activeFiles()
+	fm, inst, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -202,7 +220,7 @@ func (a *App) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleFileDownload(w http.ResponseWriter, r *http.Request) {
-	fm, _, err := a.activeFiles()
+	fm, _, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -223,7 +241,7 @@ func (a *App) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
-	inst, err := a.activeInstance()
+	inst, err := a.requestInstance(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -253,7 +271,7 @@ func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleConfigJVM(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	inst, err := a.activeInstance()
+	inst, err := a.requestInstance(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -283,7 +301,7 @@ func (a *App) handleConfigJVM(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleConfigStartup(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	inst, err := a.activeInstance()
+	inst, err := a.requestInstance(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -311,7 +329,7 @@ func (a *App) handleConfigStartup(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleConfigProperty(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	inst, err := a.activeInstance()
+	inst, err := a.requestInstance(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -334,7 +352,7 @@ func (a *App) handleConfigProperty(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleConfigEULA(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	inst, err := a.activeInstance()
+	inst, err := a.requestInstance(r)
 	if err != nil {
 		writeErr(w, 409, err)
 		return
@@ -706,6 +724,13 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 409, err)
 		return
 	}
+	admin := minecraft.ReadAdminFiles(inst.AbsoluteDir(a.Home))
+	opNames := make(map[string]bool, len(admin.Ops))
+	opUUIDs := make(map[string]bool, len(admin.Ops))
+	for _, op := range admin.Ops {
+		opNames[strings.ToLower(op.Name)] = true
+		opUUIDs[strings.ToLower(strings.ReplaceAll(op.UUID, "-", ""))] = true
+	}
 	rows, err := a.DB.Query(`SELECT username, uuid, is_online, first_seen_at, last_seen_at,
 		last_joined_at, last_left_at, observed_playtime_seconds, current_session_started_at
 		FROM players WHERE instance_id=? ORDER BY is_online DESC, last_seen_at DESC`, inst.ID)
@@ -718,6 +743,7 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		Username         string `json:"username"`
 		UUID             string `json:"uuid,omitempty"`
 		Online           bool   `json:"online"`
+		OP               bool   `json:"op"`
 		FirstSeenAt      string `json:"first_seen_at"`
 		LastSeenAt       string `json:"last_seen_at"`
 		LastJoinedAt     string `json:"last_joined_at,omitempty"`
@@ -738,6 +764,8 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		if uuid != nil {
 			p.UUID = *uuid
 		}
+		p.OP = opNames[strings.ToLower(p.Username)] ||
+			opUUIDs[strings.ToLower(strings.ReplaceAll(p.UUID, "-", ""))]
 		if joined != nil {
 			p.LastJoinedAt = *joined
 		}

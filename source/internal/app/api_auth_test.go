@@ -78,11 +78,34 @@ func TestUnauthenticatedRequestsAreRejected(t *testing.T) {
 
 	for _, path := range []string{
 		"/api/servers", "/api/server/status", "/api/configuration",
-		"/api/backups", "/api/schedules", "/api/users", "/api/activity",
+		"/api/backups", "/api/schedules", "/api/users", "/api/activity", "/api/bots",
 	} {
 		if status, body := c.do("GET", path, nil, nil); status != 401 {
 			t.Errorf("GET %s returned %d (%s), want 401", path, status, body)
 		}
+	}
+}
+
+func TestAuthenticatedActivityUsesAuditTimestamp(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	c := env.newClient()
+	c.mustLogin("owner", "correct horse battery", secret)
+
+	var out []struct {
+		Username string `json:"username"`
+		Action   string `json:"action"`
+		At       string `json:"at"`
+	}
+	status, body := c.do("GET", "/api/activity", nil, &out)
+	if status != 200 {
+		t.Fatalf("activity failed: %d %s", status, body)
+	}
+	if len(out) == 0 {
+		t.Fatal("activity returned no audit events")
+	}
+	if out[0].Action == "" || out[0].At == "" {
+		t.Fatalf("activity event missing action or timestamp: %+v", out[0])
 	}
 }
 

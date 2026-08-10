@@ -19,7 +19,13 @@
 <body>
 <div id="login-view" class="login-wrap hidden">
   <form id="login-form" class="login-card" autocomplete="on">
-    <div class="brand"><span class="brand-mark">B</span> Bonghos</div>
+    <div class="brand brand-logo" aria-label="Bonghos">
+      <span class="brand-name">&gt;BONGHOS</span>
+      <svg class="brand-symbol" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M0 0h24v24H0z" fill="none"></path>
+        <path fill="currentColor" d="M23 11v2h-1v1h-7v1h-1v2h-1v1h-1v2h-1v1h-1v1H7v-3h1v-3h1v-2H5v1H4v1H3v1H1v-3h1v-4H1V7h2v1h1v1h1v1h4V8H8V5H7V2h3v1h1v1h1v2h1v1h1v2h1v1h7v1z"></path>
+      </svg>
+    </div>
     <p class="muted">Native Linux Minecraft operations panel</p>
 
     <!-- Step one collects the username and password. The second step is shown
@@ -48,13 +54,34 @@
 </div>
 
 <div id="app-view" class="app hidden">
-  <aside class="sidebar">
-    <div class="brand small"><span class="brand-mark">B</span> Bonghos</div>
+  <header class="mobile-topbar">
+    <button id="sidebar-toggle" class="btn ghost icon-button" type="button" aria-label="Open navigation" aria-controls="app-sidebar" aria-expanded="false"></button>
+    <div class="brand brand-logo mobile-brand" aria-label="Bonghos">
+      <span class="brand-name">&gt;BONGHOS</span>
+      <svg class="brand-symbol" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M0 0h24v24H0z" fill="none"></path>
+        <path fill="currentColor" d="M23 11v2h-1v1h-7v1h-1v2h-1v1h-1v2h-1v1h-1v1H7v-3h1v-3h1v-2H5v1H4v1H3v1H1v-3h1v-4H1V7h2v1h1v1h1v1h4V8H8V5H7V2h3v1h1v1h1v2h1v1h1v2h1v1h7v1z"></path>
+      </svg>
+    </div>
+    <button class="btn ghost icon-button theme-toggle mobile-theme-toggle" type="button" data-theme-toggle></button>
+  </header>
+  <button id="sidebar-scrim" class="sidebar-scrim" type="button" aria-label="Close navigation" tabindex="-1"></button>
+  <aside id="app-sidebar" class="sidebar">
+    <div class="brand brand-logo small" aria-label="Bonghos">
+      <span class="brand-name">&gt;BONGHOS</span>
+      <svg class="brand-symbol" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M0 0h24v24H0z" fill="none"></path>
+        <path fill="currentColor" d="M23 11v2h-1v1h-7v1h-1v2h-1v1h-1v2h-1v1h-1v1H7v-3h1v-3h1v-2H5v1H4v1H3v1H1v-3h1v-4H1V7h2v1h1v1h1v1h4V8H8V5H7V2h3v1h1v1h1v2h1v1h1v2h1v1h7v1z"></path>
+      </svg>
+    </div>
     <div id="server-picker" class="server-picker"></div>
     <nav id="nav"></nav>
     <div class="sidebar-foot">
       <div id="whoami" class="muted"></div>
-      <button id="logout-btn" class="btn ghost">Sign out</button>
+      <div class="sidebar-foot-actions">
+        <button id="logout-btn" class="btn ghost">Sign out</button>
+        <button class="btn ghost icon-button theme-toggle" type="button" data-theme-toggle></button>
+      </div>
     </div>
   </aside>
   <main id="main"></main>

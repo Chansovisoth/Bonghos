@@ -78,6 +78,32 @@ func TestOrdinaryArgFileIsStillPreferred(t *testing.T) {
 	}
 }
 
+// Some packs keep their launch flags in variables.txt without generating a
+// dedicated JVM argument file. The well-known settings file is still the
+// editable source even when the startup script does not use a shell `source`
+// statement that the detector can follow.
+func TestVariablesFileDetectedWithoutGeneratedArgFile(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "start.sh"), []byte(
+		"#!/bin/bash\n. ./variables.txt\njava $JVM_ARGS -jar server.jar nogui\n"), 0o755)
+	os.WriteFile(filepath.Join(root, "variables.txt"), []byte(
+		"JVM_ARGS=\"-Xms2G -Xmx6G -XX:+UseG1GC\"\n"), 0o644)
+
+	cfg, err := DetectJVMConfig(root, "start.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SourceFile != "variables.txt" || cfg.SourceKind != "variable" {
+		t.Errorf("SourceFile=%q SourceKind=%q, want variables.txt/variable", cfg.SourceFile, cfg.SourceKind)
+	}
+	if cfg.Variable != "JVM_ARGS" || cfg.Xms != "2G" || cfg.Xmx != "6G" {
+		t.Errorf("Variable=%q Xms=%q Xmx=%q, want JVM_ARGS/2G/6G", cfg.Variable, cfg.Xms, cfg.Xmx)
+	}
+	if !cfg.Editable {
+		t.Error("variables.txt should be editable")
+	}
+}
+
 // Saving must change variables.txt, and the value must survive the pack
 // regenerating user_jvm_args.txt from it.
 func TestSavingEditsVariablesAndSurvivesRegeneration(t *testing.T) {
