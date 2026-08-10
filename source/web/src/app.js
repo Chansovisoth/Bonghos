@@ -2225,8 +2225,7 @@ async function pagePerformance(main) {
           "Host physical memory, configured Java allocation, and current resident process memory.", "server-2-linear")),
       el("div", { class: "performance-meter-grid" },
         performanceMeter("Machine memory", "host-memory"),
-        performanceMeter("Configured Java maximum (-Xmx)", "allocated-memory"),
-        performanceMeter("Current Java RSS", "process-memory")),
+        performanceMeter("Java memory (RSS / -Xmx)", "allocated-memory")),
       el("div", { class: "grid cols-2 performance-domain-charts" },
         performanceChartPanel("Machine memory", "Physical memory used by the host", "performance-chart-host-memory"),
         performanceChartPanel("Java resident memory", "Process RSS compared with configured -Xmx", "performance-chart-rss"))),
@@ -2330,7 +2329,9 @@ function updatePerformanceMeter(id, used, total, detail, valueMode = "combined")
     fill.style.width = `${percent}%`;
     fill.dataset.pressure = percent >= 90 ? "danger" : percent >= 80 ? "warning" : "normal";
   }
-  const value = valueMode === "percent" ? percent.toFixed(1) + "%" : `${fmtBytes(used)} · ${percent.toFixed(1)}%`;
+  const value = valueMode === "percent" ? percent.toFixed(1) + "%"
+    : valueMode === "ratio" ? `${fmtBytes(used)} / ${fmtBytes(total)}`
+      : `${fmtBytes(used)} · ${percent.toFixed(1)}%`;
   setNodeText(id + "-percent", valid ? value : "—");
   setNodeText(id + "-detail", valid ? detail : "Not available");
 }
@@ -2364,10 +2365,8 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
 
   updatePerformanceMeter("host-memory", hostUsed, hostTotal,
     `${fmtBytes(hostUsed)} / ${fmtBytes(hostTotal)} · ${fmtBytes(hostAvail)} available`, "percent");
-  updatePerformanceMeter("allocated-memory", xmx, hostTotal,
-    xmx > 0 ? `${fmtBytes(xms)} initial (-Xms) · ${fmtBytes(xmx)} maximum (-Xmx)` : "No JVM allocation detected in project configuration");
-  updatePerformanceMeter("process-memory", rss, xmx > 0 ? xmx : hostTotal,
-    xmx > 0 ? `${fmtBytes(rss)} RSS · ${fmtBytes(xmx)} configured maximum` : `${fmtBytes(rss)} RSS · configured maximum unavailable`);
+  updatePerformanceMeter("allocated-memory", rss, xmx,
+    xmx > 0 ? `${fmtBytes(xms)} min (-Xms) · ${fmtBytes(xmx)} max (-Xmx)` : "No JVM allocation detected in project configuration", "ratio");
 
   renderCPUCoreGrid(sample);
   renderPerformanceCharts();
@@ -2545,12 +2544,10 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
     const percent = segment.value / total * 100;
     let circle = null;
     if (percent > 0) {
-      const midpoint = (offset + percent / 2) / 100 * Math.PI * 2;
       circle = svgElement("circle", {
         cx: "120", cy: "120", r: "78", pathLength: "100", fill: "none", "stroke-width": "42",
         "stroke-dasharray": `${percent} ${100 - percent}`, "stroke-dashoffset": String(-offset),
         class: `performance-donut-segment tone-${segment.tone}`, tabindex: "0", role: "button", "aria-pressed": "false",
-        style: `--segment-lift-x:${(Math.cos(midpoint) * 6).toFixed(2)}px;--segment-lift-y:${(Math.sin(midpoint) * 6).toFixed(2)}px`,
         "aria-label": `${segment.label}: ${fmtBytes(segment.value)}, ${percent.toFixed(1)} percent`,
       });
       svg.append(circle);
