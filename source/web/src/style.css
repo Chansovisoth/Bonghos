@@ -439,7 +439,7 @@ tr:hover td { background: var(--surface-2); }
 .performance-feed-window { margin-left: auto; color: var(--faint); white-space: nowrap; }
 
 .performance-domain { padding-top: var(--space-3); }
-.performance-domain + .performance-domain { margin-top: clamp(48px, 6vw, 80px); }
+.performance-domain + .performance-domain { margin-top: var(--space-5); }
 .performance-domain-readouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--border); background: var(--surface); }
 .performance-readout { min-width: 0; min-height: 112px; display: grid; align-content: space-between; gap: var(--space-2); padding: var(--space-4); border-right: 1px solid var(--border); }
 .performance-readout:last-child { border-right: 0; }
