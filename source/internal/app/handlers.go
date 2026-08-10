@@ -414,8 +414,40 @@ func (a *App) handleServerList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	// Older imports may predate version detection. Refresh only metadata that
+	// can be confirmed from the pack and persist changes so known loaders do
+	// not need to be rescanned on later requests.
+	for _, inst := range list {
+		a.refreshServerMetadata(inst)
+	}
 	activeID, _ := a.Instances.ActiveID()
 	writeJSON(w, 200, map[string]any{"servers": list, "active_id": activeID})
+}
+
+func (a *App) refreshServerMetadata(inst *instance.Instance) {
+	if inst.MinecraftVersion != "" && inst.Modloader != "" && inst.ModloaderVersion != "" {
+		return
+	}
+	meta, err := minecraft.DetectServerMetadata(inst.AbsoluteDir(a.Home))
+	if err != nil {
+		return
+	}
+	changed := false
+	if meta.MinecraftVersion != "" && meta.MinecraftVersion != inst.MinecraftVersion {
+		inst.MinecraftVersion = meta.MinecraftVersion
+		changed = true
+	}
+	if meta.Modloader != "" && meta.Modloader != inst.Modloader {
+		inst.Modloader = meta.Modloader
+		changed = true
+	}
+	if meta.ModloaderVersion != "" && meta.ModloaderVersion != inst.ModloaderVersion {
+		inst.ModloaderVersion = meta.ModloaderVersion
+		changed = true
+	}
+	if changed {
+		_ = a.Instances.Update(inst)
+	}
 }
 
 func (a *App) handleSlugPreview(w http.ResponseWriter, r *http.Request) {
@@ -642,10 +674,12 @@ func (a *App) handleServerDetect(w http.ResponseWriter, r *http.Request) {
 	} else if len(scripts) > 0 {
 		jvm, _ = minecraft.DetectJVMConfig(dir, scripts[0].Path)
 	}
+	metadata, _ := minecraft.DetectServerMetadata(dir)
 	writeJSON(w, 200, map[string]any{
-		"scripts": scripts,
-		"jvm":     jvm,
-		"java":    minecraft.DiscoverJava(),
+		"scripts":  scripts,
+		"jvm":      jvm,
+		"java":     minecraft.DiscoverJava(),
+		"metadata": metadata,
 	})
 }
 

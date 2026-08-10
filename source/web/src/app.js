@@ -101,6 +101,16 @@ function solarIcon(name, className = "") {
   return svg;
 }
 
+function gameVersionIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon game-version-icon");
+  svg.setAttribute("viewBox", "0 0 512 512");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.innerHTML = '<path d="M0 0h512v512H0z" fill="none"/><path fill="currentColor" d="M483.13 245.38C461.92 149.49 430 98.31 382.65 84.33A107.1 107.1 0 0 0 352 80c-13.71 0-25.65 3.34-38.28 6.88C298.5 91.15 281.21 96 256 96s-42.51-4.84-57.76-9.11C185.6 83.34 173.67 80 160 80a115.7 115.7 0 0 0-31.73 4.32c-47.1 13.92-79 65.08-100.52 161C4.61 348.54 16 413.71 59.69 428.83a56.6 56.6 0 0 0 18.64 3.22c29.93 0 53.93-24.93 70.33-45.34c18.53-23.1 40.22-34.82 107.34-34.82c59.95 0 84.76 8.13 106.19 34.82c13.47 16.78 26.2 28.52 38.9 35.91c16.89 9.82 33.77 12 50.16 6.37c25.82-8.81 40.62-32.1 44-69.24c2.57-28.48-1.39-65.89-12.12-114.37M208 240h-32v32a16 16 0 0 1-32 0v-32h-32a16 16 0 0 1 0-32h32v-32a16 16 0 0 1 32 0v32h32a16 16 0 0 1 0 32m84 4a20 20 0 1 1 20-20a20 20 0 0 1-20 20m44 44a20 20 0 1 1 20-19.95A20 20 0 0 1 336 288m0-88a20 20 0 1 1 20-20a20 20 0 0 1-20 20m44 44a20 20 0 1 1 20-20a20 20 0 0 1-20 20"/>';
+  return svg;
+}
+
 let lifecycleLoadingIconId = 0;
 function lifecycleLoadingIcon() {
   const id = `lifecycle-loading-${++lifecycleLoadingIconId}`;
@@ -302,8 +312,8 @@ const DEMO_PERMS = [
 ];
 const DEMO_ME = { id: 1, username: "demo-owner", role: "owner", permissions: DEMO_PERMS };
 const DEMO_SERVERS = [
-  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "forge", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, demo_icon: "demo-server-bio1.png" },
-  { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", source_type: "archive-upload", external_directory: false, demo_icon: "demo-server-creative-lab.png" },
+  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "neoforge", modloader_version: "21.1.228", minecraft_version: "1.21.1", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, demo_icon: "demo-server-bio1.png" },
+  { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", external_directory: false, demo_icon: "demo-server-creative-lab.png" },
 ];
 const DEMO_CONSOLE = [
   "[19:27:36] [Server thread/INFO]: Starting minecraft server version 1.20.1",
@@ -3417,7 +3427,7 @@ function serverProviderLabel(server) {
   } else if (sourceHint.includes("quiltmc")) {
     inferredProvider = "quilt";
   }
-  const raw = String(server.modloader || server.provider || inferredProvider || "unknown").trim();
+  const raw = String(server.modloader || (server.minecraft_version ? "vanilla" : "") || server.provider || inferredProvider || "unknown").trim();
   const key = normalizedProviderKey(raw);
   const favicon = PROVIDER_FAVICONS[key];
   const icon = favicon
@@ -3426,8 +3436,22 @@ function serverProviderLabel(server) {
   if (favicon) {
     icon.addEventListener("error", () => icon.replaceWith(providerIconFallback(key)), { once: true });
   }
-  const names = { forge: "Forge", neoforge: "NeoForge", fabric: "Fabric", quilt: "Quilt", modrinth: "Modrinth", curseforge: "CurseForge" };
-  return el("span", { class: "server-provider" }, icon, names[key] || raw);
+  const names = { forge: "Forge", neoforge: "NeoForge", fabric: "Fabric", quilt: "Quilt", vanilla: "Vanilla", modrinth: "Modrinth", curseforge: "CurseForge" };
+  const version = String(server.modloader_version || "").trim();
+  return el("span", { class: "server-provider" }, icon, names[key] || raw, version ? " " + version : "");
+}
+
+function serverVersionSummary(server) {
+  const items = [serverProviderLabel(server)];
+  const gameVersion = String(server.minecraft_version || "").trim();
+  if (gameVersion) items.push(el("span", { class: "server-game-version" }, gameVersionIcon(), gameVersion));
+  items.push(document.createTextNode("imported via " + server.source_type));
+  const children = [];
+  items.forEach((item, index) => {
+    if (index) children.push(el("span", { "aria-hidden": "true" }, "·"));
+    children.push(item);
+  });
+  return el("div", { class: "server-provider-row muted" }, children);
 }
 
 function worldDownloadMenuItem(server) {
@@ -3621,8 +3645,7 @@ async function pageServers(main) {
         s2.external_directory ? el("span", { class: "tag" }, "external link") : "",
         el("div", { class: "spacer" })),
       el("div", { class: "muted mono" }, s2.slug),
-      el("div", { class: "server-provider-row muted" },
-        serverProviderLabel(s2), el("span", { "aria-hidden": "true" }, "·"), "imported via " + s2.source_type),
+      serverVersionSummary(s2),
       el("div", { class: "row-actions action-row-spaced server-card-actions" },
         el("div", { class: "spacer" }),
         s2.id !== S.activeId && can("server.configuration.manage")

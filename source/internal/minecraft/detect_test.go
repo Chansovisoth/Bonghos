@@ -1,6 +1,7 @@
 package minecraft
 
 import (
+	"archive/zip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,98 @@ func TestDetectStartupScriptIgnoresNeoForgeInComments(t *testing.T) {
 	}
 	if cands[0].Modloader != "forge" {
 		t.Fatalf("modloader = %q, want forge", cands[0].Modloader)
+	}
+}
+
+func TestDetectServerMetadataFromCurseForgeManifest(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"manifest.json": `{"minecraft":{"version":"1.21.1","modLoaders":[{"id":"forge-52.0.1","primary":false},{"id":"neoforge-21.1.228","primary":true}]}}`,
+	})
+	meta, err := DetectServerMetadata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MinecraftVersion != "1.21.1" || meta.Modloader != "neoforge" || meta.ModloaderVersion != "21.1.228" {
+		t.Fatalf("metadata = %+v", meta)
+	}
+}
+
+func TestDetectServerMetadataFromVariables(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"variables.txt": "MINECRAFT_VERSION=1.20.1\nMODLOADER=Forge\nMODLOADER_VERSION=47.4.0\n",
+	})
+	meta, err := DetectServerMetadata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MinecraftVersion != "1.20.1" || meta.Modloader != "forge" || meta.ModloaderVersion != "47.4.0" {
+		t.Fatalf("metadata = %+v", meta)
+	}
+}
+
+func TestDetectServerMetadataFromModrinthIndex(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"modrinth.index.json": `{"dependencies":{"minecraft":"1.21.1","fabric-loader":"0.16.10"}}`,
+	})
+	meta, err := DetectServerMetadata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MinecraftVersion != "1.21.1" || meta.Modloader != "fabric" || meta.ModloaderVersion != "0.16.10" {
+		t.Fatalf("metadata = %+v", meta)
+	}
+}
+
+func TestDetectServerMetadataFromLoaderArtifacts(t *testing.T) {
+	tests := []struct {
+		name, artifact, minecraft, loader, version string
+	}{
+		{"forge", "libraries/net/minecraftforge/forge/1.20.1-47.4.0/unix_args.txt", "1.20.1", "forge", "47.4.0"},
+		{"neoforge", "libraries/net/neoforged/neoforge/21.1.228/win_args.txt", "1.21.1", "neoforge", "21.1.228"},
+		{"fabric", "fabric-server-mc.1.21.1-loader.0.16.10-launcher.1.0.1.jar", "1.21.1", "fabric", "0.16.10"},
+		{"quilt", "libraries/org/quiltmc/quilt-loader/0.27.1/quilt-loader-0.27.1.jar", "", "quilt", "0.27.1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeServer(t, map[string]string{test.artifact: "artifact"})
+			meta, err := DetectServerMetadata(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if meta.MinecraftVersion != test.minecraft || meta.Modloader != test.loader || meta.ModloaderVersion != test.version {
+				t.Fatalf("metadata = %+v", meta)
+			}
+		})
+	}
+}
+
+func TestDetectServerMetadataReadsVanillaVersionJSON(t *testing.T) {
+	root := t.TempDir()
+	serverJar := filepath.Join(root, "server.jar")
+	file, err := os.Create(serverJar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar := zip.NewWriter(file)
+	versionJSON, err := jar.Create("version.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := versionJSON.Write([]byte(`{"id":"1.21.4"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := jar.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := DetectServerMetadata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.MinecraftVersion != "1.21.4" {
+		t.Fatalf("minecraft version = %q", meta.MinecraftVersion)
 	}
 }
 

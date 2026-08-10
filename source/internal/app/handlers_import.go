@@ -732,6 +732,17 @@ func (a *App) finishInstall(opID string, inst *instance.Instance) {
 	if props, err := minecraft.ReadProperties(dir); err == nil {
 		_ = props // versions unavailable from properties; left for detection
 	}
+	if meta, err := minecraft.DetectServerMetadata(dir); err == nil {
+		if meta.MinecraftVersion != "" {
+			inst.MinecraftVersion = meta.MinecraftVersion
+		}
+		if meta.Modloader != "" {
+			inst.Modloader = meta.Modloader
+		}
+		if meta.ModloaderVersion != "" {
+			inst.ModloaderVersion = meta.ModloaderVersion
+		}
+	}
 	if err := a.Instances.Update(inst); err != nil {
 		a.Operations.Finish(opID, "failed", err.Error())
 		return
