@@ -14,6 +14,12 @@ const INLINE_SOLAR_ICONS = {
   "alt-arrow-right-linear": {
     body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m9 5l6 7l-6 7"/>',
   },
+  "moon-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 15.5A9.75 9.75 0 0 1 8.5 2.25A10 10 0 1 0 21.75 15.5Z"/>',
+  },
+  "sun-2-linear": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"><circle cx="12" cy="12" r="4"/><path d="M12 2V1m0 22v-1m10-10h1M1 12h1m17.07-7.07l.7-.7M4.23 19.77l.7-.7m14.14 0l.7.7M4.23 4.23l.7.7"/></g>',
+  },
 };
 const BUTTON_ICONS = {
   "Activate": "check-circle-linear",
@@ -240,6 +246,30 @@ function applyTheme(choice = themeChoice()) {
   const dark = choice === "dark" || (choice === "system" && themeQuery.matches);
   document.documentElement.dataset.theme = choice;
   document.documentElement.dataset.resolvedTheme = dark ? "dark" : "light";
+  syncThemeToggles(dark);
+}
+
+function syncThemeToggles(dark = document.documentElement.dataset.resolvedTheme === "dark") {
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    const label = dark ? "Switch to light mode" : "Switch to dark mode";
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    button.setAttribute("aria-pressed", String(dark));
+  });
+}
+
+function initializeThemeToggles() {
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.append(
+      el("span", { class: "theme-toggle-icon theme-toggle-sun", "aria-hidden": "true" }, solarIcon("sun-2-linear")),
+      el("span", { class: "theme-toggle-icon theme-toggle-moon", "aria-hidden": "true" }, solarIcon("moon-linear")),
+    );
+    button.addEventListener("click", () => {
+      const dark = document.documentElement.dataset.resolvedTheme === "dark";
+      setTheme(dark ? "light" : "dark");
+    });
+  });
+  syncThemeToggles();
 }
 
 function setTheme(choice) {
@@ -252,6 +282,7 @@ function setTheme(choice) {
 
 themeQuery.addEventListener("change", () => { if (themeChoice() === "system") applyTheme("system"); });
 applyTheme();
+initializeThemeToggles();
 
 // ---------------------------------------------------------------------------
 // local demo mode
