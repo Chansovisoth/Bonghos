@@ -430,10 +430,11 @@ To safely merge the `webui` branch into `main`, use the guarded integration help
 ./scripts/integrate-webui.sh
 ```
 
-It fetches the latest refs, tests the merge in a temporary worktree, runs validation,
-then asks before updating `main`, pushing, or installing the validated build into the
-local `~/bonghos` service. If conflicts occur, `main` is untouched and the script leaves
-the temporary worktree in place for manual resolution.
+With no flags, it fetches the latest refs, tests the merge in a temporary worktree,
+runs validation, and exits without changing `main`, pushing, or installing anything.
+Use `--apply` to update local `main`, add `--push` to publish it, and add `--install`
+to install/restart the local `~/bonghos` service. If conflicts occur, `main` is
+untouched and the script leaves the temporary worktree in place for manual resolution.
 
 Contributions welcome — see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 

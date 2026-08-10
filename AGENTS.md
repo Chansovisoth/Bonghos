@@ -12,13 +12,17 @@ These notes are for Codex and other AI coding agents working in this repository.
 ./scripts/integrate-webui.sh
 ```
 
-The helper fetches remote refs, tests the merge in a temporary worktree, validates the result, then asks before updating `main`, pushing, or installing/restarting the local Bonghos service. If conflicts or validation failures happen, it leaves `main` untouched and preserves the temporary worktree for inspection.
+With no flags, the helper fetches remote refs, tests the merge in a temporary worktree, validates the result, then exits without updating `main`, pushing, or installing/restarting the local Bonghos service. This check-only mode is the safe default for AI agents.
+
+If conflicts or validation failures happen, it leaves `main` untouched and preserves the temporary worktree for inspection. Do not bypass a failed integration check; inspect the preserved worktree and fix the underlying conflict or test failure.
 
 Useful noninteractive options:
 
 ```bash
-RUN_RACE=1 ./scripts/integrate-webui.sh
-INSTALL_AFTER=no ./scripts/integrate-webui.sh
+./scripts/integrate-webui.sh --apply
+./scripts/integrate-webui.sh --apply --push
+./scripts/integrate-webui.sh --apply --push --install
+./scripts/integrate-webui.sh --race
 ```
 
 ## Development Checks

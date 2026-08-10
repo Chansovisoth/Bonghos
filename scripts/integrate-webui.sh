@@ -1,237 +1,476 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
-# Safely integrate the webui branch into main.
+# Bonghos Web UI Integration
 #
-# The merge is first attempted in a temporary worktree on a disposable
-# integration branch. main is only updated after the merge and validation pass
-# and after the operator confirms.
+# Safely validates and optionally integrates the webui branch into main.
+#
+# Safe default:
+#   ./scripts/integrate-webui.sh
+#
+# This creates a temporary Git worktree, merges origin/webui into origin/main,
+# runs validation, then exits without changing main, pushing, or restarting
+# Bonghos.
 
 REMOTE="${REMOTE:-origin}"
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
 WEBUI_BRANCH="${WEBUI_BRANCH:-webui}"
-INTEGRATION_PREFIX="${INTEGRATION_PREFIX:-integrate-webui}"
-RUN_RACE="${RUN_RACE:-0}"
-INSTALL_AFTER="${INSTALL_AFTER:-ask}"
 BONGHOS_HOME="${BONGHOS_HOME:-$HOME/bonghos}"
 
-ROOT="$(git rev-parse --show-toplevel)"
-TS="$(date +%Y%m%d-%H%M%S)"
-INTEGRATION_BRANCH="${INTEGRATION_PREFIX}-${TS}"
-WORKTREE=""
+APPLY=0
+PUSH=0
+INSTALL=0
+RUN_RACE=0
 KEEP_WORKTREE=0
 
+ROOT=""
+WORKTREE=""
+INTEGRATION_BRANCH=""
+BASE_SHA=""
+WEBUI_SHA=""
+MERGED_SHA=""
+
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+ok() { printf '\033[1;32mOK:\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
 err() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; }
 
-cleanup() {
-  if [ "$KEEP_WORKTREE" = "1" ] || [ -z "$WORKTREE" ]; then
-    return
-  fi
-  git -C "$ROOT" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
-  git -C "$ROOT" branch -D "$INTEGRATION_BRANCH" >/dev/null 2>&1 || true
+usage() {
+  cat <<'EOF'
+Usage:
+  ./scripts/integrate-webui.sh [options]
+
+Options:
+  --apply          Fast-forward local main after validation
+  --push           Push validated main to the configured remote
+                   Implies --apply
+  --install        Install the validated Bonghos build and restart its service
+  --race           Run Go race tests
+  --keep-worktree  Keep the temporary integration worktree after success
+  -h, --help       Show this help
+
+Safe default:
+  With no options, the script only performs a temporary merge and validation.
+  It does not modify main, push anything, or restart Bonghos.
+
+Examples:
+  ./scripts/integrate-webui.sh
+  ./scripts/integrate-webui.sh --apply
+  ./scripts/integrate-webui.sh --apply --push
+  ./scripts/integrate-webui.sh --apply --push --install
+  ./scripts/integrate-webui.sh --race
+EOF
 }
-trap cleanup EXIT
 
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     err "Required command not found: $1"
-    exit 1
+    exit 127
   fi
 }
 
-confirm() {
-  local prompt="$1"
-  local answer
-  read -r -p "$prompt [y/N] " answer
-  case "$answer" in
-    y|Y|yes|YES) return 0 ;;
-    *) return 1 ;;
+cleanup() {
+  local exit_code=$?
+
+  if [[ -z "${WORKTREE:-}" ]]; then
+    return "$exit_code"
+  fi
+
+  if (( KEEP_WORKTREE )); then
+    warn "Keeping integration worktree:"
+    warn "  $WORKTREE"
+    if [[ -n "${INTEGRATION_BRANCH:-}" ]]; then
+      warn "Integration branch:"
+      warn "  $INTEGRATION_BRANCH"
+    fi
+    return "$exit_code"
+  fi
+
+  git -C "$ROOT" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
+  if [[ -n "${INTEGRATION_BRANCH:-}" ]]; then
+    git -C "$ROOT" branch -D "$INTEGRATION_BRANCH" >/dev/null 2>&1 || true
+  fi
+
+  return "$exit_code"
+}
+
+on_error() {
+  local exit_code=$?
+  local line="${BASH_LINENO[0]:-unknown}"
+
+  KEEP_WORKTREE=1
+
+  echo >&2
+  err "Integration stopped with exit code $exit_code near line $line."
+  if [[ -n "${WORKTREE:-}" && -d "${WORKTREE:-}" ]]; then
+    warn "The temporary worktree was preserved for inspection:"
+    warn "  $WORKTREE"
+  fi
+
+  exit "$exit_code"
+}
+
+trap cleanup EXIT
+trap on_error ERR
+
+while (($#)); do
+  case "$1" in
+    --apply)
+      APPLY=1
+      ;;
+    --push)
+      APPLY=1
+      PUSH=1
+      ;;
+    --install)
+      INSTALL=1
+      ;;
+    --race)
+      RUN_RACE=1
+      ;;
+    --keep-worktree)
+      KEEP_WORKTREE=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      err "Unknown argument: $1"
+      echo >&2
+      usage >&2
+      exit 2
+      ;;
   esac
-}
-
-ensure_current_worktree_clean() {
-  if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
-    err "Current worktree has uncommitted changes. Commit or stash them first."
-    git -C "$ROOT" status --short
-    exit 1
-  fi
-}
-
-ensure_ref_exists() {
-  local ref="$1"
-  if ! git -C "$ROOT" rev-parse --verify --quiet "$ref" >/dev/null; then
-    err "Missing required ref: $ref"
-    exit 1
-  fi
-}
-
-ensure_local_main_can_fast_forward() {
-  if ! git -C "$ROOT" rev-parse --verify --quiet "$MAIN_BRANCH" >/dev/null; then
-    return
-  fi
-  if ! git -C "$ROOT" merge-base --is-ancestor "$MAIN_BRANCH" "$INTEGRATION_BRANCH"; then
-    err "Local $MAIN_BRANCH has commits that are not in $INTEGRATION_BRANCH."
-    err "Refusing to move it automatically. Inspect with:"
-    echo "  git log --oneline --left-right $MAIN_BRANCH...$INTEGRATION_BRANCH"
-    exit 1
-  fi
-}
-
-run_validation() {
-  say "Running validation"
-  git -C "$WORKTREE" diff --check "$REMOTE/$MAIN_BRANCH..HEAD" || return
-  (
-    cd "$WORKTREE/source"
-    make web || return
-    make fmt-check || return
-    go vet ./cmd/... ./internal/... || return
-    go test ./internal/... || return
-    if [ "$RUN_RACE" = "1" ]; then
-      go test -race ./internal/... || return
-    else
-      warn "Skipping go test -race ./internal/... (set RUN_RACE=1 to include it)."
-    fi
-    go build ./... || return
-    if command -v node >/dev/null 2>&1; then
-      node --check web/src/app.js || return
-    else
-      warn "Skipping node --check web/src/app.js because node is not installed."
-    fi
-  )
-}
-
-install_running_service() {
-  need_cmd systemctl
-  say "Installing validated build into $BONGHOS_HOME"
-  (
-    cd "$WORKTREE/source"
-    make build
-  )
-  if [ ! -x "$BONGHOS_HOME/system/bin/bonghos" ]; then
-    err "Installed Bonghos binary not found at $BONGHOS_HOME/system/bin/bonghos"
-    exit 1
-  fi
-  local stamp
-  stamp="$(date +%Y%m%d-%H%M)"
-  cp "$BONGHOS_HOME/system/bin/bonghos" "$BONGHOS_HOME/system/bin/bonghos.backup-$stamp"
-  install -m 755 "$WORKTREE/source/bin/bonghos" "$BONGHOS_HOME/system/bin/bonghos"
-  systemctl --user restart bonghos.service
-  systemctl --user is-active bonghos.service
-  say "Backup: $BONGHOS_HOME/system/bin/bonghos.backup-$stamp"
-}
+  shift
+done
 
 need_cmd git
 need_cmd make
 need_cmd go
 need_cmd mktemp
 
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+  err "This script must be run inside the Bonghos Git repository."
+  exit 1
+}
+
+cd "$ROOT"
+
+if [[ ! -d "$ROOT/source" ]]; then
+  err "Expected Bonghos source directory not found:"
+  err "  $ROOT/source"
+  exit 1
+fi
+
 say "Repository: $ROOT"
-ensure_current_worktree_clean
+say "Remote:     $REMOTE"
+say "Main:       $MAIN_BRANCH"
+say "WebUI:      $WEBUI_BRANCH"
 
-say "Fetching $REMOTE"
-git -C "$ROOT" fetch --prune "$REMOTE"
+say "Fetching latest refs from $REMOTE..."
+git fetch --prune "$REMOTE"
 
-ensure_ref_exists "$REMOTE/$MAIN_BRANCH"
-ensure_ref_exists "$REMOTE/$WEBUI_BRANCH"
+if ! git rev-parse --verify --quiet "refs/remotes/$REMOTE/$MAIN_BRANCH" >/dev/null; then
+  err "Remote branch does not exist: $REMOTE/$MAIN_BRANCH"
+  exit 1
+fi
 
-BASE_SHA="$(git -C "$ROOT" rev-parse "$REMOTE/$MAIN_BRANCH")"
-WEBUI_SHA="$(git -C "$ROOT" rev-parse "$REMOTE/$WEBUI_BRANCH")"
+if ! git rev-parse --verify --quiet "refs/remotes/$REMOTE/$WEBUI_BRANCH" >/dev/null; then
+  err "Remote branch does not exist: $REMOTE/$WEBUI_BRANCH"
+  exit 1
+fi
 
-say "Main:  $REMOTE/$MAIN_BRANCH  $BASE_SHA"
-say "WebUI: $REMOTE/$WEBUI_BRANCH  $WEBUI_SHA"
+BASE_SHA="$(git rev-parse "$REMOTE/$MAIN_BRANCH")"
+WEBUI_SHA="$(git rev-parse "$REMOTE/$WEBUI_BRANCH")"
 
-if [ "$BASE_SHA" = "$WEBUI_SHA" ]; then
-  say "$MAIN_BRANCH already matches $WEBUI_BRANCH; nothing to integrate."
+say "Remote main:"
+printf '    %s\n' "$BASE_SHA"
+say "Remote WebUI:"
+printf '    %s\n' "$WEBUI_SHA"
+
+if git merge-base --is-ancestor "$REMOTE/$WEBUI_BRANCH" "$REMOTE/$MAIN_BRANCH"; then
+  ok "$WEBUI_BRANCH is already fully contained in $MAIN_BRANCH."
   exit 0
 fi
 
-say "Commits to merge from $WEBUI_BRANCH:"
-git -C "$ROOT" log --oneline --decorate "$REMOTE/$MAIN_BRANCH..$REMOTE/$WEBUI_BRANCH" || true
+echo
+say "WebUI commits not currently in main:"
+git log --oneline --decorate "$REMOTE/$MAIN_BRANCH..$REMOTE/$WEBUI_BRANCH"
+echo
 
-WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/bonghos-webui-merge.XXXXXX")"
+timestamp="$(date +%Y%m%d-%H%M%S)"
+INTEGRATION_BRANCH="integrate-webui-$timestamp"
+WORKTREE="$(mktemp -d "${TMPDIR:-/tmp}/bonghos-webui-integration.XXXXXX")"
 rmdir "$WORKTREE"
 
-say "Creating temporary integration worktree: $WORKTREE"
-git -C "$ROOT" worktree add -b "$INTEGRATION_BRANCH" "$WORKTREE" "$REMOTE/$MAIN_BRANCH"
+say "Creating temporary integration worktree:"
+printf '    %s\n' "$WORKTREE"
+git worktree add -b "$INTEGRATION_BRANCH" "$WORKTREE" "$REMOTE/$MAIN_BRANCH"
 
-say "Merging $REMOTE/$WEBUI_BRANCH into $INTEGRATION_BRANCH"
-if ! git -C "$WORKTREE" merge --no-ff "$REMOTE/$WEBUI_BRANCH" -m "Merge Web UI"; then
+say "Merging $REMOTE/$WEBUI_BRANCH..."
+if ! git -C "$WORKTREE" merge --no-ff -m "Merge Web UI" "$REMOTE/$WEBUI_BRANCH"; then
   KEEP_WORKTREE=1
-  err "Merge conflicts detected. main was not changed."
+
   echo
-  git -C "$WORKTREE" status --short
+  err "Merge conflicts detected."
+  err "main has NOT been modified."
+
+  echo
+  git -C "$WORKTREE" status --short || true
+
   echo
   echo "Conflicted files:"
   git -C "$WORKTREE" diff --name-only --diff-filter=U || true
+
   echo
   echo "Resolve conflicts in:"
   echo "  $WORKTREE"
+
   echo
-  echo "Then validate and finish manually, or abort with:"
+  echo "After resolving:"
+  echo "  git -C '$WORKTREE' add -A"
+  echo "  git -C '$WORKTREE' commit"
+
+  echo
+  echo "Or abort and remove it:"
   echo "  git -C '$WORKTREE' merge --abort"
   echo "  git -C '$ROOT' worktree remove '$WORKTREE'"
   echo "  git -C '$ROOT' branch -D '$INTEGRATION_BRANCH'"
-  exit 1
+
+  exit 10
 fi
 
-if ! run_validation; then
+ok "Merge completed in temporary worktree."
+
+say "Checking merged diff..."
+git -C "$WORKTREE" diff --check "$REMOTE/$MAIN_BRANCH..HEAD"
+
+say "Running Bonghos Web UI build..."
+(
+  cd "$WORKTREE/source"
+  make web
+)
+
+say "Checking formatting..."
+(
+  cd "$WORKTREE/source"
+  make fmt-check
+)
+
+say "Running go vet..."
+(
+  cd "$WORKTREE/source"
+  go vet ./...
+)
+
+say "Running Go tests..."
+(
+  cd "$WORKTREE/source"
+  go test ./...
+)
+
+if (( RUN_RACE )); then
+  say "Running Go race tests..."
+  (
+    cd "$WORKTREE/source"
+    go test -race ./...
+  )
+else
+  warn "Race tests skipped. Use --race to enable them."
+fi
+
+say "Building all Go packages..."
+(
+  cd "$WORKTREE/source"
+  go build ./...
+)
+
+if command -v node >/dev/null 2>&1; then
+  if [[ -f "$WORKTREE/source/web/src/app.js" ]]; then
+    say "Checking web/src/app.js syntax..."
+    node --check "$WORKTREE/source/web/src/app.js"
+  fi
+else
+  warn "Node.js is unavailable; standalone JS syntax check skipped."
+fi
+
+if [[ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=no)" ]]; then
   KEEP_WORKTREE=1
-  err "Validation failed. main was not changed."
+
+  err "Validation modified tracked files."
+  err "Generated or formatted changes must be committed explicitly."
+
   echo
-  echo "Inspect the failed integration in:"
-  echo "  $WORKTREE"
-  echo
-  echo "Clean it up when done with:"
-  echo "  git -C '$ROOT' worktree remove '$WORKTREE'"
-  echo "  git -C '$ROOT' branch -D '$INTEGRATION_BRANCH'"
-  exit 1
+  git -C "$WORKTREE" status --short
+
+  exit 11
 fi
 
-say "Integration branch is ready: $INTEGRATION_BRANCH"
-git -C "$WORKTREE" log --graph --oneline --decorate -12
-echo
+MERGED_SHA="$(git -C "$WORKTREE" rev-parse HEAD)"
 
-if ! confirm "Fast-forward local $MAIN_BRANCH to the validated integration branch?"; then
-  say "Stopped. $MAIN_BRANCH was not changed."
+echo
+ok "Integration validation passed."
+say "Validated merge commit:"
+printf '    %s\n' "$MERGED_SHA"
+
+if (( ! APPLY )); then
+  echo
+  say "Check-only mode complete."
+  say "main was NOT changed."
+
+  echo
+  echo "To apply this integration:"
+  echo "  ./scripts/integrate-webui.sh --apply"
+  echo
+  echo "To apply and push:"
+  echo "  ./scripts/integrate-webui.sh --apply --push"
+
   exit 0
 fi
 
-ensure_local_main_can_fast_forward
-if git -C "$ROOT" branch --show-current | grep -qx "$MAIN_BRANCH"; then
-  git -C "$ROOT" switch "$MAIN_BRANCH"
-  git -C "$ROOT" merge --ff-only "$INTEGRATION_BRANCH"
-else
-  git -C "$ROOT" branch -f "$MAIN_BRANCH" "$INTEGRATION_BRANCH"
+say "Preparing to update local $MAIN_BRANCH..."
+
+if git show-ref --verify --quiet "refs/heads/$MAIN_BRANCH"; then
+  if ! git merge-base --is-ancestor "$MAIN_BRANCH" "$INTEGRATION_BRANCH"; then
+    KEEP_WORKTREE=1
+
+    err "Local $MAIN_BRANCH contains commits not present in the validated integration branch."
+    err "Refusing to overwrite local work."
+
+    echo
+    echo "Inspect with:"
+    echo "  git log --oneline --left-right '$MAIN_BRANCH...$INTEGRATION_BRANCH'"
+
+    exit 20
+  fi
 fi
 
-say "Local $MAIN_BRANCH now points to $(git -C "$ROOT" rev-parse "$MAIN_BRANCH")"
+CURRENT_BRANCH="$(git branch --show-current)"
 
-if confirm "Push $MAIN_BRANCH to $REMOTE?"; then
-  git -C "$ROOT" push "$REMOTE" "$MAIN_BRANCH"
+if [[ "$CURRENT_BRANCH" == "$MAIN_BRANCH" ]]; then
+  if [[ -n "$(git status --porcelain)" ]]; then
+    KEEP_WORKTREE=1
+
+    err "The current $MAIN_BRANCH worktree has uncommitted changes."
+    err "Commit or stash them before using --apply."
+
+    exit 21
+  fi
+
+  say "Fast-forwarding checked-out $MAIN_BRANCH..."
+  git merge --ff-only "$INTEGRATION_BRANCH"
 else
-  warn "Push skipped. Run this when ready: git push $REMOTE $MAIN_BRANCH"
+  if git show-ref --verify --quiet "refs/heads/$MAIN_BRANCH"; then
+    say "Updating local $MAIN_BRANCH ref..."
+    git branch -f "$MAIN_BRANCH" "$INTEGRATION_BRANCH"
+  else
+    say "Creating local $MAIN_BRANCH..."
+    git branch "$MAIN_BRANCH" "$INTEGRATION_BRANCH"
+  fi
 fi
 
-case "$INSTALL_AFTER" in
-  1|yes|true)
-    install_running_service
-    ;;
-  0|no|false)
-    warn "Install/restart skipped by INSTALL_AFTER=$INSTALL_AFTER."
-    ;;
-  ask)
-    if confirm "Install validated build and restart local Bonghos service?"; then
-      install_running_service
-    else
-      warn "Install/restart skipped."
-    fi
-    ;;
-  *)
-    err "Invalid INSTALL_AFTER value: $INSTALL_AFTER"
-    exit 1
-    ;;
-esac
+LOCAL_MAIN_SHA="$(git rev-parse "$MAIN_BRANCH")"
 
-say "Done."
+if [[ "$LOCAL_MAIN_SHA" != "$MERGED_SHA" ]]; then
+  KEEP_WORKTREE=1
+  err "Local $MAIN_BRANCH does not match validated merge."
+  exit 22
+fi
+
+ok "Local $MAIN_BRANCH updated to validated integration."
+
+if (( PUSH )); then
+  say "Checking that remote $MAIN_BRANCH has not changed..."
+  git fetch "$REMOTE" "$MAIN_BRANCH:refs/remotes/$REMOTE/$MAIN_BRANCH"
+
+  CURRENT_REMOTE_MAIN="$(git rev-parse "$REMOTE/$MAIN_BRANCH")"
+  if [[ "$CURRENT_REMOTE_MAIN" != "$BASE_SHA" ]]; then
+    KEEP_WORKTREE=1
+
+    err "Remote $MAIN_BRANCH changed while integration was running."
+    err "Refusing to push a potentially stale integration."
+
+    echo
+    echo "Original remote main:"
+    echo "  $BASE_SHA"
+
+    echo
+    echo "Current remote main:"
+    echo "  $CURRENT_REMOTE_MAIN"
+
+    echo
+    echo "Run the integration script again against the new main."
+
+    exit 30
+  fi
+
+  say "Pushing $MAIN_BRANCH to $REMOTE..."
+  git push "$REMOTE" "$MAIN_BRANCH:$MAIN_BRANCH"
+  ok "Remote $MAIN_BRANCH updated."
+fi
+
+if (( INSTALL )); then
+  need_cmd install
+  need_cmd systemctl
+
+  say "Building production Bonghos binary..."
+  (
+    cd "$WORKTREE/source"
+    make build
+  )
+
+  BUILT_BINARY="$WORKTREE/source/bin/bonghos"
+  INSTALLED_BINARY="$BONGHOS_HOME/system/bin/bonghos"
+
+  if [[ ! -x "$BUILT_BINARY" ]]; then
+    KEEP_WORKTREE=1
+    err "Expected built Bonghos binary was not produced:"
+    err "  $BUILT_BINARY"
+    exit 40
+  fi
+
+  mkdir -p "$(dirname "$INSTALLED_BINARY")"
+
+  if [[ -f "$INSTALLED_BINARY" ]]; then
+    backup_stamp="$(date +%Y%m%d-%H%M%S)"
+    backup_path="${INSTALLED_BINARY}.backup-${backup_stamp}"
+
+    say "Backing up currently installed binary..."
+    cp --preserve=mode,timestamps "$INSTALLED_BINARY" "$backup_path"
+
+    say "Backup:"
+    printf '    %s\n' "$backup_path"
+  fi
+
+  say "Installing validated Bonghos binary..."
+  install -m 0755 "$BUILT_BINARY" "$INSTALLED_BINARY"
+
+  say "Restarting Bonghos service..."
+  systemctl --user restart bonghos.service
+
+  if ! systemctl --user is-active --quiet bonghos.service; then
+    KEEP_WORKTREE=1
+
+    err "bonghos.service failed to become active."
+
+    echo
+    systemctl --user status bonghos.service --no-pager || true
+
+    exit 41
+  fi
+
+  ok "Bonghos service restarted successfully."
+fi
+
+echo
+ok "Web UI integration completed successfully."
+
+say "main:"
+printf '    %s\n' "$(git rev-parse "$MAIN_BRANCH")"
+
+if (( ! PUSH )); then
+  warn "Changes were not pushed."
+  warn "Use --push next time, or run:"
+  warn "  git push $REMOTE $MAIN_BRANCH"
+fi
