@@ -2238,11 +2238,6 @@ async function pagePerformance(main) {
         el("div", { class: "performance-view-toggle", role: "group", "aria-label": "Storage chart view" },
           el("button", { class: "btn small", type: "button", "data-storage-view": "distribution", onclick: () => setStorageView("distribution") }, "Distribution"),
           el("button", { class: "btn small", type: "button", "data-storage-view": "trend", onclick: () => setStorageView("trend") }, "Trend"))),
-      el("div", { class: "performance-domain-readouts performance-storage-readouts" },
-        performanceReadout("Machine disk", "performance-disk-total", "Filesystem containing Bonghos"),
-        performanceReadout("Disk used", "performance-disk-used", "Across the host filesystem"),
-        performanceReadout("Bonghos", "performance-bonghos-size", "Servers, backups, and system files"),
-        performanceReadout("Servers", "performance-server-size", "All managed server directories")),
       el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
 
   syncPageSubscription("performance");
@@ -2325,7 +2320,7 @@ function setNodeText(id, value) {
   if (node) node.textContent = value;
 }
 
-function updatePerformanceMeter(id, used, total, detail) {
+function updatePerformanceMeter(id, used, total, detail, valueMode = "combined") {
   const valid = Number.isFinite(used) && Number.isFinite(total) && total > 0;
   const percent = valid ? Math.max(0, Math.min(100, used / total * 100)) : 0;
   const meter = $("#" + id + "-meter");
@@ -2335,7 +2330,8 @@ function updatePerformanceMeter(id, used, total, detail) {
     fill.style.width = `${percent}%`;
     fill.dataset.pressure = percent >= 90 ? "danger" : percent >= 80 ? "warning" : "normal";
   }
-  setNodeText(id + "-percent", valid ? `${fmtBytes(used)} · ${percent.toFixed(1)}%` : "—");
+  const value = valueMode === "percent" ? percent.toFixed(1) + "%" : `${fmtBytes(used)} · ${percent.toFixed(1)}%`;
+  setNodeText(id + "-percent", valid ? value : "—");
   setNodeText(id + "-detail", valid ? detail : "Not available");
 }
 
@@ -2359,26 +2355,15 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
   const xmx = Number(sample.jvm_xmx_bytes);
   const hostTotal = Number(sample.host_mem_total);
   const hostAvail = Number(sample.host_mem_avail);
-  const diskTotal = Number(sample.disk_total);
-  const diskFree = Number(sample.disk_free);
-  const bonghosSize = Number(sample.bonghos_dir_bytes);
   const hostUsed = hostTotal - hostAvail;
-  const diskUsed = diskTotal - diskFree;
 
   setNodeText("performance-host-cpu", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—");
   setNodeText("performance-cpu-temp", Number.isFinite(cpuTemp) ? cpuTemp.toFixed(1) + " °C" : "Unavailable");
   setNodeText("performance-process-cpu", Number.isFinite(processCPU) ? processCPU.toFixed(1) + "%" : "—");
   setNodeText("performance-load", Number.isFinite(Number(sample.load1)) ? Number(sample.load1).toFixed(2) : "—");
-  setNodeText("performance-disk-total", Number.isFinite(diskTotal) ? fmtBytes(diskTotal) : "—");
-  setNodeText("performance-disk-used", Number.isFinite(diskUsed) ? fmtBytes(diskUsed) : "—");
-  const storageScanning = !!sample.storage_scanning;
-  setNodeText("performance-bonghos-size", storageScanning && !bonghosSize ? "Scanning…" : fmtBytes(bonghosSize));
-  setNodeText("performance-server-size", storageScanning && !Number(sample.server_dir_bytes) ? "Scanning…" : fmtBytes(sample.server_dir_bytes));
-  setNodeText("performance-bonghos-size-note", storageScanning ? "Directory scan in progress" : "Cached for one minute");
-  setNodeText("performance-server-size-note", storageScanning ? "Directory scan in progress" : "All managed servers");
 
   updatePerformanceMeter("host-memory", hostUsed, hostTotal,
-    `${fmtBytes(hostUsed)} used · ${fmtBytes(hostAvail)} available · ${fmtBytes(hostTotal)} total`);
+    `${fmtBytes(hostUsed)} / ${fmtBytes(hostTotal)} · ${fmtBytes(hostAvail)} available`, "percent");
   updatePerformanceMeter("allocated-memory", xmx, hostTotal,
     xmx > 0 ? `${fmtBytes(xms)} initial (-Xms) · ${fmtBytes(xmx)} maximum (-Xmx)` : "No JVM allocation detected in project configuration");
   updatePerformanceMeter("process-memory", rss, xmx > 0 ? xmx : hostTotal,
@@ -2525,38 +2510,75 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
   const centerLabel = el("span", {}, "total");
   const detail = el("div", { class: "performance-donut-detail mono" }, `${fmtBytes(total)} total · ${fmtTime(timestamp)}`);
   let offset = 0;
-  const activate = (segment) => {
-    centerValue.textContent = fmtBytes(segment.value);
-    centerLabel.textContent = segment.label;
-    detail.textContent = `${segment.label}: ${fmtBytes(segment.value)} (${(segment.value / total * 100).toFixed(1)}%) · ${fmtTime(timestamp)}`;
+  let selectedEntry = null;
+  const entries = [];
+  const showTotal = () => {
+    entries.forEach((entry) => {
+      entry.circle?.classList.remove("is-active");
+      entry.row.classList.remove("is-active");
+    });
+    centerValue.textContent = fmtBytes(total);
+    centerLabel.textContent = "total";
+    detail.textContent = `${fmtBytes(total)} total · ${fmtTime(timestamp)}`;
   };
-  const legendRows = [];
+  const showEntry = (entry) => {
+    entries.forEach((candidate) => {
+      const active = candidate === entry;
+      candidate.circle?.classList.toggle("is-active", active);
+      candidate.row.classList.toggle("is-active", active);
+    });
+    centerValue.textContent = fmtBytes(entry.segment.value);
+    centerLabel.textContent = entry.segment.label;
+    detail.textContent = `${entry.segment.label}: ${fmtBytes(entry.segment.value)} (${(entry.segment.value / total * 100).toFixed(1)}%) · ${fmtTime(timestamp)}`;
+  };
+  const restoreSelection = () => selectedEntry ? showEntry(selectedEntry) : showTotal();
+  const selectEntry = (entry) => {
+    selectedEntry = entry;
+    entries.forEach((candidate) => {
+      const selected = candidate === entry;
+      candidate.row.setAttribute("aria-pressed", String(selected));
+      candidate.circle?.setAttribute("aria-pressed", String(selected));
+    });
+    showEntry(entry);
+  };
   segments.forEach((segment) => {
     const percent = segment.value / total * 100;
+    let circle = null;
     if (percent > 0) {
-      const circle = svgElement("circle", {
+      const midpoint = (offset + percent / 2) / 100 * Math.PI * 2;
+      circle = svgElement("circle", {
         cx: "120", cy: "120", r: "78", pathLength: "100", fill: "none", "stroke-width": "42",
         "stroke-dasharray": `${percent} ${100 - percent}`, "stroke-dashoffset": String(-offset),
-        class: `performance-donut-segment tone-${segment.tone}`, tabindex: "0",
+        class: `performance-donut-segment tone-${segment.tone}`, tabindex: "0", role: "button", "aria-pressed": "false",
+        style: `--segment-lift-x:${(Math.cos(midpoint) * 6).toFixed(2)}px;--segment-lift-y:${(Math.sin(midpoint) * 6).toFixed(2)}px`,
         "aria-label": `${segment.label}: ${fmtBytes(segment.value)}, ${percent.toFixed(1)} percent`,
       });
-      circle.addEventListener("pointerenter", () => activate(segment));
-      circle.addEventListener("focus", () => activate(segment));
       svg.append(circle);
     }
     offset += percent;
-    const row = el("div", { class: "performance-donut-legend-row", tabindex: "0" },
+    const row = el("div", { class: "performance-donut-legend-row", tabindex: "0", role: "button", "aria-pressed": "false" },
       el("span", {}, el("span", { class: `performance-chart-swatch tone-${segment.tone}` }), segment.label),
       el("strong", { class: "mono" }, fmtBytes(segment.value)),
       el("span", { class: "mono" }, percent.toFixed(1) + "%"));
-    row.addEventListener("pointerenter", () => activate(segment));
-    row.addEventListener("focus", () => activate(segment));
-    legendRows.push(row);
+    const entry = { segment, circle, row };
+    entries.push(entry);
+    [row, circle].filter(Boolean).forEach((target) => {
+      target.addEventListener("pointerenter", () => showEntry(entry));
+      target.addEventListener("pointerleave", restoreSelection);
+      target.addEventListener("focus", () => showEntry(entry));
+      target.addEventListener("blur", restoreSelection);
+      target.addEventListener("click", () => selectEntry(entry));
+      target.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        selectEntry(entry);
+      });
+    });
   });
   return el("div", { class: "card performance-storage-panel" }, heading,
     el("div", { class: "performance-donut-layout" },
       el("div", { class: "performance-donut-plot" }, svg, el("div", { class: "performance-donut-center" }, centerValue, centerLabel)),
-      el("div", { class: "performance-donut-legend" }, ...legendRows, detail)));
+      el("div", { class: "performance-donut-legend" }, ...entries.map((entry) => entry.row), detail)));
 }
 
 function chartSamples(samples, limit = 240) {
