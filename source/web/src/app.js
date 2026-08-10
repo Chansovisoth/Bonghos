@@ -2319,7 +2319,7 @@ function setNodeText(id, value) {
   if (node) node.textContent = value;
 }
 
-function updatePerformanceMeter(id, used, total, detail, valueMode = "combined") {
+function updatePerformanceMeter(id, used, total, detail) {
   const valid = Number.isFinite(used) && Number.isFinite(total) && total > 0;
   const percent = valid ? Math.max(0, Math.min(100, used / total * 100)) : 0;
   const meter = $("#" + id + "-meter");
@@ -2329,10 +2329,7 @@ function updatePerformanceMeter(id, used, total, detail, valueMode = "combined")
     fill.style.width = `${percent}%`;
     fill.dataset.pressure = percent >= 90 ? "danger" : percent >= 80 ? "warning" : "normal";
   }
-  const value = valueMode === "percent" ? percent.toFixed(1) + "%"
-    : valueMode === "ratio" ? `${fmtBytes(used)} / ${fmtBytes(total)}`
-      : `${fmtBytes(used)} · ${percent.toFixed(1)}%`;
-  setNodeText(id + "-percent", valid ? value : "—");
+  setNodeText(id + "-percent", valid ? percent.toFixed(1) + "%" : "—");
   setNodeText(id + "-detail", valid ? detail : "Not available");
 }
 
@@ -2364,9 +2361,9 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
   setNodeText("performance-load", Number.isFinite(Number(sample.load1)) ? Number(sample.load1).toFixed(2) : "—");
 
   updatePerformanceMeter("host-memory", hostUsed, hostTotal,
-    `${fmtBytes(hostUsed)} / ${fmtBytes(hostTotal)} · ${fmtBytes(hostAvail)} available`, "percent");
+    `${fmtBytes(hostUsed)} / ${fmtBytes(hostTotal)} · ${fmtBytes(hostAvail)} available`);
   updatePerformanceMeter("allocated-memory", rss, xmx,
-    xmx > 0 ? `${fmtBytes(xms)} min (-Xms) · ${fmtBytes(xmx)} max (-Xmx)` : "No JVM allocation detected in project configuration", "ratio");
+    xmx > 0 ? `${fmtBytes(rss)} / ${fmtBytes(xmx)} · ${fmtBytes(xms)} min (-Xms) · ${fmtBytes(xmx)} max (-Xmx)` : "No JVM allocation detected in project configuration");
 
   renderCPUCoreGrid(sample);
   renderPerformanceCharts();
@@ -2444,7 +2441,7 @@ function renderStorageVisual(sample) {
       label: "Machine filesystem capacity over the last hour", min: 0, axisFormat: fmtBytes,
       series: [
         { label: "Used", tone: "accent", area: true, value: (s) => Number(s.disk_total) - Number(s.disk_free), format: fmtBytes },
-        { label: "Available", tone: "success", value: (s) => Number(s.disk_free), format: fmtBytes },
+        { label: "Available", tone: "empty", value: (s) => Number(s.disk_free), format: fmtBytes },
         { label: "Total", tone: "warning", value: (s) => Number(s.disk_total), format: fmtBytes },
       ],
     }));
@@ -2480,7 +2477,7 @@ function renderStorageVisual(sample) {
       emptyMessage: "Filesystem capacity is not available.",
       segments: [
         { label: "Used", value: diskTotal - diskFree, tone: "accent" },
-        { label: "Available", value: diskFree, tone: "success" },
+        { label: "Available", value: diskFree, tone: "empty" },
       ],
     }),
     storageDonutChart({
@@ -2509,7 +2506,6 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
   const centerLabel = el("span", {}, "total");
   const detail = el("div", { class: "performance-donut-detail mono" }, `${fmtBytes(total)} total · ${fmtTime(timestamp)}`);
   let offset = 0;
-  let selectedEntry = null;
   const entries = [];
   const showTotal = () => {
     entries.forEach((entry) => {
@@ -2534,16 +2530,6 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
     centerLabel.textContent = entry.segment.label;
     detail.textContent = `${entry.segment.label}: ${fmtBytes(entry.segment.value)} (${(entry.segment.value / total * 100).toFixed(1)}%) · ${fmtTime(timestamp)}`;
   };
-  const restoreSelection = () => selectedEntry ? showEntry(selectedEntry) : showTotal();
-  const selectEntry = (entry) => {
-    selectedEntry = entry;
-    entries.forEach((candidate) => {
-      const selected = candidate === entry;
-      candidate.row.setAttribute("aria-pressed", String(selected));
-      candidate.circle?.setAttribute("aria-pressed", String(selected));
-    });
-    showEntry(entry);
-  };
   segments.forEach((segment) => {
     const percent = segment.value / total * 100;
     let circle = null;
@@ -2551,13 +2537,13 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
       circle = svgElement("circle", {
         cx: "120", cy: "120", r: "78", pathLength: "100", fill: "none", "stroke-width": "42",
         "stroke-dasharray": `${percent} ${100 - percent}`, "stroke-dashoffset": String(-offset),
-        class: `performance-donut-segment tone-${segment.tone}`, tabindex: "0", role: "button", "aria-pressed": "false",
+        class: `performance-donut-segment tone-${segment.tone}`, tabindex: "0",
         "aria-label": `${segment.label}: ${fmtBytes(segment.value)}, ${percent.toFixed(1)} percent`,
       });
       svg.append(circle);
     }
     offset += percent;
-    const row = el("div", { class: "performance-donut-legend-row", tabindex: "0", role: "button", "aria-pressed": "false" },
+    const row = el("div", { class: "performance-donut-legend-row", tabindex: "0" },
       el("span", {}, el("span", { class: `performance-chart-swatch tone-${segment.tone}` }), segment.label),
       el("strong", { class: "mono" }, fmtBytes(segment.value)),
       el("span", { class: "mono" }, percent.toFixed(1) + "%"));
@@ -2565,15 +2551,9 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
     entries.push(entry);
     [row, circle].filter(Boolean).forEach((target) => {
       target.addEventListener("pointerenter", () => showEntry(entry));
-      target.addEventListener("pointerleave", restoreSelection);
+      target.addEventListener("pointerleave", showTotal);
       target.addEventListener("focus", () => showEntry(entry));
-      target.addEventListener("blur", restoreSelection);
-      target.addEventListener("click", () => selectEntry(entry));
-      target.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        selectEntry(entry);
-      });
+      target.addEventListener("blur", showTotal);
     });
   });
   return el("div", { class: "card performance-storage-panel" }, heading,
