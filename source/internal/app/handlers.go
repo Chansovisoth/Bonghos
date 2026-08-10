@@ -62,6 +62,9 @@ func (a *App) routes() http.Handler {
 
 	// --- imports ------------------------------------------------------------
 	mux.HandleFunc("POST /api/imports/upload", a.requirePerm(authorization.PermImportManage, a.handleImportUpload))
+	mux.HandleFunc("POST /api/imports/upload/start", a.requirePerm(authorization.PermImportManage, a.handleImportUploadStart))
+	mux.HandleFunc("PUT /api/imports/upload/{id}/chunk", a.requirePerm(authorization.PermImportManage, a.handleImportUploadChunk))
+	mux.HandleFunc("POST /api/imports/upload/{id}/finish", a.requirePerm(authorization.PermImportManage, a.handleImportUploadFinish))
 	mux.HandleFunc("POST /api/imports/url", a.requirePerm(authorization.PermImportManage, a.handleImportURL))
 	mux.HandleFunc("POST /api/imports/local-archive", a.requirePerm(authorization.PermImportManage, a.handleImportLocal))
 	mux.HandleFunc("POST /api/imports/existing-directory", a.requirePerm(authorization.PermImportManage, a.handleImportExisting))

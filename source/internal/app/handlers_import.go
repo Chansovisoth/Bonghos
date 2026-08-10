@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,16 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/operations"
 	"github.com/Chansovisoth/Bonghos/internal/security"
 )
+
+const maxImportChunkBytes = 20 << 20 // frontend sends 16 MiB; stay well below proxy caps
+
+type chunkedImportDetail struct {
+	Chunked     bool   `json:"chunked"`
+	Filename    string `json:"filename"`
+	DisplayName string `json:"display_name"`
+	Slug        string `json:"slug"`
+	Size        int64  `json:"size"`
+}
 
 // createProjectForImport validates name+slug and creates the instance row.
 func (a *App) createProjectForImport(displayName, slug, sourceType, sourceHost string) (*instance.Instance, error) {
@@ -169,6 +180,194 @@ func (a *App) handleImportUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	a.audit(u.ID, u.Username, "server_upload", inst.Slug, filename, remoteIP(r))
 
+	go a.installArchive(op.ID, inst, archivePath, uploadDir)
+	writeJSON(w, 200, map[string]any{"operation_id": op.ID, "server": inst})
+}
+
+// handleImportUploadStart creates a resumable upload session. Archive bytes
+// are sent separately in small raw chunks so reverse proxies such as
+// Cloudflare never have to accept the entire archive in one request.
+func (a *App) handleImportUploadStart(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	var req struct {
+		DisplayName string `json:"display_name"`
+		Slug        string `json:"slug"`
+		Filename    string `json:"filename"`
+		Size        int64  `json:"size"`
+	}
+	if err := readJSON(r, &req, 1<<16); err != nil {
+		writeErr(w, 400, errors.New("invalid upload metadata"))
+		return
+	}
+	req.DisplayName = strings.TrimSpace(req.DisplayName)
+	if req.DisplayName == "" {
+		writeErr(w, 400, errors.New("a project display name is required"))
+		return
+	}
+	if req.Slug == "" {
+		req.Slug = instance.GenerateSlug(req.DisplayName)
+	}
+	if err := instance.ValidateSlug(req.Slug); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	req.Filename = filepath.Base(strings.TrimSpace(req.Filename))
+	if req.Filename == "." || req.Filename == "" {
+		writeErr(w, 400, errors.New("an archive filename is required"))
+		return
+	}
+	if req.Size <= 0 || req.Size > a.Cfg.MaxUploadBytes {
+		writeErr(w, http.StatusRequestEntityTooLarge, errors.New("archive exceeds the configured upload size"))
+		return
+	}
+
+	detail := chunkedImportDetail{
+		Chunked: true, Filename: req.Filename, DisplayName: req.DisplayName,
+		Slug: req.Slug, Size: req.Size,
+	}
+	op, err := a.Operations.Create("import-upload", 0, u.ID, detail)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	uploadDir := filepath.Join(a.Home, config.DirUploads, op.ID)
+	if err := os.MkdirAll(uploadDir, 0o700); err != nil {
+		a.Operations.Finish(op.ID, operations.StageFailed, err.Error())
+		writeErr(w, 500, err)
+		return
+	}
+	archivePath := filepath.Join(uploadDir, "upload.archive")
+	f, err := os.OpenFile(archivePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		a.Operations.Finish(op.ID, operations.StageFailed, err.Error())
+		_ = os.RemoveAll(uploadDir)
+		writeErr(w, 500, err)
+		return
+	}
+	_ = f.Close()
+	a.Operations.SetStage(op.ID, operations.StageReceivingUpload, "Receiving "+req.Filename)
+	a.Operations.Progress(op.ID, 0, req.Size)
+	writeJSON(w, 201, map[string]any{
+		"operation_id": op.ID,
+		"chunk_size":   16 << 20,
+		"offset":       0,
+	})
+}
+
+func (a *App) chunkedImportOperation(r *http.Request) (*operations.Operation, chunkedImportDetail, error) {
+	var detail chunkedImportDetail
+	op, err := a.Operations.Get(r.PathValue("id"))
+	if err != nil {
+		return nil, detail, errors.New("upload session not found")
+	}
+	if op.Kind != "import-upload" || op.Stage != operations.StageReceivingUpload || op.CreatedBy != currentUser(r).ID {
+		return nil, detail, errors.New("upload session is not active")
+	}
+	if err := json.Unmarshal(op.Detail, &detail); err != nil || !detail.Chunked || detail.Size <= 0 {
+		return nil, detail, errors.New("invalid upload session")
+	}
+	return op, detail, nil
+}
+
+func (a *App) handleImportUploadChunk(w http.ResponseWriter, r *http.Request) {
+	offset, err := strconv.ParseInt(r.Header.Get("X-Bonghos-Upload-Offset"), 10, 64)
+	if err != nil || offset < 0 {
+		writeErr(w, 400, errors.New("valid upload offset required"))
+		return
+	}
+	if r.ContentLength == 0 || r.ContentLength > maxImportChunkBytes {
+		writeErr(w, http.StatusRequestEntityTooLarge, errors.New("upload chunk is too large"))
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportChunkBytes)
+
+	a.uploadMu.Lock()
+	defer a.uploadMu.Unlock()
+	op, detail, err := a.chunkedImportOperation(r)
+	if err != nil {
+		writeErr(w, 409, err)
+		return
+	}
+	archivePath := filepath.Join(a.Home, config.DirUploads, op.ID, "upload.archive")
+	st, err := os.Stat(archivePath)
+	if err != nil || !st.Mode().IsRegular() {
+		writeErr(w, 409, errors.New("upload session data is missing"))
+		return
+	}
+	if st.Size() != offset {
+		writeJSON(w, 409, map[string]any{"error": "upload offset does not match", "expected_offset": st.Size()})
+		return
+	}
+	if r.ContentLength > 0 && offset+r.ContentLength > detail.Size {
+		writeErr(w, 400, errors.New("chunk exceeds declared archive size"))
+		return
+	}
+
+	dst, err := os.OpenFile(archivePath, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	written, copyErr := io.Copy(dst, r.Body)
+	if copyErr == nil && offset+written > detail.Size {
+		copyErr = errors.New("chunk exceeds declared archive size")
+	}
+	if copyErr != nil || written == 0 {
+		_ = dst.Truncate(offset)
+		_ = dst.Close()
+		if copyErr == nil {
+			copyErr = errors.New("empty upload chunk")
+		}
+		writeErr(w, 400, copyErr)
+		return
+	}
+	if err := dst.Sync(); err != nil {
+		_ = dst.Truncate(offset)
+		_ = dst.Close()
+		writeErr(w, 500, err)
+		return
+	}
+	if err := dst.Close(); err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	next := offset + written
+	a.Operations.Progress(op.ID, next, detail.Size)
+	writeJSON(w, 200, map[string]int64{"offset": next})
+}
+
+func (a *App) handleImportUploadFinish(w http.ResponseWriter, r *http.Request) {
+	a.uploadMu.Lock()
+	op, detail, err := a.chunkedImportOperation(r)
+	if err != nil {
+		a.uploadMu.Unlock()
+		writeErr(w, 409, err)
+		return
+	}
+	uploadDir := filepath.Join(a.Home, config.DirUploads, op.ID)
+	archivePath := filepath.Join(uploadDir, "upload.archive")
+	st, statErr := os.Stat(archivePath)
+	if statErr != nil || !st.Mode().IsRegular() || st.Size() != detail.Size {
+		a.uploadMu.Unlock()
+		writeJSON(w, 409, map[string]any{"error": "upload is incomplete", "expected_size": detail.Size, "received_size": op.BytesProcessed})
+		return
+	}
+	// Move the session out of the receiving stage while holding the same lock
+	// used by chunk writes, preventing a late duplicate chunk from racing the
+	// finalization request.
+	a.Operations.SetStage(op.ID, operations.StageVerifyingDownload, "Verifying archive")
+	a.uploadMu.Unlock()
+
+	inst, err := a.createProjectForImport(detail.DisplayName, detail.Slug, "archive-upload", "")
+	if err != nil {
+		a.Operations.Finish(op.ID, operations.StageFailed, err.Error())
+		_ = os.RemoveAll(uploadDir)
+		writeErr(w, 409, err)
+		return
+	}
+	u := currentUser(r)
+	a.audit(u.ID, u.Username, "server_upload", inst.Slug, detail.Filename, remoteIP(r))
+	a.Logf("chunked upload complete %s (%d bytes)", detail.Filename, detail.Size)
 	go a.installArchive(op.ID, inst, archivePath, uploadDir)
 	writeJSON(w, 200, map[string]any{"operation_id": op.ID, "server": inst})
 }
@@ -616,6 +815,18 @@ func (a *App) handleOperationList(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleOperationCancel(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	id := r.PathValue("id")
+	if op, err := a.Operations.Get(id); err == nil && op.Kind == "import-upload" && op.Stage == operations.StageReceivingUpload {
+		var detail chunkedImportDetail
+		if json.Unmarshal(op.Detail, &detail) == nil && detail.Chunked {
+			a.uploadMu.Lock()
+			_ = os.RemoveAll(filepath.Join(a.Home, config.DirUploads, id))
+			a.Operations.Finish(id, operations.StageCancelled, "")
+			a.uploadMu.Unlock()
+			a.audit(u.ID, u.Username, "import_cancelled", id, "", remoteIP(r))
+			writeJSON(w, 200, map[string]bool{"ok": true})
+			return
+		}
+	}
 	if err := a.Operations.Cancel(id); err != nil {
 		writeErr(w, 404, err)
 		return

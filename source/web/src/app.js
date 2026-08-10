@@ -3590,18 +3590,43 @@ function deleteProject(s2) {
     }]]);
 }
 
-// uploadArchive streams the file with XMLHttpRequest rather than fetch,
-// because only XHR reports upload progress and can be aborted mid-transfer.
-// The browser streams the body; the whole archive is never held in memory.
+function uploadArchiveChunk(operationID, offset, chunk, onProgress, onXHR) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    onXHR(xhr);
+    xhr.upload.addEventListener("progress", (event) => onProgress(event.loaded));
+    xhr.addEventListener("load", () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.error || `Upload chunk failed (HTTP ${xhr.status})`));
+    });
+    xhr.addEventListener("error", () => reject(new Error("Upload failed: connection lost")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+    xhr.open("PUT", `/api/imports/upload/${encodeURIComponent(operationID)}/chunk`);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.setRequestHeader("X-Bonghos-CSRF", csrfToken);
+    xhr.setRequestHeader("X-Bonghos-Upload-Offset", String(offset));
+    xhr.send(chunk);
+  });
+}
+
+// Archives are uploaded as small, ordered requests. Besides making retries
+// cheaper, this stays below reverse-proxy request limits (Cloudflare rejects a
+// single request above the plan's upload cap) without loading the file into
+// browser or server memory.
 function uploadArchive(file, displayName) {
   const host = $("#ops-host");
   const started = Date.now();
   let lastTime = started, lastLoaded = 0, instantRate = 0;
+  let operationID = "";
+  let currentXHR = null;
+  let cancelled = false;
 
   const bar = el("div", { style: "width:0%" });
   const line = el("div", { class: "muted detail-note" }, "Preparing upload…");
-  const xhr = new XMLHttpRequest();
-  const cancelBtn = el("button", { class: "btn ghost", onclick: () => xhr.abort() }, "Cancel");
+  const cancelBtn = el("button", { class: "btn ghost" }, "Cancel");
   const card = el("div", { class: "card list-card" },
     el("div", { class: "toolbar compact" },
       el("strong", {}, "Uploading " + file.name),
@@ -3610,46 +3635,73 @@ function uploadArchive(file, displayName) {
     el("div", { class: "progress" }, bar), line);
   if (host) host.prepend(card); else toast("Upload started", "ok");
 
-  xhr.upload.addEventListener("progress", (e) => {
-    if (!e.lengthComputable) {
-      line.textContent = `${fmtBytes(e.loaded)} sent`;
-      return;
-    }
+  function updateProgress(loaded) {
     const now = Date.now();
     const dt = (now - lastTime) / 1000;
     if (dt >= 0.5) {
-      instantRate = (e.loaded - lastLoaded) / dt;
-      lastTime = now; lastLoaded = e.loaded;
+      instantRate = (loaded - lastLoaded) / dt;
+      lastTime = now; lastLoaded = loaded;
     }
-    const avg = e.loaded / Math.max(0.001, (now - started) / 1000);
-    const pct = (e.loaded / e.total) * 100;
+    const avg = loaded / Math.max(0.001, (now - started) / 1000);
+    const pct = (loaded / file.size) * 100;
     bar.style.width = pct.toFixed(1) + "%";
-    const remaining = instantRate > 0 ? (e.total - e.loaded) / instantRate : null;
+    const remaining = instantRate > 0 ? (file.size - loaded) / instantRate : null;
     line.textContent =
-      `${fmtBytes(e.loaded)} / ${fmtBytes(e.total)} · ${pct.toFixed(0)}%` +
+      `${fmtBytes(loaded)} / ${fmtBytes(file.size)} · ${pct.toFixed(0)}%` +
       ` · ${fmtBytes(instantRate || avg)}/s` +
       (remaining !== null && isFinite(remaining) ? ` · about ${fmtDur(remaining)} remaining` : "");
-  });
+  }
 
-  xhr.addEventListener("load", () => {
-    let d = {}; try { d = JSON.parse(xhr.responseText); } catch {}
-    card.remove();
-    if (xhr.status >= 200 && xhr.status < 300) {
-      toast("Upload complete — the host is now extracting and installing it", "ok");
-    } else {
-      toast(d.error || `Upload failed (HTTP ${xhr.status})`, "err");
+  cancelBtn.addEventListener("click", async () => {
+    if (cancelled) return;
+    cancelled = true;
+    currentXHR?.abort();
+    if (operationID) {
+      try { await api(`/operations/${operationID}/cancel`, { method: "POST" }); } catch {}
     }
+    card.remove();
+    toast("Upload cancelled", "ok");
   });
-  xhr.addEventListener("error", () => { card.remove(); toast("Upload failed: connection lost", "err"); });
-  xhr.addEventListener("abort", () => { card.remove(); toast("Upload cancelled", "ok"); });
 
-  const fd = new FormData();
-  fd.append("display_name", displayName);
-  fd.append("archive", file);
-  xhr.open("POST", "/api/imports/upload");
-  xhr.withCredentials = true;
-  xhr.setRequestHeader("X-Bonghos-CSRF", csrfToken);
-  xhr.send(fd);
+  (async () => {
+    try {
+      const session = await api("/imports/upload/start", {
+        method: "POST",
+        json: { display_name: displayName, filename: file.name, size: file.size },
+      });
+      operationID = session.operation_id;
+      const chunkSize = Number(session.chunk_size) || 16 * 1024 * 1024;
+      let offset = Number(session.offset) || 0;
+      while (offset < file.size) {
+        if (cancelled) return;
+        const end = Math.min(file.size, offset + chunkSize);
+        const baseOffset = offset;
+        const result = await uploadArchiveChunk(
+          operationID,
+          offset,
+          file.slice(offset, end),
+          (chunkLoaded) => updateProgress(baseOffset + chunkLoaded),
+          (xhr) => { currentXHR = xhr; },
+        );
+        currentXHR = null;
+        offset = Number(result.offset);
+        if (!Number.isFinite(offset) || offset !== end) throw new Error("Host returned an invalid upload offset");
+        updateProgress(offset);
+      }
+      cancelBtn.disabled = true;
+      line.textContent = "Upload received · verifying archive…";
+      await api(`/imports/upload/${operationID}/finish`, { method: "POST" });
+      card.remove();
+      toast("Upload complete — the host is now extracting and installing it", "ok");
+    } catch (error) {
+      if (cancelled) return;
+      if (operationID) {
+        try { await api(`/operations/${operationID}/cancel`, { method: "POST" }); } catch {}
+      }
+      card.remove();
+      toast(error.message, "err");
+    }
+  })();
 }
 
 function importWizard() {

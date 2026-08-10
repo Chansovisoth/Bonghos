@@ -57,6 +57,7 @@ type App struct {
 	Collector       *monitoring.Collector
 	storageMu       sync.RWMutex
 	storageSnapshot monitoring.StorageSnapshot
+	uploadMu        sync.Mutex
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
