@@ -409,15 +409,15 @@ tr:hover td { background: var(--surface-2); }
 .performance-section-heading h2 .performance-section-icon { display: block; width: 0.8em; height: 0.8em; flex: 0 0 auto; align-self: center; color: var(--accent); transform: none; }
 .performance-section-heading p { margin-bottom: 0; }
 .performance-meter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--border); }
-.performance-meter { min-width: 0; display: grid; gap: var(--space-2); padding: var(--space-3); border-right: 1px solid var(--border); background: var(--inset); }
+.performance-meter { min-width: 0; display: grid; gap: var(--space-2); padding: var(--space-3); border-right: 1px solid var(--border); background: var(--surface); color: var(--text); }
 .performance-meter:last-child { border-right: 0; }
 .performance-meter-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
-.performance-meter-head strong { font-size: 0.9rem; text-align: right; }
-.performance-meter-track { height: 12px; overflow: hidden; border: 1px solid var(--border-strong); background: var(--surface); }
+.performance-meter-head strong { color: var(--text); font-size: 0.9rem; text-align: right; }
+.performance-meter-track { height: 12px; overflow: hidden; border: 1px solid var(--border-strong); background: var(--inset); }
 .performance-meter-fill { width: 0; height: 100%; display: block; background: var(--success); transition: width 180ms linear, background-color 180ms linear; }
 .performance-meter-fill[data-pressure="warning"] { background: var(--warn); }
 .performance-meter-fill[data-pressure="danger"] { background: var(--danger); }
-.performance-meter-detail { min-height: 2.5em; color: var(--faint); font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; }
+.performance-meter-detail { min-height: 2.5em; color: var(--muted); font-family: var(--font-mono); font-size: 0.72rem; line-height: 1.35; overflow-wrap: anywhere; }
 
 .performance-domain-charts, .performance-storage-trends { align-items: stretch; margin-top: var(--space-4); }
 .performance-chart-panel { min-height: 320px; display: flex; flex-direction: column; padding: var(--space-3); background: var(--surface); }
