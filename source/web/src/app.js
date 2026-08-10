@@ -114,8 +114,10 @@ function gameVersionIcon() {
   return svg;
 }
 
+const LIFECYCLE_LOADING_STEP_SECONDS = 0.2;
+const LIFECYCLE_LOADING_CYCLE_MS = LIFECYCLE_LOADING_STEP_SECONDS * 12 * 1000;
 let lifecycleLoadingIconId = 0;
-function lifecycleLoadingIcon() {
+function lifecycleLoadingIcon(onCycleEnd = null) {
   const id = `lifecycle-loading-${++lifecycleLoadingIconId}`;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "icon lifecycle-loading-icon");
@@ -124,23 +126,24 @@ function lifecycleLoadingIcon() {
   svg.setAttribute("focusable", "false");
   svg.innerHTML = `
     <rect width="10" height="10" x="1" y="1" fill="currentColor" rx="1">
-      <animate id="${id}-a" fill="freeze" attributeName="x" begin="0;${id}-l.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-d" fill="freeze" attributeName="y" begin="${id}-c.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-g" fill="freeze" attributeName="x" begin="${id}-f.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-j" fill="freeze" attributeName="y" begin="${id}-i.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-a" fill="freeze" attributeName="x" begin="0;${id}-l.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
+      <animate id="${id}-d" fill="freeze" attributeName="y" begin="${id}-c.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
+      <animate id="${id}-g" fill="freeze" attributeName="x" begin="${id}-f.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
+      <animate id="${id}-j" fill="freeze" attributeName="y" begin="${id}-i.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
     </rect>
     <rect width="10" height="10" x="1" y="13" fill="currentColor" rx="1">
-      <animate id="${id}-b" fill="freeze" attributeName="y" begin="${id}-a.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-e" fill="freeze" attributeName="x" begin="${id}-d.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-h" fill="freeze" attributeName="y" begin="${id}-g.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-k" fill="freeze" attributeName="x" begin="${id}-j.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-b" fill="freeze" attributeName="y" begin="${id}-a.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
+      <animate id="${id}-e" fill="freeze" attributeName="x" begin="${id}-d.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
+      <animate id="${id}-h" fill="freeze" attributeName="y" begin="${id}-g.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
+      <animate id="${id}-k" fill="freeze" attributeName="x" begin="${id}-j.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
     </rect>
     <rect width="10" height="10" x="13" y="13" fill="currentColor" rx="1">
-      <animate id="${id}-c" fill="freeze" attributeName="x" begin="${id}-b.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-f" fill="freeze" attributeName="y" begin="${id}-e.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-i" fill="freeze" attributeName="x" begin="${id}-h.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-l" fill="freeze" attributeName="y" begin="${id}-k.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-c" fill="freeze" attributeName="x" begin="${id}-b.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
+      <animate id="${id}-f" fill="freeze" attributeName="y" begin="${id}-e.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
+      <animate id="${id}-i" fill="freeze" attributeName="x" begin="${id}-h.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
+      <animate id="${id}-l" fill="freeze" attributeName="y" begin="${id}-k.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
     </rect>`;
+  if (onCycleEnd) svg.querySelector(`#${id}-l`)?.addEventListener("endEvent", onCycleEnd);
   return svg;
 }
 
@@ -723,10 +726,9 @@ function handleEvent(m) {
     appendConsoleLine(data.line);
   } else if (type === "status") {
     S.status = data || S.status;
-    const lifecycleSettled = lifecyclePendingSettled(S.status.state);
-    if (lifecycleSettled) S.lifecyclePending = null;
+    markLifecyclePendingSettled(S.status.state);
     renderStatusPill();
-    if (S.page === "overview" || (lifecycleSettled && S.page === "console")) renderPage();
+    if (S.page === "overview" && !S.lifecyclePending) renderPage();
   } else if (type === "sample" && ((S.page === "performance" && topic === "performance") || (S.page === "overview" && topic === "overview"))) {
     appendPerformanceSample(data);
     setUptimeBaseline(data);
@@ -1040,6 +1042,36 @@ function lifecyclePendingSettled(state) {
   if (!pending) return false;
   if (pending.action === "restart" && state !== pending.target) pending.departed = true;
   return state === pending.target && (pending.action !== "restart" || pending.departed);
+}
+
+function finishLifecyclePending(pending = S.lifecyclePending) {
+  if (!pending || S.lifecyclePending !== pending || !pending.settled) return false;
+  if (pending.completionTimer) clearTimeout(pending.completionTimer);
+  S.lifecyclePending = null;
+  if (S.page === "overview" || S.page === "console") renderPage();
+  return true;
+}
+
+function armLifecycleCompletionFallback(pending = S.lifecyclePending) {
+  if (!pending || S.lifecyclePending !== pending || !pending.settled) return;
+  if (pending.completionTimer) clearTimeout(pending.completionTimer);
+  const startedAt = Number(pending.cycleStartedAt) || Date.now();
+  const elapsed = Math.max(0, Date.now() - startedAt);
+  const remaining = LIFECYCLE_LOADING_CYCLE_MS - (elapsed % LIFECYCLE_LOADING_CYCLE_MS);
+  pending.completionTimer = setTimeout(
+    () => finishLifecyclePending(pending),
+    remaining,
+  );
+}
+
+function markLifecyclePendingSettled(state = S.status.state) {
+  const pending = S.lifecyclePending;
+  if (!pending || !lifecyclePendingSettled(state)) return false;
+  if (!pending.settled) {
+    pending.settled = true;
+    armLifecycleCompletionFallback(pending);
+  }
+  return true;
 }
 
 function renderServerPicker() {
@@ -1370,29 +1402,32 @@ function serverStatusCard(state, server) {
 function lifecycleButtons(includeServers = false) {
   const st = S.status.state || "stopped";
   const running = st === "running" || st === "starting";
-  if (lifecyclePendingSettled(st)) S.lifecyclePending = null;
+  markLifecyclePendingSettled(st);
   const pending = S.lifecyclePending;
   const wrap = el("div", { class: "row-actions" + (includeServers ? " overview-lifecycle-actions" : "") });
   const showLoading = (button) => {
     const icon = button.querySelector(":scope > .icon");
-    const loadingIcon = lifecycleLoadingIcon();
+    const pendingAction = S.lifecyclePending;
+    const loadingIcon = lifecycleLoadingIcon(() => finishLifecyclePending(pendingAction));
+    if (pendingAction) pendingAction.cycleStartedAt = Date.now();
     if (icon) icon.replaceWith(loadingIcon);
     else button.prepend(loadingIcon);
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
+    if (pendingAction?.settled) armLifecycleCompletionFallback(pendingAction);
   };
   const act = async (path, label, action = "", target = "", button = null) => {
-    if (action && target) S.lifecyclePending = { action, target, departed: action !== "restart" };
+    if (action && target) S.lifecyclePending = { action, target, departed: action !== "restart", settled: false, completionTimer: null };
     if (button) showLoading(button);
     try {
       await api(path, { method: "POST", json: {} });
       toast(label + " requested", "ok");
-      if (target && lifecyclePendingSettled(S.status.state)) {
-        S.lifecyclePending = null;
-        if (S.page === "overview" || S.page === "console") renderPage();
-      }
+      if (target) markLifecyclePendingSettled(S.status.state);
     } catch (e) {
-      if (action && S.lifecyclePending?.action === action) S.lifecyclePending = null;
+      if (action && S.lifecyclePending?.action === action) {
+        if (S.lifecyclePending.completionTimer) clearTimeout(S.lifecyclePending.completionTimer);
+        S.lifecyclePending = null;
+      }
       toast(e.message, "err");
       if (S.page === "overview" || S.page === "console") renderPage();
     }
