@@ -204,4 +204,11 @@ func TestDirectorySize(t *testing.T) {
 	if got := DirectorySize(root); got != 10 {
 		t.Errorf("DirectorySize() = %d, want 10", got)
 	}
+	total, directories := DirectoryBreakdown(root)
+	if total != 10 {
+		t.Errorf("DirectoryBreakdown() total = %d, want 10", total)
+	}
+	if directories["nested"] != 6 {
+		t.Errorf("DirectoryBreakdown() nested = %d, want 6", directories["nested"])
+	}
 }

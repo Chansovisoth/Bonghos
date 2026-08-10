@@ -39,8 +39,10 @@ type Sample struct {
 	Load1           float64   `json:"load1"`
 	DiskTotal       int64     `json:"disk_total"`
 	DiskFree        int64     `json:"disk_free"`
+	BonghosDirBytes int64     `json:"bonghos_dir_bytes"`
 	ServerDirBytes  int64     `json:"server_dir_bytes"`
 	BackupDirBytes  int64     `json:"backup_dir_bytes"`
+	SystemDirBytes  int64     `json:"system_dir_bytes"`
 	StorageScanning bool      `json:"storage_scanning,omitempty"`
 	OnlinePlayers   int       `json:"online_players"`
 	UptimeSeconds   int64     `json:"uptime_seconds"`
@@ -408,17 +410,33 @@ func DiskUsage(path string) (int64, int64) {
 // DirectorySize returns the sum of regular files under root. Symlinks are not
 // followed and unreadable entries are skipped so monitoring remains best-effort.
 func DirectorySize(root string) int64 {
+	total, _ := DirectoryBreakdown(root)
+	return total
+}
+
+// DirectoryBreakdown returns total regular-file bytes and totals grouped by
+// the first directory below root. It performs a single walk so large Bonghos
+// homes do not need one scan per category.
+func DirectoryBreakdown(root string) (int64, map[string]int64) {
 	var total int64
+	byTopLevel := map[string]int64{}
 	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil || entry == nil || !entry.Type().IsRegular() {
 			return nil
 		}
 		if info, err := entry.Info(); err == nil {
-			total += info.Size()
+			size := info.Size()
+			total += size
+			if relative, err := filepath.Rel(root, path); err == nil {
+				parts := strings.Split(relative, string(os.PathSeparator))
+				if len(parts) > 1 {
+					byTopLevel[parts[0]] += size
+				}
+			}
 		}
 		return nil
 	})
-	return total
+	return total, byTopLevel
 }
 
 // StoreSample inserts a sample into the metrics table.
@@ -426,12 +444,14 @@ func StoreSample(db *sql.DB, instanceID int64, s *Sample) {
 	db.Exec(`INSERT INTO metrics (collected_at, instance_id, cpu_percent, rss_bytes,
 		host_mem_total, host_mem_avail, load1, disk_total, disk_free,
 		server_dir_bytes, backup_dir_bytes, online_players, host_cpu_percent,
-		cpu_temp_celsius, jvm_xms_bytes, jvm_xmx_bytes)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		cpu_temp_celsius, jvm_xms_bytes, jvm_xmx_bytes, bonghos_dir_bytes,
+		system_dir_bytes)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.CollectedAt, instanceID, s.CPUPercent, s.RSSBytes,
 		s.HostMemTotal, s.HostMemAvail, s.Load1, s.DiskTotal, s.DiskFree,
 		s.ServerDirBytes, s.BackupDirBytes, s.OnlinePlayers, s.HostCPUPercent,
-		s.CPUTempCelsius, s.JVMXmsBytes, s.JVMXmxBytes)
+		s.CPUTempCelsius, s.JVMXmsBytes, s.JVMXmxBytes, s.BonghosDirBytes,
+		s.SystemDirBytes)
 }
 
 // Prune removes samples older than retention.
@@ -445,7 +465,7 @@ func History(db *sql.DB, since time.Time, limit int) ([]Sample, error) {
 	rows, err := db.Query(`SELECT collected_at, cpu_percent, rss_bytes, host_mem_total,
 		host_mem_avail, load1, disk_total, disk_free, server_dir_bytes,
 		backup_dir_bytes, online_players, host_cpu_percent, cpu_temp_celsius,
-		jvm_xms_bytes, jvm_xmx_bytes
+		jvm_xms_bytes, jvm_xmx_bytes, bonghos_dir_bytes, system_dir_bytes
 		FROM metrics WHERE collected_at >= ? ORDER BY collected_at ASC LIMIT ?`,
 		since.UTC().Format(time.RFC3339), limit)
 	if err != nil {
@@ -459,7 +479,8 @@ func History(db *sql.DB, since time.Time, limit int) ([]Sample, error) {
 		if err := rows.Scan(&s.CollectedAt, &s.CPUPercent, &s.RSSBytes, &s.HostMemTotal,
 			&s.HostMemAvail, &s.Load1, &s.DiskTotal, &s.DiskFree,
 			&s.ServerDirBytes, &s.BackupDirBytes, &s.OnlinePlayers, &s.HostCPUPercent,
-			&temperature, &s.JVMXmsBytes, &s.JVMXmxBytes); err != nil {
+			&temperature, &s.JVMXmsBytes, &s.JVMXmxBytes, &s.BonghosDirBytes,
+			&s.SystemDirBytes); err != nil {
 			return nil, err
 		}
 		if temperature.Valid {

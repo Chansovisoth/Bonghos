@@ -57,9 +57,10 @@ type App struct {
 	Collector       *monitoring.Collector
 	storageMu       sync.Mutex
 	storageAt       time.Time
-	storageInstID   int64
+	storageHome     int64
 	storageServer   int64
 	storageBackups  int64
+	storageSystem   int64
 	storageScanning bool
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
@@ -276,10 +277,10 @@ func (a *App) collectSample() *monitoring.Sample {
 	s.HostMemTotal, s.HostMemAvail = monitoring.HostMemory()
 	s.Load1 = monitoring.LoadAvg()
 	s.DiskTotal, s.DiskFree = monitoring.DiskUsage(a.Home)
+	s.BonghosDirBytes, s.ServerDirBytes, s.BackupDirBytes, s.SystemDirBytes, s.StorageScanning = a.storageSizes()
 	var online int
 	if inst, err := a.activeInstance(); err == nil {
 		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, inst.ID).Scan(&online)
-		s.ServerDirBytes, s.BackupDirBytes, s.StorageScanning = a.storageSizes(inst)
 		s.JVMXmsBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXms)
 		s.JVMXmxBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXmx)
 	}
@@ -287,38 +288,33 @@ func (a *App) collectSample() *monitoring.Sample {
 	return s
 }
 
-func (a *App) storageSizes(inst *instance.Instance) (int64, int64, bool) {
+func (a *App) storageSizes() (int64, int64, int64, int64, bool) {
 	a.storageMu.Lock()
-	if a.storageInstID == inst.ID && !a.storageScanning && time.Since(a.storageAt) < time.Minute {
-		server, backups := a.storageServer, a.storageBackups
+	if !a.storageScanning && !a.storageAt.IsZero() && time.Since(a.storageAt) < time.Minute {
+		home, server, backups, system := a.storageHome, a.storageServer, a.storageBackups, a.storageSystem
 		a.storageMu.Unlock()
-		return server, backups, false
+		return home, server, backups, system, false
 	}
-	server, backups := a.storageServer, a.storageBackups
-	if a.storageInstID != 0 && a.storageInstID != inst.ID {
-		server, backups = 0, 0
-	}
+	home, server, backups, system := a.storageHome, a.storageServer, a.storageBackups, a.storageSystem
 	if a.storageScanning {
 		a.storageMu.Unlock()
-		return server, backups, true
+		return home, server, backups, system, true
 	}
 	a.storageScanning = true
 	a.storageMu.Unlock()
 
-	serverRoot := inst.AbsoluteDir(a.Home)
-	backupRoot := filepath.Join(a.Home, instance.BackupDirFor(inst.Slug))
-	go func(instanceID int64) {
-		serverSize := monitoring.DirectorySize(serverRoot)
-		backupSize := monitoring.DirectorySize(backupRoot)
+	go func() {
+		homeSize, directories := monitoring.DirectoryBreakdown(a.Home)
 		a.storageMu.Lock()
 		a.storageAt = time.Now()
-		a.storageInstID = instanceID
-		a.storageServer = serverSize
-		a.storageBackups = backupSize
+		a.storageHome = homeSize
+		a.storageServer = directories[config.DirServers]
+		a.storageBackups = directories[config.DirBackups]
+		a.storageSystem = directories[config.DirSystem]
 		a.storageScanning = false
 		a.storageMu.Unlock()
-	}(inst.ID)
-	return server, backups, true
+	}()
+	return home, server, backups, system, true
 }
 
 // playerPollLoop issues `list` periodically while relevant pages are open.

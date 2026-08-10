@@ -294,8 +294,10 @@ const DEMO_METRICS = Array.from({ length: 60 }, (_, i) => ({
   host_mem_avail: (18 - Math.sin(i / 9) * 1.4) * 1024 * 1024 * 1024,
   load1: 0.65 + Math.sin(i / 7) * 0.32,
   disk_total: 512 * 1024 * 1024 * 1024,
+  bonghos_dir_bytes: (60.4 + i * 0.006) * 1024 * 1024 * 1024,
   server_dir_bytes: (14.2 + i * 0.005) * 1024 * 1024 * 1024,
   backup_dir_bytes: 42.6 * 1024 * 1024 * 1024,
+  system_dir_bytes: 1.8 * 1024 * 1024 * 1024,
   online_players: i % 17 > 9 ? 4 : 3,
   disk_free: (186 - i * 0.08) * 1024 * 1024 * 1024,
   uptime_seconds: 86400 + i * 60,
@@ -2232,15 +2234,15 @@ async function pagePerformance(main) {
     el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-storage-title" },
       el("div", { class: "performance-section-heading" },
         el("div", {}, el("h2", { id: "performance-storage-title" }, "Storage"),
-          el("p", { class: "muted" }, "Filesystem capacity plus active project and Bonghos backup directory sizes.")),
+          el("p", { class: "muted" }, "Machine filesystem capacity and the complete Bonghos home directory.")),
         el("div", { class: "performance-view-toggle", role: "group", "aria-label": "Storage chart view" },
           el("button", { class: "btn small", type: "button", "data-storage-view": "distribution", onclick: () => setStorageView("distribution") }, "Distribution"),
           el("button", { class: "btn small", type: "button", "data-storage-view": "trend", onclick: () => setStorageView("trend") }, "Trend"))),
       el("div", { class: "performance-domain-readouts performance-storage-readouts" },
-        performanceReadout("Disk used", "performance-disk-used", "Host filesystem"),
-        performanceReadout("Disk free", "performance-disk-free", "Available to Bonghos"),
-        performanceReadout("Active project", "performance-project-size", "Cached for one minute"),
-        performanceReadout("Backups", "performance-backup-size", "Active project backups")),
+        performanceReadout("Machine disk", "performance-disk-total", "Filesystem containing Bonghos"),
+        performanceReadout("Disk used", "performance-disk-used", "Across the host filesystem"),
+        performanceReadout("Bonghos home", "performance-bonghos-size", "Servers, backups, and system files"),
+        performanceReadout("Servers", "performance-server-size", "All managed server directories")),
       el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
 
   syncPageSubscription("performance");
@@ -2327,7 +2329,7 @@ function updatePerformanceMeter(id, used, total, detail) {
     fill.style.width = `${percent}%`;
     fill.dataset.pressure = percent >= 90 ? "danger" : percent >= 80 ? "warning" : "normal";
   }
-  setNodeText(id + "-percent", valid ? percent.toFixed(1) + "%" : "—");
+  setNodeText(id + "-percent", valid ? `${fmtBytes(used)} · ${percent.toFixed(1)}%` : "—");
   setNodeText(id + "-detail", valid ? detail : "Not available");
 }
 
@@ -2353,6 +2355,7 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
   const hostAvail = Number(sample.host_mem_avail);
   const diskTotal = Number(sample.disk_total);
   const diskFree = Number(sample.disk_free);
+  const bonghosSize = Number(sample.bonghos_dir_bytes);
   const hostUsed = hostTotal - hostAvail;
   const diskUsed = diskTotal - diskFree;
 
@@ -2360,13 +2363,13 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
   setNodeText("performance-cpu-temp", Number.isFinite(cpuTemp) ? cpuTemp.toFixed(1) + " °C" : "Unavailable");
   setNodeText("performance-process-cpu", Number.isFinite(processCPU) ? processCPU.toFixed(1) + "%" : "—");
   setNodeText("performance-load", Number.isFinite(Number(sample.load1)) ? Number(sample.load1).toFixed(2) : "—");
+  setNodeText("performance-disk-total", Number.isFinite(diskTotal) ? fmtBytes(diskTotal) : "—");
   setNodeText("performance-disk-used", Number.isFinite(diskUsed) ? fmtBytes(diskUsed) : "—");
-  setNodeText("performance-disk-free", Number.isFinite(diskFree) ? fmtBytes(diskFree) : "—");
   const storageScanning = !!sample.storage_scanning;
-  setNodeText("performance-project-size", storageScanning && !Number(sample.server_dir_bytes) ? "Scanning…" : fmtBytes(sample.server_dir_bytes));
-  setNodeText("performance-backup-size", storageScanning && !Number(sample.backup_dir_bytes) ? "Scanning…" : fmtBytes(sample.backup_dir_bytes));
-  setNodeText("performance-project-size-note", storageScanning ? "Directory scan in progress" : "Cached for one minute");
-  setNodeText("performance-backup-size-note", storageScanning ? "Directory scan in progress" : "Active project backups");
+  setNodeText("performance-bonghos-size", storageScanning && !bonghosSize ? "Scanning…" : fmtBytes(bonghosSize));
+  setNodeText("performance-server-size", storageScanning && !Number(sample.server_dir_bytes) ? "Scanning…" : fmtBytes(sample.server_dir_bytes));
+  setNodeText("performance-bonghos-size-note", storageScanning ? "Directory scan in progress" : "Cached for one minute");
+  setNodeText("performance-server-size-note", storageScanning ? "Directory scan in progress" : "All managed servers");
 
   updatePerformanceMeter("host-memory", hostUsed, hostTotal,
     `${fmtBytes(hostUsed)} used · ${fmtBytes(hostAvail)} available · ${fmtBytes(hostTotal)} total`);
@@ -2442,50 +2445,79 @@ function renderStorageVisual(sample) {
     button.setAttribute("aria-pressed", String(active));
   });
   if (S.perfStorageView === "trend") {
-    const diskPanel = performanceChartPanel("Filesystem utilization", "Used host filesystem capacity", "performance-chart-disk-trend");
-    const projectPanel = performanceChartPanel("Bonghos directories", "Active project and its backup directory", "performance-chart-project-trend");
+    const diskPanel = performanceChartPanel("Machine filesystem", "Total, used, and available filesystem capacity", "performance-chart-disk-trend");
+    const projectPanel = performanceChartPanel("Bonghos home", "Total size split across servers, backups, and system files", "performance-chart-project-trend");
     host.replaceChildren(el("div", { class: "grid cols-2 performance-storage-trends" }, diskPanel, projectPanel));
     const diskHost = $("#performance-chart-disk-trend");
     const projectHost = $("#performance-chart-project-trend");
     if (diskHost) diskHost.replaceChildren(timeSeriesChart(S.perf, {
-      label: "Host filesystem utilization over the last hour", min: 0, fixedMax: 100, axisFormat: (v) => v.toFixed(0) + "%",
-      series: [{ label: "Disk used", tone: "success", area: true,
-        value: (s) => Number(s.disk_total) > 0 ? (Number(s.disk_total) - Number(s.disk_free)) / Number(s.disk_total) * 100 : 0,
-        format: (v) => v.toFixed(1) + "%" }],
+      label: "Machine filesystem capacity over the last hour", min: 0, axisFormat: fmtBytes,
+      series: [
+        { label: "Used", tone: "accent", area: true, value: (s) => Number(s.disk_total) - Number(s.disk_free), format: fmtBytes },
+        { label: "Available", tone: "success", value: (s) => Number(s.disk_free), format: fmtBytes },
+        { label: "Total", tone: "warning", value: (s) => Number(s.disk_total), format: fmtBytes },
+      ],
     }));
     if (projectHost) projectHost.replaceChildren(timeSeriesChart(S.perf, {
-      label: "Bonghos project and backup directory sizes over the last hour", min: 0, axisFormat: fmtBytes,
+      label: "Bonghos home directory sizes over the last hour", min: 0, axisFormat: fmtBytes,
       series: [
-        { label: "Project", tone: "accent", area: true, value: (s) => Number(s.server_dir_bytes), format: fmtBytes },
+        { label: "Total", tone: "warning", value: (s) => Number(s.bonghos_dir_bytes), format: fmtBytes },
+        { label: "Servers", tone: "accent", area: true, value: (s) => Number(s.server_dir_bytes), format: fmtBytes },
         { label: "Backups", tone: "info", value: (s) => Number(s.backup_dir_bytes), format: fmtBytes },
+        { label: "System", tone: "success", value: (s) => Number(s.system_dir_bytes), format: fmtBytes },
       ],
     }));
     return;
   }
-  host.replaceChildren(storageDonutChart(sample));
+
+  const diskTotal = Math.max(0, Number(sample.disk_total) || 0);
+  const diskFree = Math.max(0, Math.min(diskTotal, Number(sample.disk_free) || 0));
+  const bonghosTotal = Math.max(0, Number(sample.bonghos_dir_bytes) || 0);
+  let remaining = bonghosTotal;
+  const servers = Math.min(remaining, Math.max(0, Number(sample.server_dir_bytes) || 0));
+  remaining -= servers;
+  const backups = Math.min(remaining, Math.max(0, Number(sample.backup_dir_bytes) || 0));
+  remaining -= backups;
+  const system = Math.min(remaining, Math.max(0, Number(sample.system_dir_bytes) || 0));
+  remaining -= system;
+  const timestamp = sample.collected_at || sample.at;
+  host.replaceChildren(el("div", { class: "grid cols-2 performance-storage-distributions" },
+    storageDonutChart({
+      title: "Machine filesystem",
+      description: "Filesystem containing the Bonghos home directory",
+      total: diskTotal,
+      timestamp,
+      emptyMessage: "Filesystem capacity is not available.",
+      segments: [
+        { label: "Used", value: diskTotal - diskFree, tone: "accent" },
+        { label: "Available", value: diskFree, tone: "success" },
+      ],
+    }),
+    storageDonutChart({
+      title: "Bonghos home",
+      description: "Everything stored below BONGHOS_HOME",
+      total: bonghosTotal,
+      timestamp,
+      emptyMessage: sample.storage_scanning ? "Scanning the Bonghos home directory…" : "Bonghos directory size is not available.",
+      segments: [
+        { label: "Servers", value: servers, tone: "accent" },
+        { label: "Backups", value: backups, tone: "info" },
+        { label: "System", value: system, tone: "success" },
+        { label: "Other", value: remaining, tone: "warning" },
+      ],
+    })));
 }
 
-function storageDonutChart(sample) {
-  const total = Math.max(0, Number(sample.disk_total) || 0);
-  const free = Math.max(0, Math.min(total, Number(sample.disk_free) || 0));
-  let remainingUsed = Math.max(0, total - free);
-  const project = Math.min(remainingUsed, Math.max(0, Number(sample.server_dir_bytes) || 0));
-  remainingUsed -= project;
-  const backups = Math.min(remainingUsed, Math.max(0, Number(sample.backup_dir_bytes) || 0));
-  remainingUsed -= backups;
-  const segments = [
-    { label: "Active project", value: project, tone: "accent" },
-    { label: "Backups", value: backups, tone: "info" },
-    { label: "Other used", value: remainingUsed, tone: "warning" },
-    { label: "Free", value: free, tone: "success" },
-  ];
-  if (total <= 0) return el("div", { class: "performance-chart-empty" }, "Filesystem capacity is not available.");
+function storageDonutChart({ title, description, total, segments, timestamp, emptyMessage }) {
+  const heading = el("div", { class: "performance-chart-heading" },
+    el("div", {}, el("h3", {}, title), el("p", { class: "metric-note" }, description)));
+  if (total <= 0) return el("div", { class: "card performance-storage-panel" }, heading,
+    el("div", { class: "performance-chart-empty" }, emptyMessage));
 
-  const svg = svgElement("svg", { class: "performance-donut", viewBox: "0 0 240 240", role: "img", "aria-label": "Storage distribution" });
-  const centerValue = el("strong", { class: "mono" }, ((total - free) / total * 100).toFixed(1) + "%");
-  const centerLabel = el("span", {}, "used");
-  const timestamp = sample.collected_at || sample.at;
-  const detail = el("div", { class: "performance-donut-detail mono" }, `${fmtBytes(total - free)} used of ${fmtBytes(total)} · ${fmtTime(timestamp)}`);
+  const svg = svgElement("svg", { class: "performance-donut", viewBox: "0 0 240 240", role: "img", "aria-label": `${title} distribution` });
+  const centerValue = el("strong", { class: "mono" }, fmtBytes(total));
+  const centerLabel = el("span", {}, "total");
+  const detail = el("div", { class: "performance-donut-detail mono" }, `${fmtBytes(total)} total · ${fmtTime(timestamp)}`);
   let offset = 0;
   const activate = (segment) => {
     centerValue.textContent = fmtBytes(segment.value);
@@ -2515,9 +2547,10 @@ function storageDonutChart(sample) {
     row.addEventListener("focus", () => activate(segment));
     legendRows.push(row);
   });
-  return el("div", { class: "performance-donut-layout" },
-    el("div", { class: "performance-donut-plot" }, svg, el("div", { class: "performance-donut-center" }, centerValue, centerLabel)),
-    el("div", { class: "performance-donut-legend" }, ...legendRows, detail));
+  return el("div", { class: "card performance-storage-panel" }, heading,
+    el("div", { class: "performance-donut-layout" },
+      el("div", { class: "performance-donut-plot" }, svg, el("div", { class: "performance-donut-center" }, centerValue, centerLabel)),
+      el("div", { class: "performance-donut-legend" }, ...legendRows, detail)));
 }
 
 function chartSamples(samples, limit = 240) {
@@ -2719,6 +2752,7 @@ function syncDemoPerformanceStream() {
       load1: Math.max(0, 0.72 + Math.sin(tick / 8) * 0.38),
       disk_free: Math.max(0, Number(previous.disk_free) - 2 * 1024 * 1024),
       server_dir_bytes: Number(previous.server_dir_bytes) + 512 * 1024,
+      bonghos_dir_bytes: Number(previous.bonghos_dir_bytes) + 512 * 1024,
       online_players: Math.max(0, Math.round(3 + Math.sin(tick / 20))),
       uptime_seconds: Number(previous.uptime_seconds || 0) + seconds,
     };
