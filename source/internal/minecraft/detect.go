@@ -523,11 +523,11 @@ func UpdateJVMArgFile(content, xms, xmx string) string {
 
 // ValidateMemory checks Xms <= Xmx and that Xmx leaves headroom for the host.
 func ValidateMemory(xms, xmx string, hostTotalBytes int64) error {
-	msB, err := parseMem(xms)
+	msB, err := ParseMemoryBytes(xms)
 	if err != nil {
 		return fmt.Errorf("invalid Xms: %w", err)
 	}
-	mxB, err := parseMem(xmx)
+	mxB, err := ParseMemoryBytes(xmx)
 	if err != nil {
 		return fmt.Errorf("invalid Xmx: %w", err)
 	}
@@ -548,7 +548,8 @@ func ValidateMemory(xms, xmx string, hostTotalBytes int64) error {
 	return nil
 }
 
-func parseMem(v string) (int64, error) {
+// ParseMemoryBytes converts a JVM memory value such as 512M or 6G to bytes.
+func ParseMemoryBytes(v string) (int64, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return 0, fmt.Errorf("empty value")

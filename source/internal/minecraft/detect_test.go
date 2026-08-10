@@ -115,6 +115,22 @@ func TestDetectJVMConfigVariable(t *testing.T) {
 	}
 }
 
+func TestParseMemoryBytes(t *testing.T) {
+	for input, want := range map[string]int64{
+		"512M": 512 << 20,
+		"6G":   6 << 30,
+		"1024": 1024,
+	} {
+		got, err := ParseMemoryBytes(input)
+		if err != nil || got != want {
+			t.Errorf("ParseMemoryBytes(%q) = %d, %v; want %d", input, got, err, want)
+		}
+	}
+	if _, err := ParseMemoryBytes("nope"); err == nil {
+		t.Error("ParseMemoryBytes accepted invalid input")
+	}
+}
+
 func TestUpdateJVMArgFile(t *testing.T) {
 	in := "# keep this comment\n-Xms2G\n-Xmx8G\n-XX:+UseG1GC\n"
 	out := UpdateJVMArgFile(in, "4G", "12G")

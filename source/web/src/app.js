@@ -280,11 +280,22 @@ const DEMO_CONSOLE = [
 const DEMO_METRICS = Array.from({ length: 60 }, (_, i) => ({
   collected_at: new Date(Date.now() - (59 - i) * 60000).toISOString(),
   cpu_percent: 18 + Math.sin(i / 6) * 11 + (i % 13),
+  host_cpu_percent: 34 + Math.sin(i / 5) * 18 + (i % 7),
+  cpu_temp_celsius: 54 + Math.sin(i / 8) * 7,
+  cpu_cores: Array.from({ length: 8 }, (_, core) => ({
+    index: core,
+    usage_percent: Math.max(2, Math.min(100, 28 + Math.sin((i + core) / 4) * 24 + core * 3)),
+    temp_celsius: 50 + Math.sin((i + core) / 9) * 7 + core * 0.6,
+  })),
   rss_bytes: (2600 + Math.sin(i / 8) * 220 + i * 3) * 1024 * 1024,
+  jvm_xms_bytes: 2 * 1024 * 1024 * 1024,
+  jvm_xmx_bytes: 6 * 1024 * 1024 * 1024,
   host_mem_total: 32 * 1024 * 1024 * 1024,
   host_mem_avail: (18 - Math.sin(i / 9) * 1.4) * 1024 * 1024 * 1024,
   load1: 0.65 + Math.sin(i / 7) * 0.32,
   disk_total: 512 * 1024 * 1024 * 1024,
+  server_dir_bytes: (14.2 + i * 0.005) * 1024 * 1024 * 1024,
+  backup_dir_bytes: 42.6 * 1024 * 1024 * 1024,
   online_players: i % 17 > 9 ? 4 : 3,
   disk_free: (186 - i * 0.08) * 1024 * 1024 * 1024,
   uptime_seconds: 86400 + i * 60,
@@ -452,6 +463,7 @@ const S = {
   perf: [],
   perfDefaultIntervalSeconds: 10,
   perfIntervalSeconds: 0,
+  perfStorageView: "distribution",
   uptimeBase: null,
 };
 const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
@@ -501,6 +513,7 @@ const PAGE_TOPICS = {
 };
 let currentPageTopic = null;
 const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
+const PERFORMANCE_STORAGE_VIEW_KEY = "bonghos.performance.storage-view";
 const PERFORMANCE_INTERVAL_OPTIONS = [2, 5, 10, 30, 60];
 let demoPerformanceTimer = null;
 
@@ -510,6 +523,7 @@ function savedPerformanceInterval() {
 }
 
 S.perfIntervalSeconds = savedPerformanceInterval();
+S.perfStorageView = localStorage.getItem(PERFORMANCE_STORAGE_VIEW_KEY) === "trend" ? "trend" : "distribution";
 
 function performanceSubscription() {
   const message = { action: "subscribe", topic: "performance" };
@@ -2186,43 +2200,48 @@ async function pagePerformance(main) {
       el("span", { class: "performance-feed-detail", id: "performance-feed-detail" }),
       el("span", { class: "performance-feed-window mono", id: "performance-feed-window" })),
 
-    el("section", { class: "panel performance-readouts", "aria-label": "Current performance" },
-      performanceReadout("Java process", "performance-process", "Process state"),
-      performanceReadout("Uptime", "performance-uptime", "Current run"),
-      performanceReadout("CPU", "performance-cpu", "100% = one core"),
-      performanceReadout("Java RSS", "performance-rss", "Resident memory, not heap"),
-      performanceReadout("Load average", "performance-load", "1 minute"),
-      performanceReadout("Players", "performance-players", "Online now")),
-
-    el("section", { class: "panel performance-resources flow-section", "aria-label": "Resource pressure" },
+    el("section", { class: "performance-domain performance-cpu-domain", "aria-labelledby": "performance-cpu-title" },
       el("div", { class: "performance-section-heading" },
-        el("div", {}, el("h2", {}, "Resource pressure"), el("p", { class: "muted" }, "Capacity used now; free capacity is shown alongside each meter."))),
+        el("div", {}, el("h2", { id: "performance-cpu-title" }, "CPU"),
+          el("p", { class: "muted" }, "Whole-machine load, Java process usage, temperatures, and every logical CPU."))),
+      el("div", { class: "performance-domain-readouts" },
+        performanceReadout("Machine usage", "performance-host-cpu", "Average across all logical CPUs"),
+        performanceReadout("Average temperature", "performance-cpu-temp", "Best available Linux CPU sensors"),
+        performanceReadout("Java process", "performance-process-cpu", "100% = one full CPU core"),
+        performanceReadout("Load average", "performance-load", "1 minute")),
+      el("div", { class: "grid cols-2 performance-domain-charts" },
+        performanceChartPanel("Machine CPU usage", "Average utilization across all logical CPUs", "performance-chart-host-cpu"),
+        performanceChartPanel("CPU temperature", "Average of available CPU sensors", "performance-chart-cpu-temp")),
+      el("div", { class: "performance-core-heading" },
+        el("h3", {}, "Logical CPUs"),
+        el("span", { class: "metric-note" }, "Temperature is shown only when Linux exposes a matching per-core sensor.")),
+      el("div", { class: "performance-core-grid", id: "performance-core-grid" })),
+
+    el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-memory-title" },
+      el("div", { class: "performance-section-heading" },
+        el("div", {}, el("h2", { id: "performance-memory-title" }, "Memory"),
+          el("p", { class: "muted" }, "Host physical memory, configured Java allocation, and current resident process memory."))),
       el("div", { class: "performance-meter-grid" },
-        performanceMeter("Host memory", "host-memory"),
-        performanceMeter("Java share of host", "process-memory"),
-        performanceMeter("Filesystem", "disk"))),
+        performanceMeter("Machine memory", "host-memory"),
+        performanceMeter("Configured Java maximum (-Xmx)", "allocated-memory"),
+        performanceMeter("Current Java RSS", "process-memory")),
+      el("div", { class: "grid cols-2 performance-domain-charts" },
+        performanceChartPanel("Machine memory", "Physical memory used by the host", "performance-chart-host-memory"),
+        performanceChartPanel("Java resident memory", "Process RSS compared with configured -Xmx", "performance-chart-rss"))),
 
-    el("section", { class: "performance-chart-section flow-section", "aria-labelledby": "performance-trends-title" },
+    el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-storage-title" },
       el("div", { class: "performance-section-heading" },
-        el("div", {}, el("h2", { id: "performance-trends-title" }, "Live trends"),
-          el("p", { class: "muted" }, "Hover, tap, or use the arrow keys on a chart to inspect exact samples."))),
-      el("div", { class: "grid cols-2 performance-primary-charts" },
-        performanceChartPanel("CPU", "Percent of one CPU core", "performance-chart-cpu"),
-        performanceChartPanel("Java resident memory", "Process RSS, not configured heap", "performance-chart-rss")),
-      el("div", { class: "grid cols-3 performance-secondary-charts flow-section" },
-        performanceChartPanel("Host pressure", "Memory and filesystem utilization", "performance-chart-pressure"),
-        performanceChartPanel("System load", "One-minute load average", "performance-chart-load"),
-        performanceChartPanel("Players", "Online player count", "performance-chart-players"))),
-
-    el("section", { class: "flow-section", "aria-labelledby": "performance-samples-title" },
-      el("div", { class: "performance-section-heading" },
-        el("div", {}, el("h2", { id: "performance-samples-title" }, "Recent samples"),
-          el("p", { class: "muted" }, "Newest first. Historical samples do not retain transient PID and uptime fields."))),
-      el("div", { class: "table-wrap performance-samples" },
-        el("table", {},
-          el("thead", {}, el("tr", {},
-            ...["Time", "CPU", "Java RSS", "Host used", "Load", "Disk free", "Players"].map((label) => el("th", {}, label)))),
-          el("tbody", { id: "performance-sample-rows" })))));
+        el("div", {}, el("h2", { id: "performance-storage-title" }, "Storage"),
+          el("p", { class: "muted" }, "Filesystem capacity plus active project and Bonghos backup directory sizes.")),
+        el("div", { class: "performance-view-toggle", role: "group", "aria-label": "Storage chart view" },
+          el("button", { class: "btn small", type: "button", "data-storage-view": "distribution", onclick: () => setStorageView("distribution") }, "Distribution"),
+          el("button", { class: "btn small", type: "button", "data-storage-view": "trend", onclick: () => setStorageView("trend") }, "Trend"))),
+      el("div", { class: "performance-domain-readouts performance-storage-readouts" },
+        performanceReadout("Disk used", "performance-disk-used", "Host filesystem"),
+        performanceReadout("Disk free", "performance-disk-free", "Available to Bonghos"),
+        performanceReadout("Active project", "performance-project-size", "Cached for one minute"),
+        performanceReadout("Backups", "performance-backup-size", "Active project backups")),
+      el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
 
   syncPageSubscription("performance");
   updatePerformanceView(current || latestPerformanceSample());
@@ -2239,6 +2258,12 @@ function setPerformanceInterval(seconds) {
   wsSend(performanceSubscription());
   syncDemoPerformanceStream();
   updatePerformanceFreshness();
+}
+
+function setStorageView(view) {
+  S.perfStorageView = view === "trend" ? "trend" : "distribution";
+  localStorage.setItem(PERFORMANCE_STORAGE_VIEW_KEY, S.perfStorageView);
+  renderStorageVisual(latestPerformanceSample());
 }
 
 function sampleTimestamp(sample) {
@@ -2318,68 +2343,181 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
     updatePerformanceFreshness();
     return;
   }
-  const cpu = Number(sample.cpu_percent);
+  const processCPU = Number(sample.cpu_percent);
+  const hostCPU = Number(sample.host_cpu_percent);
+  const cpuTemp = sample.cpu_temp_celsius == null ? NaN : Number(sample.cpu_temp_celsius);
   const rss = Number(sample.rss_bytes);
+  const xms = Number(sample.jvm_xms_bytes);
+  const xmx = Number(sample.jvm_xmx_bytes);
   const hostTotal = Number(sample.host_mem_total);
   const hostAvail = Number(sample.host_mem_avail);
   const diskTotal = Number(sample.disk_total);
   const diskFree = Number(sample.disk_free);
   const hostUsed = hostTotal - hostAvail;
   const diskUsed = diskTotal - diskFree;
-  const uptime = currentUptimeSeconds() ?? Number(sample.uptime_seconds);
 
-  setNodeText("performance-process", sample.java_pid ? `PID ${sample.java_pid}` : "Stopped");
-  setNodeText("performance-process-note", sample.java_pid ? "Java process detected" : "No active Java PID");
-  setNodeText("performance-uptime", Number.isFinite(uptime) && uptime >= 0 ? fmtDur(uptime) : "—");
-  setNodeText("performance-cpu", Number.isFinite(cpu) ? cpu.toFixed(1) + "%" : "—");
-  setNodeText("performance-rss", Number.isFinite(rss) ? fmtBytes(rss) : "—");
+  setNodeText("performance-host-cpu", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—");
+  setNodeText("performance-cpu-temp", Number.isFinite(cpuTemp) ? cpuTemp.toFixed(1) + " °C" : "Unavailable");
+  setNodeText("performance-process-cpu", Number.isFinite(processCPU) ? processCPU.toFixed(1) + "%" : "—");
   setNodeText("performance-load", Number.isFinite(Number(sample.load1)) ? Number(sample.load1).toFixed(2) : "—");
-  setNodeText("performance-players", Number.isFinite(Number(sample.online_players)) ? String(sample.online_players) : "—");
+  setNodeText("performance-disk-used", Number.isFinite(diskUsed) ? fmtBytes(diskUsed) : "—");
+  setNodeText("performance-disk-free", Number.isFinite(diskFree) ? fmtBytes(diskFree) : "—");
+  const storageScanning = !!sample.storage_scanning;
+  setNodeText("performance-project-size", storageScanning && !Number(sample.server_dir_bytes) ? "Scanning…" : fmtBytes(sample.server_dir_bytes));
+  setNodeText("performance-backup-size", storageScanning && !Number(sample.backup_dir_bytes) ? "Scanning…" : fmtBytes(sample.backup_dir_bytes));
+  setNodeText("performance-project-size-note", storageScanning ? "Directory scan in progress" : "Cached for one minute");
+  setNodeText("performance-backup-size-note", storageScanning ? "Directory scan in progress" : "Active project backups");
 
   updatePerformanceMeter("host-memory", hostUsed, hostTotal,
     `${fmtBytes(hostUsed)} used · ${fmtBytes(hostAvail)} available · ${fmtBytes(hostTotal)} total`);
-  updatePerformanceMeter("process-memory", rss, hostTotal,
-    `${fmtBytes(rss)} Java RSS · ${fmtBytes(hostTotal)} host total`);
-  updatePerformanceMeter("disk", diskUsed, diskTotal,
-    `${fmtBytes(diskUsed)} used · ${fmtBytes(diskFree)} free · ${fmtBytes(diskTotal)} total`);
+  updatePerformanceMeter("allocated-memory", xmx, hostTotal,
+    xmx > 0 ? `${fmtBytes(xms)} initial (-Xms) · ${fmtBytes(xmx)} maximum (-Xmx)` : "No JVM allocation detected in project configuration");
+  updatePerformanceMeter("process-memory", rss, xmx > 0 ? xmx : hostTotal,
+    xmx > 0 ? `${fmtBytes(rss)} RSS · ${fmtBytes(xmx)} configured maximum` : `${fmtBytes(rss)} RSS · configured maximum unavailable`);
 
+  renderCPUCoreGrid(sample);
   renderPerformanceCharts();
-  renderPerformanceSampleRows();
+  renderStorageVisual(sample);
   updatePerformanceFreshness();
 }
 
 function renderPerformanceCharts() {
   const samples = S.perf;
-  const pressureValue = (used, total) => total > 0 ? Math.max(0, Math.min(100, used / total * 100)) : 0;
+  const configuredXmx = Number(latestPerformanceSample()?.jvm_xmx_bytes) || 0;
   const charts = [
-    ["#performance-chart-cpu", {
-      label: "CPU over the last hour", min: 0, floorMax: 100, axisFormat: (v) => v.toFixed(0) + "%",
-      series: [{ label: "CPU", tone: "accent", area: true, value: (s) => Number(s.cpu_percent), format: (v) => v.toFixed(1) + "%" }],
+    ["#performance-chart-host-cpu", samples, {
+      label: "Whole-machine CPU usage over the last hour", min: 0, fixedMax: 100, axisFormat: (v) => v.toFixed(0) + "%",
+      series: [{ label: "Machine", tone: "accent", area: true, value: (s) => Number(s.host_cpu_percent), format: (v) => v.toFixed(1) + "%" }],
     }],
-    ["#performance-chart-rss", {
-      label: "Java resident memory over the last hour", min: 0, axisFormat: fmtBytes,
-      series: [{ label: "Java RSS", tone: "info", area: true, value: (s) => Number(s.rss_bytes), format: fmtBytes }],
+    ["#performance-chart-cpu-temp", samples.filter((s) => s.cpu_temp_celsius != null), {
+      label: "Average CPU sensor temperature over the last hour", axisFormat: (v) => v.toFixed(0) + " °C",
+      series: [{ label: "Average", tone: "warning", area: true, value: (s) => Number(s.cpu_temp_celsius), format: (v) => v.toFixed(1) + " °C" }],
     }],
-    ["#performance-chart-pressure", {
-      label: "Host memory and filesystem utilization over the last hour", min: 0, fixedMax: 100, axisFormat: (v) => v.toFixed(0) + "%",
+    ["#performance-chart-host-memory", samples, {
+      label: "Machine physical memory usage over the last hour", min: 0, axisFormat: fmtBytes,
+      series: [{ label: "Machine used", tone: "accent", area: true, value: (s) => Number(s.host_mem_total) - Number(s.host_mem_avail), format: fmtBytes }],
+    }],
+    ["#performance-chart-rss", samples, {
+      label: "Java resident memory and configured maximum over the last hour", min: 0, axisFormat: fmtBytes,
       series: [
-        { label: "Memory", tone: "accent", value: (s) => pressureValue(Number(s.host_mem_total) - Number(s.host_mem_avail), Number(s.host_mem_total)), format: (v) => v.toFixed(1) + "%" },
-        { label: "Disk", tone: "success", value: (s) => pressureValue(Number(s.disk_total) - Number(s.disk_free), Number(s.disk_total)), format: (v) => v.toFixed(1) + "%" },
+        { label: "Java RSS", tone: "info", area: true, value: (s) => Number(s.rss_bytes), format: fmtBytes },
+        { label: "Configured -Xmx", tone: "warning", value: (s) => Number(s.jvm_xmx_bytes) || configuredXmx, format: fmtBytes },
       ],
     }],
-    ["#performance-chart-load", {
-      label: "One-minute system load average over the last hour", min: 0, axisFormat: (v) => v.toFixed(2),
-      series: [{ label: "Load 1m", tone: "warning", area: true, value: (s) => Number(s.load1), format: (v) => v.toFixed(2) }],
-    }],
-    ["#performance-chart-players", {
-      label: "Online players over the last hour", min: 0, step: true, axisFormat: (v) => Math.round(v).toString(),
-      series: [{ label: "Online", tone: "success", area: true, value: (s) => Number(s.online_players), format: (v) => Math.round(v).toString() }],
-    }],
   ];
-  charts.forEach(([selector, options]) => {
+  charts.forEach(([selector, chartData, options]) => {
     const host = $(selector);
-    if (host) host.replaceChildren(timeSeriesChart(samples, options));
+    if (host) host.replaceChildren(timeSeriesChart(chartData, options));
   });
+}
+
+function renderCPUCoreGrid(sample) {
+  const host = $("#performance-core-grid");
+  if (!host) return;
+  const cores = Array.isArray(sample?.cpu_cores) ? sample.cpu_cores : [];
+  if (!cores.length) {
+    host.replaceChildren(el("div", { class: "performance-chart-empty" }, "Per-core CPU data is not available yet."));
+    return;
+  }
+  host.replaceChildren(...cores.map((core) => {
+    const usage = Math.max(0, Math.min(100, Number(core.usage_percent) || 0));
+    const temperature = core.temp_celsius == null ? null : Number(core.temp_celsius);
+    const pressure = usage >= 90 ? "danger" : usage >= 75 ? "warning" : "normal";
+    return el("div", { class: "performance-core" },
+      el("div", { class: "performance-core-head" },
+        el("strong", { class: "mono" }, `C${core.index}`),
+        el("span", { class: "mono" }, usage.toFixed(1) + "%")),
+      el("div", { class: "performance-core-track", role: "meter", "aria-label": `CPU C${core.index} usage`, "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": usage.toFixed(1) },
+        el("span", { class: "performance-core-fill", style: `width:${usage}%`, "data-pressure": pressure })),
+      el("div", { class: "performance-core-temp mono" }, Number.isFinite(temperature) ? temperature.toFixed(1) + " °C" : "temp —"));
+  }));
+}
+
+function renderStorageVisual(sample) {
+  const host = $("#performance-storage-visual");
+  if (!host || !sample) return;
+  document.querySelectorAll("[data-storage-view]").forEach((button) => {
+    const active = button.dataset.storageView === S.perfStorageView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  if (S.perfStorageView === "trend") {
+    const diskPanel = performanceChartPanel("Filesystem utilization", "Used host filesystem capacity", "performance-chart-disk-trend");
+    const projectPanel = performanceChartPanel("Bonghos directories", "Active project and its backup directory", "performance-chart-project-trend");
+    host.replaceChildren(el("div", { class: "grid cols-2 performance-storage-trends" }, diskPanel, projectPanel));
+    const diskHost = $("#performance-chart-disk-trend");
+    const projectHost = $("#performance-chart-project-trend");
+    if (diskHost) diskHost.replaceChildren(timeSeriesChart(S.perf, {
+      label: "Host filesystem utilization over the last hour", min: 0, fixedMax: 100, axisFormat: (v) => v.toFixed(0) + "%",
+      series: [{ label: "Disk used", tone: "success", area: true,
+        value: (s) => Number(s.disk_total) > 0 ? (Number(s.disk_total) - Number(s.disk_free)) / Number(s.disk_total) * 100 : 0,
+        format: (v) => v.toFixed(1) + "%" }],
+    }));
+    if (projectHost) projectHost.replaceChildren(timeSeriesChart(S.perf, {
+      label: "Bonghos project and backup directory sizes over the last hour", min: 0, axisFormat: fmtBytes,
+      series: [
+        { label: "Project", tone: "accent", area: true, value: (s) => Number(s.server_dir_bytes), format: fmtBytes },
+        { label: "Backups", tone: "info", value: (s) => Number(s.backup_dir_bytes), format: fmtBytes },
+      ],
+    }));
+    return;
+  }
+  host.replaceChildren(storageDonutChart(sample));
+}
+
+function storageDonutChart(sample) {
+  const total = Math.max(0, Number(sample.disk_total) || 0);
+  const free = Math.max(0, Math.min(total, Number(sample.disk_free) || 0));
+  let remainingUsed = Math.max(0, total - free);
+  const project = Math.min(remainingUsed, Math.max(0, Number(sample.server_dir_bytes) || 0));
+  remainingUsed -= project;
+  const backups = Math.min(remainingUsed, Math.max(0, Number(sample.backup_dir_bytes) || 0));
+  remainingUsed -= backups;
+  const segments = [
+    { label: "Active project", value: project, tone: "accent" },
+    { label: "Backups", value: backups, tone: "info" },
+    { label: "Other used", value: remainingUsed, tone: "warning" },
+    { label: "Free", value: free, tone: "success" },
+  ];
+  if (total <= 0) return el("div", { class: "performance-chart-empty" }, "Filesystem capacity is not available.");
+
+  const svg = svgElement("svg", { class: "performance-donut", viewBox: "0 0 240 240", role: "img", "aria-label": "Storage distribution" });
+  const centerValue = el("strong", { class: "mono" }, ((total - free) / total * 100).toFixed(1) + "%");
+  const centerLabel = el("span", {}, "used");
+  const timestamp = sample.collected_at || sample.at;
+  const detail = el("div", { class: "performance-donut-detail mono" }, `${fmtBytes(total - free)} used of ${fmtBytes(total)} · ${fmtTime(timestamp)}`);
+  let offset = 0;
+  const activate = (segment) => {
+    centerValue.textContent = fmtBytes(segment.value);
+    centerLabel.textContent = segment.label;
+    detail.textContent = `${segment.label}: ${fmtBytes(segment.value)} (${(segment.value / total * 100).toFixed(1)}%) · ${fmtTime(timestamp)}`;
+  };
+  const legendRows = [];
+  segments.forEach((segment) => {
+    const percent = segment.value / total * 100;
+    if (percent > 0) {
+      const circle = svgElement("circle", {
+        cx: "120", cy: "120", r: "78", pathLength: "100", fill: "none", "stroke-width": "42",
+        "stroke-dasharray": `${percent} ${100 - percent}`, "stroke-dashoffset": String(-offset),
+        class: `performance-donut-segment tone-${segment.tone}`, tabindex: "0",
+        "aria-label": `${segment.label}: ${fmtBytes(segment.value)}, ${percent.toFixed(1)} percent`,
+      });
+      circle.addEventListener("pointerenter", () => activate(segment));
+      circle.addEventListener("focus", () => activate(segment));
+      svg.append(circle);
+    }
+    offset += percent;
+    const row = el("div", { class: "performance-donut-legend-row", tabindex: "0" },
+      el("span", {}, el("span", { class: `performance-chart-swatch tone-${segment.tone}` }), segment.label),
+      el("strong", { class: "mono" }, fmtBytes(segment.value)),
+      el("span", { class: "mono" }, percent.toFixed(1) + "%"));
+    row.addEventListener("pointerenter", () => activate(segment));
+    row.addEventListener("focus", () => activate(segment));
+    legendRows.push(row);
+  });
+  return el("div", { class: "performance-donut-layout" },
+    el("div", { class: "performance-donut-plot" }, svg, el("div", { class: "performance-donut-center" }, centerValue, centerLabel)),
+    el("div", { class: "performance-donut-legend" }, ...legendRows, detail));
 }
 
 function chartSamples(samples, limit = 240) {
@@ -2522,28 +2660,6 @@ function timeSeriesChart(inputSamples, options) {
   return frame;
 }
 
-function renderPerformanceSampleRows() {
-  const body = $("#performance-sample-rows");
-  if (!body) return;
-  const samples = S.perf.slice(-12).reverse();
-  if (!samples.length) {
-    body.replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "muted" }, "No samples in this time window.")));
-    return;
-  }
-  body.replaceChildren(...samples.map((sample) => {
-    const hostTotal = Number(sample.host_mem_total);
-    const hostUsed = hostTotal - Number(sample.host_mem_avail);
-    return el("tr", {},
-      el("td", { class: "mono" }, new Date(sampleTimestamp(sample)).toLocaleTimeString()),
-      el("td", { class: "mono" }, Number(sample.cpu_percent || 0).toFixed(1) + "%"),
-      el("td", { class: "mono" }, fmtBytes(sample.rss_bytes)),
-      el("td", { class: "mono" }, hostTotal > 0 ? fmtBytes(hostUsed) : "—"),
-      el("td", { class: "mono" }, Number(sample.load1 || 0).toFixed(2)),
-      el("td", { class: "mono" }, fmtBytes(sample.disk_free)),
-      el("td", { class: "mono" }, String(sample.online_players ?? 0)));
-  }));
-}
-
 function updatePerformanceFreshness() {
   if (S.page !== "performance") return;
   const label = $("#performance-feed-label");
@@ -2559,9 +2675,12 @@ function updatePerformanceFreshness() {
   const fresh = age <= Math.max(interval * 2500, 15000);
   state.className = "performance-feed-state " + (connected && fresh ? "is-live" : connected ? "is-waiting" : "is-offline");
   label.textContent = DEMO_MODE ? "Demo live" : !connected ? "Reconnecting" : fresh ? "Live" : "Waiting for sample";
-  if (detail) detail.textContent = latest
-    ? `Last sample ${relativeSampleAge(age)} · ${fmtTime(latest.collected_at || latest.at)}`
-    : "No sample received yet";
+  if (detail) {
+    const process = latest?.java_pid ? `PID ${latest.java_pid} · uptime ${fmtDur(currentUptimeSeconds() ?? latest.uptime_seconds)}` : "Java process stopped";
+    detail.textContent = latest
+      ? `Last sample ${relativeSampleAge(age)} · ${fmtTime(latest.collected_at || latest.at)} · ${process}`
+      : "No sample received yet";
+  }
   if (windowNode) windowNode.textContent = `${S.perf.length} samples · 1 hour`;
   if (intervalNote) intervalNote.textContent = S.perfIntervalSeconds
     ? `This view requests ${formatInterval(S.perfIntervalSeconds)}. Server default: ${formatInterval(S.perfDefaultIntervalSeconds)}.`
@@ -2588,10 +2707,18 @@ function syncDemoPerformanceStream() {
       ...previous,
       collected_at: new Date().toISOString(),
       cpu_percent: Math.max(0, 32 + Math.sin(tick / 7) * 18 + Math.sin(tick / 2) * 5),
+      host_cpu_percent: Math.max(0, Math.min(100, 46 + Math.sin(tick / 6) * 24)),
+      cpu_temp_celsius: 57 + Math.sin(tick / 10) * 6,
+      cpu_cores: Array.from({ length: 8 }, (_, core) => ({
+        index: core,
+        usage_percent: Math.max(1, Math.min(100, 38 + Math.sin((tick + core * 2) / 5) * 30 + core * 2)),
+        temp_celsius: 52 + Math.sin((tick + core) / 10) * 6 + core * 0.5,
+      })),
       rss_bytes: Math.max(0, Number(previous.rss_bytes) + Math.sin(tick / 11) * 6 * 1024 * 1024),
       host_mem_avail: 18 * 1024 * 1024 * 1024 - Math.sin(tick / 9) * 1.4 * 1024 * 1024 * 1024,
       load1: Math.max(0, 0.72 + Math.sin(tick / 8) * 0.38),
       disk_free: Math.max(0, Number(previous.disk_free) - 2 * 1024 * 1024),
+      server_dir_bytes: Number(previous.server_dir_bytes) + 512 * 1024,
       online_players: Math.max(0, Math.round(3 + Math.sin(tick / 20))),
       uptime_seconds: Number(previous.uptime_seconds || 0) + seconds,
     };
@@ -2627,22 +2754,6 @@ function sparklineNode(values) {
   line.setAttribute("stroke-width", "2");
   svg.appendChild(line);
   return svg;
-}
-
-function sparkline(sel, values, fmt = (v) => v.toFixed(1)) {
-  const host = $(sel);
-  if (!host) return;
-  const W = 520, H = 160, pad = 6;
-  if (!values.length) { host.innerHTML = '<div class="muted">No data yet.</div>'; return; }
-  const max = Math.max(...values, 1), min = Math.min(...values, 0);
-  const pts = values.map((v, i) => {
-    const x = pad + (i / Math.max(values.length - 1, 1)) * (W - 2 * pad);
-    const y = H - pad - ((v - min) / (max - min || 1)) * (H - 2 * pad);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-    <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2"/>
-  </svg><div class="muted">now: ${fmt(values[values.length - 1])} · peak: ${fmt(max)}</div>`;
 }
 
 // ----- servers (projects + import) ------------------------------------------

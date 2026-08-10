@@ -3,6 +3,7 @@ package monitoring
 import (
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -157,5 +158,50 @@ func TestProcessCPUAgainstRealProc(t *testing.T) {
 	got := c.ProcessCPU(pid)
 	if got < 0 || got > 100*float64(numCPU()) {
 		t.Errorf("real CPU sample %v is outside the plausible range", got)
+	}
+}
+
+func TestHostCPUPerCoreDeltas(t *testing.T) {
+	c := NewCollector()
+	c.sampleHostCPU(map[int]cpuTicks{
+		-1: {total: 1000, idle: 700},
+		0:  {total: 500, idle: 400},
+		1:  {total: 500, idle: 300},
+	})
+	overall, cores := c.sampleHostCPU(map[int]cpuTicks{
+		-1: {total: 1100, idle: 740},
+		0:  {total: 550, idle: 410},
+		1:  {total: 550, idle: 330},
+	})
+	if math.Abs(overall-60) > 0.01 {
+		t.Errorf("overall = %.2f, want 60", overall)
+	}
+	if len(cores) != 2 || math.Abs(cores[0].UsagePercent-80) > 0.01 || math.Abs(cores[1].UsagePercent-40) > 0.01 {
+		t.Fatalf("cores = %#v, want C0=80 C1=40", cores)
+	}
+}
+
+func TestTemperatureCoreIndex(t *testing.T) {
+	if got, ok := temperatureCoreIndex("Core 7"); !ok || got != 7 {
+		t.Fatalf("temperatureCoreIndex(Core 7) = %d, %v", got, ok)
+	}
+	if _, ok := temperatureCoreIndex("Package id 0"); ok {
+		t.Error("package temperature was mistaken for a core")
+	}
+}
+
+func TestDirectorySize(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "one"), []byte("1234"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "nested", "two"), []byte("123456"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := DirectorySize(root); got != 10 {
+		t.Errorf("DirectorySize() = %d, want 10", got)
 	}
 }

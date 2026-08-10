@@ -21,6 +21,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/config"
 	"github.com/Chansovisoth/Bonghos/internal/database"
 	"github.com/Chansovisoth/Bonghos/internal/instance"
+	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/monitoring"
 	"github.com/Chansovisoth/Bonghos/internal/operations"
 	"github.com/Chansovisoth/Bonghos/internal/scheduler"
@@ -49,11 +50,17 @@ type App struct {
 	Runner     *Runner
 
 	// Startup phases already reported for the current server run.
-	phaseMu        sync.Mutex
-	seenPhases     map[string]bool
-	consoleMu      sync.Mutex
-	consoleHistory []string
-	Collector      *monitoring.Collector
+	phaseMu         sync.Mutex
+	seenPhases      map[string]bool
+	consoleMu       sync.Mutex
+	consoleHistory  []string
+	Collector       *monitoring.Collector
+	storageMu       sync.Mutex
+	storageAt       time.Time
+	storageInstID   int64
+	storageServer   int64
+	storageBackups  int64
+	storageScanning bool
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
@@ -248,6 +255,15 @@ func (a *App) metricsLoop(ctx context.Context) {
 
 func (a *App) collectSample() *monitoring.Sample {
 	s := &monitoring.Sample{CollectedAt: time.Now().UTC().Format(time.RFC3339)}
+	s.HostCPUPercent, s.CPUCores = a.Collector.HostCPU()
+	var coreTemperatures map[int]float64
+	s.CPUTempCelsius, coreTemperatures = monitoring.CPUTemperatures()
+	for index := range s.CPUCores {
+		if temperature, ok := coreTemperatures[s.CPUCores[index].Index]; ok {
+			temperatureCopy := temperature
+			s.CPUCores[index].TempCelsius = &temperatureCopy
+		}
+	}
 	_, ps := a.Runner.State()
 	if ps != nil && ps.JavaPID > 0 {
 		s.JavaPID = ps.JavaPID
@@ -261,11 +277,48 @@ func (a *App) collectSample() *monitoring.Sample {
 	s.Load1 = monitoring.LoadAvg()
 	s.DiskTotal, s.DiskFree = monitoring.DiskUsage(a.Home)
 	var online int
-	if id := a.activeInstanceIDQuiet(); id != 0 {
-		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, id).Scan(&online)
+	if inst, err := a.activeInstance(); err == nil {
+		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, inst.ID).Scan(&online)
+		s.ServerDirBytes, s.BackupDirBytes, s.StorageScanning = a.storageSizes(inst)
+		s.JVMXmsBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXms)
+		s.JVMXmxBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXmx)
 	}
 	s.OnlinePlayers = online
 	return s
+}
+
+func (a *App) storageSizes(inst *instance.Instance) (int64, int64, bool) {
+	a.storageMu.Lock()
+	if a.storageInstID == inst.ID && !a.storageScanning && time.Since(a.storageAt) < time.Minute {
+		server, backups := a.storageServer, a.storageBackups
+		a.storageMu.Unlock()
+		return server, backups, false
+	}
+	server, backups := a.storageServer, a.storageBackups
+	if a.storageInstID != 0 && a.storageInstID != inst.ID {
+		server, backups = 0, 0
+	}
+	if a.storageScanning {
+		a.storageMu.Unlock()
+		return server, backups, true
+	}
+	a.storageScanning = true
+	a.storageMu.Unlock()
+
+	serverRoot := inst.AbsoluteDir(a.Home)
+	backupRoot := filepath.Join(a.Home, instance.BackupDirFor(inst.Slug))
+	go func(instanceID int64) {
+		serverSize := monitoring.DirectorySize(serverRoot)
+		backupSize := monitoring.DirectorySize(backupRoot)
+		a.storageMu.Lock()
+		a.storageAt = time.Now()
+		a.storageInstID = instanceID
+		a.storageServer = serverSize
+		a.storageBackups = backupSize
+		a.storageScanning = false
+		a.storageMu.Unlock()
+	}(inst.ID)
+	return server, backups, true
 }
 
 // playerPollLoop issues `list` periodically while relevant pages are open.
