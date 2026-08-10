@@ -360,6 +360,18 @@ async function demoApi(path, opts = {}) {
       const name = (opts.json && opts.json.name) || "server";
       return { slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server" };
     }
+    const updateMatch = clean.match(/^\/servers\/(\d+)$/);
+    if (method === "PATCH" && updateMatch) {
+      const server = DEMO_SERVERS.find((entry) => entry.id === Number(updateMatch[1]));
+      if (!server) throw new Error("Server not found");
+      if (opts.json?.display_name !== undefined) {
+        const displayName = String(opts.json.display_name).trim();
+        if (!displayName) throw new Error("Display name is required");
+        if ([...displayName].length > 120) throw new Error("Display name must be 120 characters or fewer");
+        server.display_name = displayName;
+      }
+      return { ...server };
+    }
     const duplicateMatch = clean.match(/^\/servers\/(\d+)\/duplicate$/);
     if (duplicateMatch) {
       const source = DEMO_SERVERS.find((server) => server.id === Number(duplicateMatch[1]));
@@ -3237,6 +3249,9 @@ function overflowActionsMenu(label, items, className = "") {
 function serverActionsMenu(server) {
   const items = [];
   if (can("server.files.manage")) items.push(worldDownloadMenuItem(server));
+  if (can("server.configuration.manage")) items.push(
+    el("button", { class: "action-menu-item", type: "button", role: "menuitem", onclick: () => renameProject(server) },
+      solarIcon("pen-new-square-linear"), "Rename"));
   if (can("server.import.manage")) items.push(
     el("button", { class: "action-menu-item", type: "button", role: "menuitem", onclick: () => duplicateProject(server) },
       solarIcon("copy-linear"), "Duplicate"));
@@ -3250,6 +3265,28 @@ function serverActionsMenu(server) {
 }
 
 document.addEventListener("click", () => closeActionMenus());
+
+function renameProject(server) {
+  const name = el("input", { value: server.display_name, maxlength: "120", autocomplete: "off" });
+  modal("Rename server", [
+    el("p", { class: "muted" }, "Only the display name changes. The project slug and files stay unchanged."),
+    el("div", { class: "field-row" }, el("label", {}, "Server name", name)),
+  ], [
+    ["Cancel", "ghost", (close) => close()],
+    ["Rename", "primary", async (close) => {
+      try {
+        const displayName = name.value.trim();
+        if (!displayName) throw new Error("Enter a server name.");
+        if (displayName === server.display_name) { close(); return; }
+        const updated = await api(`/servers/${server.id}`, { method: "PATCH", json: { display_name: displayName } });
+        close();
+        toast(`Renamed server to ${updated.display_name}`, "ok");
+        await renderPage();
+      } catch (error) { toast(error.message, "err"); }
+    }],
+  ]);
+  requestAnimationFrame(() => name.select());
+}
 
 function duplicateProject(server) {
   const name = el("input", { value: server.display_name + " Copy", maxlength: "120" });

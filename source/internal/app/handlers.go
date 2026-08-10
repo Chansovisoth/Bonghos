@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Chansovisoth/Bonghos/internal/auth"
 	"github.com/Chansovisoth/Bonghos/internal/authorization"
@@ -488,6 +489,7 @@ func (a *App) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, err)
 		return
 	}
+	previousDisplayName := inst.DisplayName
 	var req struct {
 		DisplayName                 *string `json:"display_name"`
 		StartupScript               *string `json:"startup_script"`
@@ -502,8 +504,17 @@ func (a *App) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("invalid request"))
 		return
 	}
-	if req.DisplayName != nil && strings.TrimSpace(*req.DisplayName) != "" {
-		inst.DisplayName = strings.TrimSpace(*req.DisplayName)
+	if req.DisplayName != nil {
+		displayName := strings.TrimSpace(*req.DisplayName)
+		if displayName == "" {
+			writeErr(w, 400, errors.New("display name is required"))
+			return
+		}
+		if utf8.RuneCountInString(displayName) > 120 {
+			writeErr(w, 400, errors.New("display name must be 120 characters or fewer"))
+			return
+		}
+		inst.DisplayName = displayName
 	}
 	if req.StartupScript != nil {
 		rel := filepath.ToSlash(filepath.Clean(*req.StartupScript))
@@ -545,7 +556,11 @@ func (a *App) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	a.audit(u.ID, u.Username, "project_updated", inst.Slug, "", remoteIP(r))
+	detail := ""
+	if inst.DisplayName != previousDisplayName {
+		detail = fmt.Sprintf("display_name=%q -> %q", previousDisplayName, inst.DisplayName)
+	}
+	a.audit(u.ID, u.Username, "project_updated", inst.Slug, detail, remoteIP(r))
 	writeJSON(w, 200, inst)
 }
 
