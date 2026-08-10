@@ -416,6 +416,7 @@ tr:hover td { background: var(--surface-2); }
 .performance-section-heading h2 .performance-section-icon { width: 32px; height: 32px; flex: 0 0 32px; align-self: center; color: var(--accent); transform: none; }
 .performance-section-heading p { margin-bottom: 0; }
 .performance-storage-refresh { width: 40px; height: 40px; min-height: 40px; flex: 0 0 40px; align-self: flex-start; margin-top: var(--space-1); padding: 0; color: var(--accent); }
+.performance-storage-refresh .icon { width: 28px; height: 28px; }
 .performance-storage-refresh.is-loading .icon { animation: performance-refresh-spin 900ms linear infinite; }
 .performance-storage-loading { min-height: 180px; display: grid; place-items: center; }
 @keyframes performance-refresh-spin { to { transform: rotate(360deg); } }

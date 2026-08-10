@@ -1038,9 +1038,13 @@ async function pageOverview(main) {
   try { players = (await api("/players")).players || []; } catch {}
   if (players) setOnlinePlayerCount(players);
 
-  const memUsed = (host && host.mem_total) ? host.mem_total - host.mem_available : 0;
+  const hostMemTotal = Number(s.host_mem_total || host?.mem_total) || 0;
+  const hostMemAvailable = Number(s.host_mem_avail || host?.mem_available) || 0;
+  const memUsed = hostMemTotal > 0 ? hostMemTotal - hostMemAvailable : 0;
   const diskTotal = Number(host?.disk_total || s.disk_total) || 0;
   const diskFree = Number(host?.disk_free || s.disk_free) || 0;
+  const hostCPU = Number(s.host_cpu_percent);
+  const loadAverage = Number(s.load1 ?? host?.load1);
   const onlinePlayers = (players || []).filter((player) => player.online);
   const onlineCount = players ? onlinePlayers.length : Number(s.online_players || 0);
   const maxPlayers = Number(d.max_players || s.max_players || 20);
@@ -1056,20 +1060,20 @@ async function pageOverview(main) {
       serverStatusCard(d.state, inst),
       statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
       playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
-      statCard("CPU", (s.cpu_percent ?? 0).toFixed(1) + "%", "of one core = 100%", "overview-live-cpu")),
+      statCard("CPU", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—", "whole-machine average", "overview-live-cpu")),
 
     // Host health, previously a separate tab.
     el("div", { class: "grid cols-4 flow-section overview-stat-grid" },
-      statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)"),
-      statCard("Host memory", host ? fmtBytes(memUsed) : "—",
-        host ? "of " + fmtBytes(host.mem_total) : ""),
+      statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)", "overview-live-rss"),
+      statCard("Host memory", hostMemTotal > 0 ? fmtBytes(memUsed) : "—",
+        hostMemTotal > 0 ? "of " + fmtBytes(hostMemTotal) : "", "overview-live-host-memory"),
       statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
-        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure"),
-      statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute")),
+        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure", "overview-live-disk-free"),
+      statCard("Load average", Number.isFinite(loadAverage) ? loadAverage.toFixed(2) : "—", "1 minute", "overview-live-load")),
 
     // Trends, previously the Performance tab.
     el("div", { class: "grid cols-2 flow-section" },
-      trendCard("CPU", history, (x) => x.cpu_percent, (v) => v.toFixed(0) + "%"),
+      trendCard("CPU", history, (x) => x.host_cpu_percent, (v) => v.toFixed(0) + "%"),
       trendCard("Process memory", history, (x) => x.rss_bytes, fmtBytes)),
 
     el("div", { class: "grid cols-2 flow-section" },
@@ -2386,7 +2390,18 @@ function updatePerformanceMeter(id, used, total, detail) {
 function updateLiveStats(sample) {
   if (S.page === "performance") updatePerformanceView(sample);
   if (S.page === "overview" && sample) {
-    setNodeText("overview-live-cpu", Number(sample.cpu_percent || 0).toFixed(1) + "%");
+    const hostCPU = Number(sample.host_cpu_percent);
+    const rss = Number(sample.rss_bytes);
+    const hostTotal = Number(sample.host_mem_total);
+    const hostAvail = Number(sample.host_mem_avail);
+    const diskTotal = Number(sample.disk_total);
+    const diskFree = Number(sample.disk_free);
+    const load = Number(sample.load1);
+    setNodeText("overview-live-cpu", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—");
+    setNodeText("overview-live-rss", Number.isFinite(rss) ? fmtBytes(rss) : "—");
+    setNodeText("overview-live-host-memory", hostTotal > 0 && Number.isFinite(hostAvail) ? fmtBytes(hostTotal - hostAvail) : "—");
+    setNodeText("overview-live-disk-free", diskTotal > 0 && Number.isFinite(diskFree) ? fmtBytes(diskFree) : "—");
+    setNodeText("overview-live-load", Number.isFinite(load) ? load.toFixed(2) : "—");
   }
 }
 
