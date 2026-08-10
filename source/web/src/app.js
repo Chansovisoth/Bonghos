@@ -1260,10 +1260,10 @@ function serverStatusCard(state, server) {
       navigate("servers", { fromOverview: true, serverTargetId: targetId });
     },
   },
+    icon,
     el("div", { class: "metric-label server-status-label-row" },
       "Server status", solarIcon("alt-arrow-right-linear", "player-summary-arrow")),
     el("div", { class: "metric-value server-status-value" },
-      icon,
       el("span", { class: "server-status-state" },
         el("span", { class: "status-square", "aria-hidden": "true" }), label)),
     el("div", { class: "metric-note" }, ""));
