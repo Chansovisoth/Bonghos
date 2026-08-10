@@ -42,6 +42,26 @@ func TestDetectStartupScripts(t *testing.T) {
 	}
 }
 
+func TestDetectCommonStartupScriptNames(t *testing.T) {
+	names := []string{
+		"start.sh", "run.sh", "server.sh", "launch.sh", "startserver.sh", "start-server.sh", "minecraft.sh",
+		"start.bat", "run.bat", "server.bat", "launch.bat", "startserver.bat", "start-server.bat",
+		"start.cmd", "run.cmd",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			root := writeServer(t, map[string]string{name: "java -Xms1G -Xmx2G -jar server.jar nogui\n"})
+			candidates, err := DetectStartupScripts(root, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(candidates) != 1 || candidates[0].Path != name || !candidates[0].HasJava {
+				t.Fatalf("candidates=%+v, want Java startup %q", candidates, name)
+			}
+		})
+	}
+}
+
 func TestDetectStartupScriptUsesServerPackVariablesForModloader(t *testing.T) {
 	root := writeServer(t, map[string]string{
 		"start.sh":      "echo supports Forge and NeoForge\njava @user_jvm_args.txt @libraries/net/minecraftforge/forge/1.20.1-47.4.0/unix_args.txt nogui\n",
@@ -112,6 +132,98 @@ func TestDetectJVMConfigVariable(t *testing.T) {
 	}
 	if cfg.Xmx != "6G" {
 		t.Errorf("variable Xmx=%q want 6G", cfg.Xmx)
+	}
+}
+
+func TestDetectCommonJVMConfigurationFiles(t *testing.T) {
+	names := []string{
+		"user_jvm_args.txt", "variables.txt", "jvm_args.txt", "jvm-args.txt", "jvm.args",
+		"java_args.txt", "java-args.txt", "java.args", "args.txt", "flags.txt", ".env",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			body := "-Xms2G\n-Xmx6G\n-XX:+UseG1GC\n"
+			if name == "variables.txt" || name == ".env" {
+				body = "JVM_ARGS=\"-Xms2G -Xmx6G -XX:+UseG1GC\"\n"
+			}
+			root := writeServer(t, map[string]string{
+				"start.sh": "#!/bin/bash\njava -jar server.jar nogui\n",
+				name:       body,
+			})
+			cfg, err := DetectJVMConfig(root, "start.sh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.SourceFile != name || cfg.Xms != "2G" || cfg.Xmx != "6G" || !cfg.Editable {
+				t.Fatalf("config=%+v, want editable %s with 2G/6G", cfg, name)
+			}
+		})
+	}
+}
+
+func TestDetectAndUpdateSeparateEnvMemoryValues(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"start.sh": "#!/bin/bash\njava -jar server.jar nogui\n",
+		".env":     "XMS=2G\nXMX=6G\nOTHER=value\n",
+	})
+	cfg, err := DetectJVMConfig(root, "start.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SourceFile != ".env" || cfg.SourceKind != "variable" || cfg.Xms != "2G" || cfg.Xmx != "6G" {
+		t.Fatalf("config=%+v, want .env variable 2G/6G", cfg)
+	}
+	updated := UpdateJVMArgFile("XMS=2G\nXMX=6G\nOTHER=value\n", "3G", "8G")
+	if updated != "XMS=3G\nXMX=8G\nOTHER=value\n" {
+		t.Fatalf("updated environment file incorrectly:\n%s", updated)
+	}
+}
+
+func TestDetectJVMVariableInBatchStartupScript(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"start.bat": "@echo off\r\nset \"JVM_ARGS=-Xms3G -Xmx7G\"\r\n%JAVA% %JVM_ARGS% -jar server.jar nogui\r\n",
+	})
+	cfg, err := DetectJVMConfig(root, "start.bat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SourceFile != "start.bat" || cfg.SourceKind != "variable" || cfg.Xms != "3G" || cfg.Xmx != "7G" || !cfg.Editable {
+		t.Fatalf("config=%+v, want editable batch JVM_ARGS 3G/7G", cfg)
+	}
+}
+
+func TestForgeInternalArgumentFilesAreNeverEditable(t *testing.T) {
+	internalNames := []string{"unix_args.txt", "win_args.txt", "args.txt"}
+	for _, name := range internalNames {
+		t.Run(name, func(t *testing.T) {
+			rel := filepath.ToSlash(filepath.Join("libraries", "net", "neoforged", "loader", name))
+			root := writeServer(t, map[string]string{
+				"run.sh": "#!/bin/bash\njava @" + rel + " nogui\n",
+				rel:      "-Xms2G\n-Xmx6G\n",
+			})
+			cfg, err := DetectJVMConfig(root, "run.sh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.SourceKind != "none" || cfg.Editable {
+				t.Fatalf("internal %s was exposed as JVM configuration: %+v", rel, cfg)
+			}
+		})
+	}
+}
+
+func TestRootArgsFileWinsOverReferencedForgeInternalArgs(t *testing.T) {
+	root := writeServer(t, map[string]string{
+		"run.sh": "#!/bin/bash\njava @libraries/net/minecraftforge/unix_args.txt @args.txt nogui\n",
+		"libraries/net/minecraftforge/unix_args.txt": "-Xmx99G\n",
+		"args.txt": "-Xms2G\n-Xmx6G\n",
+	})
+	cfg, err := DetectJVMConfig(root, "run.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SourceFile != "args.txt" || !cfg.Editable || cfg.Xmx != "6G" {
+		t.Fatalf("config=%+v, want editable root args.txt", cfg)
 	}
 }
 
