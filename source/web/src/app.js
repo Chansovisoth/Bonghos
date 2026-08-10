@@ -1119,6 +1119,18 @@ function pageHeader(title, subtitle, actions = [], leading = null) {
     actions.length ? el("div", { class: "actions" }, actions) : null);
 }
 
+function projectContextSubtitle(prefix, project, isActive, includeArticle = true) {
+  if (!project) return "No server project selected.";
+  const state = isActive ? "Active" : "Non-Active";
+  return el("span", { class: "project-context" },
+    prefix,
+    includeArticle ? (isActive ? " an " : " a ") : " ",
+    el("strong", { class: "project-context-state" }, state),
+    " project ",
+    el("span", { class: "project-context-name" }, `“${project.display_name}”`),
+    ".");
+}
+
 // ----- overview -------------------------------------------------------------
 async function pageOverview(main) {
   const d = await api("/overview");
@@ -1754,10 +1766,7 @@ async function pageFiles(main, path = filePath) {
   const search = pageSearchInput("files", draw);
   const project = S.servers.find((server) => server.id === S.managedServerId)
     || S.servers.find((server) => server.id === S.activeId);
-  const projectState = project?.id === S.activeId ? "an Active" : "a Non-Active";
-  const subtitle = project
-    ? `Currently in ${projectState} project “${project.display_name}”.`
-    : "No server project selected.";
+  const subtitle = projectContextSubtitle("Currently in", project, project?.id === S.activeId);
   main.append(
     pageHeader("Files", subtitle, [
       search,
@@ -2248,8 +2257,8 @@ async function pageConfiguration(main) {
   };
 
   main.append(
-    pageHeader("Configuration", `Startup, Java, memory, Minecraft properties, and recovery policy for ${inst.display_name}.`, [headerDiscard, headerSave]),
-    d.eula ? null : el("div", { class: "notice" },
+    pageHeader("Configuration", projectContextSubtitle("Editing", inst, inst.id === S.activeId, false), [headerDiscard, headerSave]),
+    d.eula ? document.createDocumentFragment() : el("div", { class: "notice" },
       "The Minecraft EULA has not been accepted for this project. The server will not start until it is. ",
       el("button", { class: "btn inline-offset", onclick: () =>
         confirmModal("Accept Minecraft EULA",
