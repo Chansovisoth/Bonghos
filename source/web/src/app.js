@@ -926,7 +926,6 @@ const PAGES = [
   { section: "System", id: "activity", label: "Activity", icon: "history-linear", perm: "server.configuration.manage" },
   { section: "System", id: "users", label: "Users", icon: "users-group-two-rounded-linear", perm: "users.manage" },
   { section: "System", id: "security", label: "Security", icon: "shield-keyhole-linear", perm: "users.manage" },
-  { section: "System", id: "host", label: "Host", icon: "server-2-linear", perm: "server.configuration.manage" },
   { section: "System", id: "settings", label: "Settings", icon: "settings-linear", perm: "server.view" },
 ];
 
@@ -1085,7 +1084,6 @@ async function renderPage() {
       case "activity": return await pageActivity(main);
       case "users": return await pageUsers(main);
       case "security": return await pageSecurity(main);
-      case "host": return await pageHost(main);
       case "settings": return await pageSettings(main);
     }
   } catch (err) {
@@ -1125,9 +1123,9 @@ function projectContextSubtitle(prefix, project, isActive, includeArticle = true
     prefix,
     includeArticle ? (isActive ? " an " : " a ") : " ",
     el("strong", { class: "project-context-state" }, state),
-    " project ",
-    el("span", { class: "project-context-name" }, `“${project.display_name}”`),
-    ".");
+    " project “",
+    el("span", { class: "project-context-name" }, project.display_name),
+    "”.");
 }
 
 // ----- overview -------------------------------------------------------------
@@ -4205,31 +4203,6 @@ function changeRole(u) {
     }]]);
 }
 
-// ----- host ------------------------------------------------------------------
-async function pageHost(main) {
-  const d = await api("/host");
-  const diskTotal = Number(d.disk_total) || 0;
-  const diskFree = Number(d.disk_free) || 0;
-  main.innerHTML = "";
-  main.append(
-    pageHeader("Host", "Linux host dependencies, services, storage, and exact local runtime paths."),
-    el("div", { class: "notice" }, d.note),
-    el("div", { class: "grid cols-3" },
-      statCard("Memory available", fmtBytes(d.mem_available), "of " + fmtBytes(d.mem_total)),
-      statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
-        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure"),
-      statCard("Load (1m)", (d.load1 || 0).toFixed(2), "")),
-    el("div", { class: "card flow-section" },
-      el("h3", {}, "Services & panel"),
-      el("dl", { class: "kv" },
-        el("dt", {}, "Panel address"), el("dd", { class: "mono" }, `${d.bind_address}:${d.port}`),
-        el("dt", {}, "Bonghos"), el("dd", { class: "mono" }, d.home),
-        el("dt", {}, "systemd"), el("dd", {}, d.systemd ? "available" : "unavailable"),
-        el("dt", {}, "bonghos.service"), el("dd", {}, d.service_bonghos || "—"),
-        el("dt", {}, "bonghos-minecraft.service"), el("dd", {}, d.service_minecraft || "—"),
-        el("dt", {}, "Version"), el("dd", {}, d.version))));
-}
-
 async function pageSecurity(main) {
   const users = await api("/users").catch(() => []);
   const activity = await api("/activity").catch(() => []);
@@ -4471,9 +4444,10 @@ function botsSettingsSection(bots) {
 }
 
 async function pageSettings(main) {
-  const [version, bots] = await Promise.all([
+  const [version, bots, host] = await Promise.all([
     api("/version").catch(() => ({ version: "unknown" })),
     can("security.manage") ? api("/bots") : Promise.resolve([]),
+    can("server.configuration.manage") ? api("/host").catch(() => null) : Promise.resolve(null),
   ]);
   const makeThemeButton = (value, label) => el("button", {
     class: "btn ghost" + (themeChoice() === value ? " active" : ""),
@@ -4501,6 +4475,14 @@ async function pageSettings(main) {
         el("dl", { class: "kv" },
           el("dt", {}, "WebSocket topics"), el("dd", { class: "mono" }, BASE_TOPICS.join(", ") + " + active page"),
           el("dt", {}, "Console buffer"), el("dd", {}, "Latest 1000 lines from server history plus live events"))),
+      host ? el("div", { class: "settings-row" },
+        el("div", {}, el("h3", {}, "Services & panel"), el("p", { class: "muted" }, host.note || "Linux services and local runtime paths.")),
+        el("dl", { class: "kv" },
+          el("dt", {}, "Panel address"), el("dd", { class: "mono" }, `${host.bind_address}:${host.port}`),
+          el("dt", {}, "Bonghos"), el("dd", { class: "mono" }, host.home),
+          el("dt", {}, "systemd"), el("dd", {}, host.systemd ? "available" : "unavailable"),
+          el("dt", {}, "bonghos.service"), el("dd", {}, host.service_bonghos || "—"),
+          el("dt", {}, "bonghos-minecraft.service"), el("dd", {}, host.service_minecraft || "—"))) : null,
       el("div", { class: "settings-row" },
         el("div", {}, el("h3", {}, "Application"), el("p", { class: "muted" }, "Runtime settings not exposed by the API are shown honestly rather than mocked.")),
         el("dl", { class: "kv" },

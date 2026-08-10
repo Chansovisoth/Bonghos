@@ -222,7 +222,7 @@ h3 { font-size: 0.82rem; margin-bottom: var(--space-2); color: var(--muted); fon
 .page-header .page-sub { margin-bottom: 0; }
 .page-header .title.has-leading .page-sub { margin-left: calc(var(--page-title-size) + var(--space-3)); }
 .page-header .actions { align-self: flex-start; justify-content: flex-end; }
-.project-context-state { color: var(--text); font-weight: 850; }
+.project-context-state { font-weight: 850; }
 .project-context-name { text-decoration-line: underline; text-decoration-style: dotted; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .page-search { width: 240px; min-height: 36px; }
 .page-back-button { width: var(--page-title-size); min-width: var(--page-title-size); height: var(--page-title-size); min-height: var(--page-title-size); padding: 0; flex: 0 0 var(--page-title-size); }
