@@ -1037,6 +1037,9 @@ async function pageOverview(main) {
   try { history = await api("/metrics?hours=1") || []; } catch {}
   try { players = (await api("/players")).players || []; } catch {}
   if (players) setOnlinePlayerCount(players);
+  S.perf = [];
+  history.forEach(appendPerformanceSample);
+  appendPerformanceSample(s);
 
   const hostMemTotal = Number(s.host_mem_total || host?.mem_total) || 0;
   const hostMemAvailable = Number(s.host_mem_avail || host?.mem_available) || 0;
@@ -1073,8 +1076,8 @@ async function pageOverview(main) {
 
     // Trends, previously the Performance tab.
     el("div", { class: "grid cols-2 flow-section" },
-      trendCard("CPU", history, (x) => x.host_cpu_percent, (v) => v.toFixed(0) + "%"),
-      trendCard("Process memory", history, (x) => x.rss_bytes, fmtBytes)),
+      trendCard("CPU", S.perf, (x) => x.host_cpu_percent, (v) => v.toFixed(0) + "%", "overview-trend-cpu"),
+      trendCard("Process memory", S.perf, (x) => x.rss_bytes, fmtBytes, "overview-trend-memory")),
 
     el("div", { class: "grid cols-2 flow-section" },
       // The timeline: what the server did, in its own words.
@@ -1127,15 +1130,30 @@ function eventRow(e) {
     el("span", { class: "timeline-msg" }, e.message || e.event));
 }
 
-// trendCard draws a small sparkline plus the latest value.
-function trendCard(title, samples, pick, fmt) {
-  const values = (samples || []).map(pick).filter((v) => typeof v === "number");
-  const latest = values.length ? values[values.length - 1] : 0;
-  return el("div", { class: "card graph-card" },
+// trendCard draws a compact interactive sparkline plus the latest value.
+function trendCard(title, samples, pick, fmt, id = "") {
+  const points = (samples || []).map((sample) => ({
+    timestamp: sampleTimestamp(sample),
+    value: Number(pick(sample)),
+  })).filter((point) => point.timestamp && Number.isFinite(point.value));
+  const latest = points.length ? points[points.length - 1].value : 0;
+  const attrs = { class: "card graph-card" };
+  if (id) attrs.id = id;
+  return el("div", attrs,
     el("div", { class: "metric-label" }, title),
     el("div", { class: "metric-value" }, fmt(latest)),
     el("div", { class: "metric-note" }, "last hour"),
-    values.length > 1 ? sparklineNode(values) : el("p", { class: "muted" }, "Collecting samples…"));
+    points.length > 1 ? overviewSparklineNode(title, points, fmt) : el("p", { class: "muted" }, "Collecting samples…"));
+}
+
+function updateOverviewTrendCharts() {
+  if (S.page !== "overview") return;
+  const cpu = $("#overview-trend-cpu");
+  const memory = $("#overview-trend-memory");
+  cpu?.replaceWith(trendCard("CPU", S.perf, (sample) => sample.host_cpu_percent,
+    (value) => value.toFixed(0) + "%", "overview-trend-cpu"));
+  memory?.replaceWith(trendCard("Process memory", S.perf, (sample) => sample.rss_bytes,
+    fmtBytes, "overview-trend-memory"));
 }
 
 function statCard(title, value, sub, valueId = "") {
@@ -2402,6 +2420,7 @@ function updateLiveStats(sample) {
     setNodeText("overview-live-host-memory", hostTotal > 0 && Number.isFinite(hostAvail) ? fmtBytes(hostTotal - hostAvail) : "—");
     setNodeText("overview-live-disk-free", diskTotal > 0 && Number.isFinite(diskFree) ? fmtBytes(diskFree) : "—");
     setNodeText("overview-live-load", Number.isFinite(load) ? load.toFixed(2) : "—");
+    updateOverviewTrendCharts();
   }
 }
 
@@ -2816,7 +2835,7 @@ function relativeSampleAge(milliseconds) {
 function syncDemoPerformanceStream() {
   if (demoPerformanceTimer) clearInterval(demoPerformanceTimer);
   demoPerformanceTimer = null;
-  if (!DEMO_MODE || S.page !== "performance") return;
+  if (!DEMO_MODE || (S.page !== "performance" && S.page !== "overview")) return;
   const seconds = S.perfIntervalSeconds || S.perfDefaultIntervalSeconds;
   demoPerformanceTimer = setInterval(() => {
     const previous = latestPerformanceSample() || DEMO_METRICS[DEMO_METRICS.length - 1];
@@ -2840,36 +2859,89 @@ function syncDemoPerformanceStream() {
     };
     appendPerformanceSample(sample);
     setUptimeBaseline(sample);
-    updatePerformanceView(sample);
+    updateLiveStats(sample);
   }, seconds * 1000);
 }
 
 setInterval(updatePerformanceFreshness, 1000);
 
-// sparklineNode returns a standalone SVG element, for callers building a card
-// rather than filling a pre-existing container.
-function sparklineNode(values) {
+// overviewSparklineNode keeps Overview graphs visually light while exposing
+// exact samples through pointer and keyboard interaction.
+function overviewSparklineNode(title, points, fmt) {
   const W = 320, H = 56, pad = 2;
+  const values = points.map((point) => point.value);
   const max = Math.max(...values, 1), min = Math.min(...values, 0);
   const span = (max - min) || 1;
-  const pts = values.map((v, i) => {
-    const x = pad + (i / Math.max(1, values.length - 1)) * (W - pad * 2);
-    const y = H - pad - ((v - min) / span) * (H - pad * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("class", "sparkline");
-  svg.setAttribute("preserveAspectRatio", "none");
-  svg.setAttribute("role", "img");
-  const line = document.createElementNS(ns, "polyline");
-  line.setAttribute("points", pts);
-  line.setAttribute("fill", "none");
-  line.setAttribute("stroke", "currentColor");
-  line.setAttribute("stroke-width", "2");
-  svg.appendChild(line);
-  return svg;
+  const firstAt = points[0].timestamp;
+  const timeSpan = Math.max(1, points[points.length - 1].timestamp - firstAt);
+  const xAt = (point, index) => points.length > 1
+    ? pad + ((point.timestamp - firstAt) / timeSpan) * (W - pad * 2)
+    : pad + (index / Math.max(1, points.length - 1)) * (W - pad * 2);
+  const yAt = (point) => H - pad - ((point.value - min) / span) * (H - pad * 2);
+  const linePoints = points.map((point, index) => `${xAt(point, index).toFixed(1)},${yAt(point).toFixed(1)}`).join(" ");
+  const svg = svgElement("svg", {
+    class: "sparkline", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none",
+    role: "img", "aria-label": `${title} over the last hour`,
+  });
+  const line = svgElement("polyline", { points: linePoints, class: "overview-sparkline-line" });
+  const crosshair = svgElement("line", { y1: pad, y2: H - pad, class: "overview-sparkline-crosshair" });
+  const marker = svgElement("circle", { r: 3.5, class: "overview-sparkline-marker" });
+  const overlay = svgElement("rect", { x: 0, y: 0, width: W, height: H, class: "overview-sparkline-overlay" });
+  const tooltip = el("div", { class: "overview-sparkline-tooltip mono", role: "status", "aria-live": "polite", hidden: "" });
+  const wrapper = el("div", {
+    class: "overview-sparkline", tabindex: "0",
+    "aria-label": `${title} history. Focus and use left or right arrow keys to inspect samples.`,
+  }, svg, tooltip);
+  svg.append(line, crosshair, marker, overlay);
+  let activeIndex = points.length - 1;
+
+  const showPoint = (index) => {
+    activeIndex = Math.max(0, Math.min(points.length - 1, index));
+    const point = points[activeIndex];
+    const x = xAt(point, activeIndex);
+    const y = yAt(point);
+    crosshair.setAttribute("x1", x);
+    crosshair.setAttribute("x2", x);
+    marker.setAttribute("cx", x);
+    marker.setAttribute("cy", y);
+    wrapper.classList.add("is-active");
+    tooltip.hidden = false;
+    tooltip.textContent = `${fmtTime(point.timestamp)} · ${title} ${fmt(point.value)}`;
+    tooltip.style.left = `${x / W * 100}%`;
+    tooltip.style.top = `${y / H * 100}%`;
+    tooltip.dataset.align = x < W * 0.22 ? "left" : x > W * 0.78 ? "right" : "center";
+  };
+  const hidePoint = () => {
+    wrapper.classList.remove("is-active");
+    tooltip.hidden = true;
+  };
+  const pointFromPointer = (event) => {
+    const rect = svg.getBoundingClientRect();
+    const pointerX = (event.clientX - rect.left) / Math.max(1, rect.width) * W;
+    let nearest = 0;
+    let distance = Infinity;
+    points.forEach((point, index) => {
+      const nextDistance = Math.abs(xAt(point, index) - pointerX);
+      if (nextDistance < distance) { nearest = index; distance = nextDistance; }
+    });
+    return nearest;
+  };
+
+  overlay.addEventListener("pointermove", (event) => showPoint(pointFromPointer(event)));
+  overlay.addEventListener("pointerleave", hidePoint);
+  overlay.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    wrapper.focus();
+    showPoint(pointFromPointer(event));
+  });
+  wrapper.addEventListener("focus", () => showPoint(activeIndex));
+  wrapper.addEventListener("blur", hidePoint);
+  wrapper.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    showPoint(activeIndex + (event.key === "ArrowRight" ? 1 : -1));
+  });
+  return wrapper;
 }
 
 // ----- servers (projects + import) ------------------------------------------
