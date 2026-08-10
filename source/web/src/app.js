@@ -20,6 +20,9 @@ const INLINE_SOLAR_ICONS = {
   "sun-2-linear": {
     body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"><circle cx="12" cy="12" r="4"/><path d="M12 2V1m0 22v-1m10-10h1M1 12h1m17.07-7.07l.7-.7M4.23 19.77l.7-.7m14.14 0l.7.7M4.23 4.23l.7.7"/></g>',
   },
+  "storage-refresh": {
+    body: '<path d="M0 0h24v24H0z" fill="none"/><path fill="currentColor" d="M12.077 19q-2.931 0-4.966-2.033q-2.034-2.034-2.034-4.964t2.034-4.966T12.077 5q1.783 0 3.339.847q1.555.847 2.507 2.365V5h1v5.23h-5.23v-1h3.7q-.782-1.495-2.198-2.363T12.077 6q-2.5 0-4.25 1.75T6.077 12t1.75 4.25t4.25 1.75q1.925 0 3.475-1.1t2.175-2.9h1.062q-.662 2.246-2.514 3.623T12.077 19"/>',
+  },
 };
 const BUTTON_ICONS = {
   "Activate": "check-circle-linear",
@@ -2284,10 +2287,10 @@ async function pagePerformance(main) {
           class: "btn ghost icon-button performance-storage-refresh",
           id: "performance-storage-refresh",
           type: "button",
-          title: "Refresh storage stats",
-          "aria-label": "Refresh storage stats",
+          title: "Refresh",
+          "aria-label": "Refresh",
           onclick: refreshPerformanceStorage,
-        }, solarIcon("refresh-linear"))),
+        }, solarIcon("storage-refresh"))),
       el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
 
   syncPageSubscription("performance");
@@ -2477,7 +2480,7 @@ async function refreshPerformanceStorage() {
     button.disabled = true;
     button.classList.add("is-loading");
     button.setAttribute("aria-label", "Refreshing storage stats");
-    button.setAttribute("title", "Refreshing storage stats");
+    button.setAttribute("title", "Refresh");
   }
   if (!S.perfStorage) renderStorageVisual();
   try {
@@ -2498,8 +2501,8 @@ async function refreshPerformanceStorage() {
     if (currentButton) {
       currentButton.disabled = false;
       currentButton.classList.remove("is-loading");
-      currentButton.setAttribute("aria-label", "Refresh storage stats");
-      currentButton.setAttribute("title", "Refresh storage stats");
+      currentButton.setAttribute("aria-label", "Refresh");
+      currentButton.setAttribute("title", "Refresh");
     }
   }
 }
