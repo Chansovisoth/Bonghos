@@ -2513,6 +2513,7 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
   const entries = [];
   const showTotal = () => {
     entries.forEach((entry) => {
+      if (entry.circle) svg.append(entry.circle);
       entry.circle?.classList.remove("is-active");
       entry.row.classList.remove("is-active");
     });
@@ -2521,6 +2522,9 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
     detail.textContent = `${fmtBytes(total)} total · ${fmtTime(timestamp)}`;
   };
   const showEntry = (entry) => {
+    // SVG uses paint order for stacking. Re-append the active slice so its
+    // scale and shadow render above every neighboring segment.
+    if (entry.circle) svg.append(entry.circle);
     entries.forEach((candidate) => {
       const active = candidate === entry;
       candidate.circle?.classList.toggle("is-active", active);
