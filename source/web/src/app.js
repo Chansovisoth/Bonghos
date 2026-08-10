@@ -2291,10 +2291,18 @@ async function pagePerformance(main) {
   main.innerHTML = "";
   main.append(
     pageHeader("Performance", "Live Java process and Linux host telemetry for the active server. History covers the last hour.", [
-      el("label", { class: "performance-interval-control" },
-        el("span", {}, "Update interval"),
-        intervalSelect,
-        el("span", { class: "performance-interval-note", id: "performance-interval-note" })),
+      el("div", { class: "performance-interval-control" },
+        el("label", { for: "performance-interval" }, "Update interval"),
+        el("span", { class: "performance-interval-row" },
+          intervalSelect,
+          el("button", {
+            class: "btn ghost icon-button performance-interval-refresh",
+            id: "performance-interval-refresh",
+            type: "button",
+            title: "Refresh",
+            "aria-label": "Refresh",
+            onclick: refreshPerformanceMetrics,
+          }, solarIcon("storage-refresh")))),
     ]),
 
     el("div", { class: "performance-feedbar", "aria-live": "polite" },
@@ -2364,6 +2372,44 @@ function setPerformanceInterval(seconds) {
   wsSend(performanceSubscription());
   syncDemoPerformanceStream();
   updatePerformanceFreshness();
+}
+
+async function refreshPerformanceMetrics() {
+  if (S.page !== "performance") return;
+  const button = $("#performance-interval-refresh");
+  if (button?.disabled) return;
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.setAttribute("aria-label", "Refreshing performance");
+  }
+  try {
+    const overview = await api("/overview");
+    if (S.page !== "performance") return;
+    const received = overview?.sample;
+    if (!received) throw new Error("No performance sample was returned");
+    const sample = DEMO_MODE
+      ? { ...(latestPerformanceSample() || received), collected_at: new Date().toISOString() }
+      : received;
+    appendPerformanceSample(sample);
+    setUptimeBaseline(sample);
+    if (overview?.state) {
+      S.status = { state: overview.state, detail: overview.supervisor };
+      renderStatusPill();
+    }
+    updatePerformanceView(latestPerformanceSample());
+    updatePerformanceFreshness();
+  } catch (error) {
+    toast("Performance refresh failed: " + error.message, "err");
+  } finally {
+    const currentButton = $("#performance-interval-refresh");
+    if (currentButton) {
+      currentButton.disabled = false;
+      currentButton.classList.remove("is-loading");
+      currentButton.setAttribute("aria-label", "Refresh");
+      currentButton.setAttribute("title", "Refresh");
+    }
+  }
 }
 
 function sampleTimestamp(sample) {
@@ -2868,7 +2914,6 @@ function updatePerformanceFreshness() {
   const state = $("#performance-feed-state");
   const detail = $("#performance-feed-detail");
   const windowNode = $("#performance-feed-window");
-  const intervalNote = $("#performance-interval-note");
   if (!label || !state) return;
   const interval = S.perfIntervalSeconds || S.perfDefaultIntervalSeconds;
   const latest = latestPerformanceSample();
@@ -2884,9 +2929,6 @@ function updatePerformanceFreshness() {
       : "No sample received yet";
   }
   if (windowNode) windowNode.textContent = `${S.perf.length} samples · 1 hour`;
-  if (intervalNote) intervalNote.textContent = S.perfIntervalSeconds
-    ? `This view requests ${formatInterval(S.perfIntervalSeconds)}. Server default: ${formatInterval(S.perfDefaultIntervalSeconds)}.`
-    : `Using server default: ${formatInterval(S.perfDefaultIntervalSeconds)}.`;
 }
 
 function relativeSampleAge(milliseconds) {
