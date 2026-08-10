@@ -3434,10 +3434,10 @@ function overflowActionsMenu(label, items, className = "") {
 
 function serverActionsMenu(server) {
   const items = [];
-  if (can("server.files.manage")) items.push(worldDownloadMenuItem(server));
   if (can("server.configuration.manage")) items.push(
     el("button", { class: "action-menu-item", type: "button", role: "menuitem", onclick: () => renameProject(server) },
       solarIcon("pen-new-square-linear"), "Rename"));
+  if (can("server.files.manage")) items.push(worldDownloadMenuItem(server));
   if (can("server.import.manage")) items.push(
     el("button", { class: "action-menu-item", type: "button", role: "menuitem", onclick: () => duplicateProject(server) },
       solarIcon("copy-linear"), "Duplicate"));
