@@ -84,6 +84,7 @@ func (a *App) routes() http.Handler {
 	// --- monitoring ---------------------------------------------------------
 	mux.HandleFunc("GET /api/metrics", a.requirePerm(authorization.PermServerView, a.handleMetrics))
 	mux.HandleFunc("GET /api/metrics/config", a.requirePerm(authorization.PermServerView, a.handleMetricsConfig))
+	mux.HandleFunc("GET /api/metrics/storage", a.requirePerm(authorization.PermServerView, a.handleMetricsStorage))
 	mux.HandleFunc("GET /api/overview", a.requirePerm(authorization.PermServerView, a.handleOverview))
 
 	// --- files --------------------------------------------------------------
@@ -836,17 +837,21 @@ func (a *App) handleMetricsConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]int{"interval_seconds": interval})
 }
 
+func (a *App) handleMetricsStorage(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, a.collectStorageSnapshot())
+}
+
 func (a *App) handleHost(w http.ResponseWriter, r *http.Request) {
 	memT, memA := monitoring.HostMemory()
-	diskT, diskF := monitoring.DiskUsage(a.Home)
+	storage := a.cachedStorageSnapshot()
 	out := map[string]any{
 		"bind_address":      a.Cfg.BindAddress,
 		"port":              a.Cfg.Port,
 		"home":              a.Home,
 		"mem_total":         memT,
 		"mem_available":     memA,
-		"disk_total":        diskT,
-		"disk_free":         diskF,
+		"disk_total":        storage.DiskTotal,
+		"disk_free":         storage.DiskFree,
 		"load1":             monitoring.LoadAvg(),
 		"systemd":           systemd.Available(),
 		"service_bonghos":   systemd.Status(systemd.ServiceControlPlane),

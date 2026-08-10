@@ -49,6 +49,19 @@ type Sample struct {
 	JavaPID         int       `json:"java_pid"`
 }
 
+// StorageSnapshot is collected only when an operator opens or manually
+// refreshes the Performance page. Directory walking is intentionally kept out
+// of the recurring metrics loop.
+type StorageSnapshot struct {
+	CollectedAt     string `json:"collected_at"`
+	DiskTotal       int64  `json:"disk_total"`
+	DiskFree        int64  `json:"disk_free"`
+	BonghosDirBytes int64  `json:"bonghos_dir_bytes"`
+	ServerDirBytes  int64  `json:"server_dir_bytes"`
+	BackupDirBytes  int64  `json:"backup_dir_bytes"`
+	SystemDirBytes  int64  `json:"system_dir_bytes"`
+}
+
 // Collector tracks CPU tick deltas per PID between samples.
 type Collector struct {
 	mu          sync.Mutex

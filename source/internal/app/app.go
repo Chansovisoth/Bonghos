@@ -55,13 +55,8 @@ type App struct {
 	consoleMu       sync.Mutex
 	consoleHistory  []string
 	Collector       *monitoring.Collector
-	storageMu       sync.Mutex
-	storageAt       time.Time
-	storageHome     int64
-	storageServer   int64
-	storageBackups  int64
-	storageSystem   int64
-	storageScanning bool
+	storageMu       sync.RWMutex
+	storageSnapshot monitoring.StorageSnapshot
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
@@ -276,8 +271,13 @@ func (a *App) collectSample() *monitoring.Sample {
 	}
 	s.HostMemTotal, s.HostMemAvail = monitoring.HostMemory()
 	s.Load1 = monitoring.LoadAvg()
-	s.DiskTotal, s.DiskFree = monitoring.DiskUsage(a.Home)
-	s.BonghosDirBytes, s.ServerDirBytes, s.BackupDirBytes, s.SystemDirBytes, s.StorageScanning = a.storageSizes()
+	storage := a.cachedStorageSnapshot()
+	s.DiskTotal = storage.DiskTotal
+	s.DiskFree = storage.DiskFree
+	s.BonghosDirBytes = storage.BonghosDirBytes
+	s.ServerDirBytes = storage.ServerDirBytes
+	s.BackupDirBytes = storage.BackupDirBytes
+	s.SystemDirBytes = storage.SystemDirBytes
 	var online int
 	if inst, err := a.activeInstance(); err == nil {
 		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, inst.ID).Scan(&online)
@@ -288,33 +288,28 @@ func (a *App) collectSample() *monitoring.Sample {
 	return s
 }
 
-func (a *App) storageSizes() (int64, int64, int64, int64, bool) {
-	a.storageMu.Lock()
-	if !a.storageScanning && !a.storageAt.IsZero() && time.Since(a.storageAt) < time.Minute {
-		home, server, backups, system := a.storageHome, a.storageServer, a.storageBackups, a.storageSystem
-		a.storageMu.Unlock()
-		return home, server, backups, system, false
-	}
-	home, server, backups, system := a.storageHome, a.storageServer, a.storageBackups, a.storageSystem
-	if a.storageScanning {
-		a.storageMu.Unlock()
-		return home, server, backups, system, true
-	}
-	a.storageScanning = true
-	a.storageMu.Unlock()
+func (a *App) cachedStorageSnapshot() monitoring.StorageSnapshot {
+	a.storageMu.RLock()
+	defer a.storageMu.RUnlock()
+	return a.storageSnapshot
+}
 
-	go func() {
-		homeSize, directories := monitoring.DirectoryBreakdown(a.Home)
-		a.storageMu.Lock()
-		a.storageAt = time.Now()
-		a.storageHome = homeSize
-		a.storageServer = directories[config.DirServers]
-		a.storageBackups = directories[config.DirBackups]
-		a.storageSystem = directories[config.DirSystem]
-		a.storageScanning = false
-		a.storageMu.Unlock()
-	}()
-	return home, server, backups, system, true
+func (a *App) collectStorageSnapshot() monitoring.StorageSnapshot {
+	diskTotal, diskFree := monitoring.DiskUsage(a.Home)
+	homeSize, directories := monitoring.DirectoryBreakdown(a.Home)
+	snapshot := monitoring.StorageSnapshot{
+		CollectedAt:     time.Now().UTC().Format(time.RFC3339),
+		DiskTotal:       diskTotal,
+		DiskFree:        diskFree,
+		BonghosDirBytes: homeSize,
+		ServerDirBytes:  directories[config.DirServers],
+		BackupDirBytes:  directories[config.DirBackups],
+		SystemDirBytes:  directories[config.DirSystem],
+	}
+	a.storageMu.Lock()
+	a.storageSnapshot = snapshot
+	a.storageMu.Unlock()
+	return snapshot
 }
 
 // playerPollLoop issues `list` periodically while relevant pages are open.

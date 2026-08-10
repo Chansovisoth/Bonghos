@@ -406,6 +406,18 @@ async function demoApi(path, opts = {}) {
     ] };
     case "/metrics": return DEMO_METRICS;
     case "/metrics/config": return { interval_seconds: 10 };
+    case "/metrics/storage": {
+      const sample = DEMO_METRICS[DEMO_METRICS.length - 1];
+      return {
+        collected_at: new Date().toISOString(),
+        disk_total: sample.disk_total,
+        disk_free: sample.disk_free,
+        bonghos_dir_bytes: sample.bonghos_dir_bytes,
+        server_dir_bytes: sample.server_dir_bytes,
+        backup_dir_bytes: sample.backup_dir_bytes,
+        system_dir_bytes: sample.system_dir_bytes,
+      };
+    }
     case "/players": return { players: [
       { username: "iKlaude", online: true, op: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
       { username: "Alex", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 3922 },
@@ -494,6 +506,7 @@ const S = {
   commandHistory: [],
   commandHistoryAt: -1,
   perf: [],
+  perfStorage: null,
   perfDefaultIntervalSeconds: 10,
   perfIntervalSeconds: 0,
   uptimeBase: null,
@@ -547,6 +560,7 @@ let currentPageTopic = null;
 const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
 const PERFORMANCE_INTERVAL_OPTIONS = [2, 5, 10, 30, 60];
 let demoPerformanceTimer = null;
+let performanceStorageRequest = 0;
 
 function savedPerformanceInterval() {
   const seconds = Number(localStorage.getItem(PERFORMANCE_INTERVAL_KEY) || 0);
@@ -1022,6 +1036,8 @@ async function pageOverview(main) {
   if (players) setOnlinePlayerCount(players);
 
   const memUsed = (host && host.mem_total) ? host.mem_total - host.mem_available : 0;
+  const diskTotal = Number(host?.disk_total || s.disk_total) || 0;
+  const diskFree = Number(host?.disk_free || s.disk_free) || 0;
   const onlinePlayers = (players || []).filter((player) => player.online);
   const onlineCount = players ? onlinePlayers.length : Number(s.online_players || 0);
   const maxPlayers = Number(d.max_players || s.max_players || 20);
@@ -1044,7 +1060,8 @@ async function pageOverview(main) {
       statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)"),
       statCard("Host memory", host ? fmtBytes(memUsed) : "—",
         host ? "of " + fmtBytes(host.mem_total) : ""),
-      statCard("Disk free", fmtBytes(s.disk_free), "of " + fmtBytes(s.disk_total)),
+      statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
+        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure"),
       statCard("Load average", host && host.load1 != null ? host.load1.toFixed(2) : "—", "1 minute")),
 
     // Trends, previously the Performance tab.
@@ -2194,6 +2211,7 @@ async function pagePerformance(main) {
     api("/overview").catch(() => null),
   ]);
   S.perf = [];
+  S.perfStorage = null;
   (history || []).forEach(appendPerformanceSample);
   const current = overview?.sample;
   if (current) {
@@ -2259,13 +2277,23 @@ async function pagePerformance(main) {
         performanceChartPanel("Java resident memory", "Process RSS compared with configured -Xmx", "performance-chart-rss"))),
 
     el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-storage-title" },
-      el("div", { class: "performance-section-heading" },
+      el("div", { class: "performance-section-heading has-action" },
         performanceSectionTitle("performance-storage-title", "Storage",
-          "Machine filesystem capacity and storage managed by Bonghos.", "database-linear")),
+          "Machine filesystem capacity and storage managed by Bonghos.", "database-linear"),
+        el("button", {
+          class: "btn ghost icon-button performance-storage-refresh",
+          id: "performance-storage-refresh",
+          type: "button",
+          title: "Refresh storage stats",
+          "aria-label": "Refresh storage stats",
+          onclick: refreshPerformanceStorage,
+        }, solarIcon("refresh-linear"))),
       el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
 
   syncPageSubscription("performance");
   updatePerformanceView(current || latestPerformanceSample());
+  renderStorageVisual();
+  refreshPerformanceStorage();
 }
 
 function formatInterval(seconds) {
@@ -2386,7 +2414,6 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
 
   renderCPUCoreGrid(sample);
   renderPerformanceCharts();
-  renderStorageVisual(sample);
   updatePerformanceFreshness();
 }
 
@@ -2442,12 +2469,54 @@ function renderCPUCoreGrid(sample) {
   }));
 }
 
-function renderStorageVisual(sample) {
+async function refreshPerformanceStorage() {
+  if (S.page !== "performance") return;
+  const request = ++performanceStorageRequest;
+  const button = $("#performance-storage-refresh");
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.setAttribute("aria-label", "Refreshing storage stats");
+    button.setAttribute("title", "Refreshing storage stats");
+  }
+  if (!S.perfStorage) renderStorageVisual();
+  try {
+    const snapshot = await api("/metrics/storage");
+    if (request !== performanceStorageRequest || S.page !== "performance") return;
+    S.perfStorage = snapshot;
+    renderStorageVisual();
+  } catch (error) {
+    if (request !== performanceStorageRequest || S.page !== "performance") return;
+    if (!S.perfStorage) {
+      const host = $("#performance-storage-visual");
+      host?.replaceChildren(el("div", { class: "card performance-chart-empty" }, "Storage stats could not be loaded."));
+    }
+    toast("Storage refresh failed: " + error.message, "err");
+  } finally {
+    if (request !== performanceStorageRequest || S.page !== "performance") return;
+    const currentButton = $("#performance-storage-refresh");
+    if (currentButton) {
+      currentButton.disabled = false;
+      currentButton.classList.remove("is-loading");
+      currentButton.setAttribute("aria-label", "Refresh storage stats");
+      currentButton.setAttribute("title", "Refresh storage stats");
+    }
+  }
+}
+
+function renderStorageVisual(sample = S.perfStorage) {
   const host = $("#performance-storage-visual");
-  if (!host || !sample) return;
+  if (!host) return;
+  if (!sample) {
+    host.replaceChildren(el("div", { class: "card performance-chart-empty performance-storage-loading" }, "Reading filesystem storage…"));
+    return;
+  }
   const diskTotal = Math.max(0, Number(sample.disk_total) || 0);
   const diskFree = Math.max(0, Math.min(diskTotal, Number(sample.disk_free) || 0));
   const bonghosTotal = Math.max(0, Number(sample.bonghos_dir_bytes) || 0);
+  const diskUsed = Math.max(0, diskTotal - diskFree);
+  const bonghosOnDisk = Math.min(diskUsed, bonghosTotal);
+  const otherUsed = Math.max(0, diskUsed - bonghosOnDisk);
   let remaining = bonghosTotal;
   const servers = Math.min(remaining, Math.max(0, Number(sample.server_dir_bytes) || 0));
   remaining -= servers;
@@ -2464,7 +2533,8 @@ function renderStorageVisual(sample) {
       timestamp,
       emptyMessage: "Filesystem capacity is not available.",
       segments: [
-        { label: "Used", value: diskTotal - diskFree, tone: "accent" },
+        { label: "Other used", value: otherUsed, tone: "info" },
+        { label: "Bonghos", value: bonghosOnDisk, tone: "accent" },
         { label: "Available", value: diskFree, tone: "empty" },
       ],
     }),
@@ -2473,7 +2543,7 @@ function renderStorageVisual(sample) {
       description: "Servers, backups, system files, and other managed data",
       total: bonghosTotal,
       timestamp,
-      emptyMessage: sample.storage_scanning ? "Scanning Bonghos storage…" : "Bonghos storage size is not available.",
+      emptyMessage: "Bonghos storage size is not available.",
       segments: [
         { label: "Servers", value: servers, tone: "accent" },
         { label: "Backups", value: backups, tone: "info" },
@@ -2747,9 +2817,6 @@ function syncDemoPerformanceStream() {
       rss_bytes: Math.max(0, Number(previous.rss_bytes) + Math.sin(tick / 11) * 6 * 1024 * 1024),
       host_mem_avail: 18 * 1024 * 1024 * 1024 - Math.sin(tick / 9) * 1.4 * 1024 * 1024 * 1024,
       load1: Math.max(0, 0.72 + Math.sin(tick / 8) * 0.38),
-      disk_free: Math.max(0, Number(previous.disk_free) - 2 * 1024 * 1024),
-      server_dir_bytes: Number(previous.server_dir_bytes) + 512 * 1024,
-      bonghos_dir_bytes: Number(previous.bonghos_dir_bytes) + 512 * 1024,
       online_players: Math.max(0, Math.round(3 + Math.sin(tick / 20))),
       uptime_seconds: Number(previous.uptime_seconds || 0) + seconds,
     };
@@ -3369,13 +3436,16 @@ function changeRole(u) {
 // ----- host ------------------------------------------------------------------
 async function pageHost(main) {
   const d = await api("/host");
+  const diskTotal = Number(d.disk_total) || 0;
+  const diskFree = Number(d.disk_free) || 0;
   main.innerHTML = "";
   main.append(
     pageHeader("Host", "Linux host dependencies, services, storage, and exact local runtime paths."),
     el("div", { class: "notice" }, d.note),
     el("div", { class: "grid cols-3" },
       statCard("Memory available", fmtBytes(d.mem_available), "of " + fmtBytes(d.mem_total)),
-      statCard("Disk free", fmtBytes(d.disk_free), "of " + fmtBytes(d.disk_total)),
+      statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
+        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure"),
       statCard("Load (1m)", (d.load1 || 0).toFixed(2), "")),
     el("div", { class: "card flow-section" },
       el("h3", {}, "Services & panel"),
