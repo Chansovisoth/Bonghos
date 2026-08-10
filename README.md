@@ -424,6 +424,17 @@ The frontend has no JavaScript build step: edit `source/web/src/` and rebuild to
 re-embed. Dependencies are vendored under `source/third_party/`, so the project builds
 offline (`GOPROXY=direct`).
 
+To safely merge the `webui` branch into `main`, use the guarded integration helper:
+
+```bash
+./scripts/integrate-webui.sh
+```
+
+It fetches the latest refs, tests the merge in a temporary worktree, runs validation,
+then asks before updating `main`, pushing, or installing the validated build into the
+local `~/bonghos` service. If conflicts occur, `main` is untouched and the script leaves
+the temporary worktree in place for manual resolution.
+
 Contributions welcome — see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).
 
 ---
