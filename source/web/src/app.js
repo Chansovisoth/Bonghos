@@ -590,7 +590,6 @@ const S = {
   performanceTarget: "",
   serverTargetId: null,
   managedServerId: null,
-  perfDefaultIntervalSeconds: 10,
   perfIntervalSeconds: 2,
   uptimeBase: null,
 };
@@ -651,15 +650,15 @@ function savedPerformanceInterval() {
   const saved = localStorage.getItem(PERFORMANCE_INTERVAL_KEY);
   if (saved === null) return 2;
   const seconds = Number(saved);
-  return seconds === 0 || PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 2;
+  // Older builds stored 0 for the removed "Server default" option. Treat it
+  // like any invalid value and migrate the browser to the 2-second UI default.
+  return PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 2;
 }
 
 S.perfIntervalSeconds = savedPerformanceInterval();
 
 function performanceSubscription() {
-  const message = { action: "subscribe", topic: "performance" };
-  if (S.perfIntervalSeconds) message.interval_seconds = S.perfIntervalSeconds;
-  return message;
+  return { action: "subscribe", topic: "performance", interval_seconds: S.perfIntervalSeconds };
 }
 
 function wsSend(obj) {
@@ -2646,9 +2645,8 @@ function scheduleForm(s) {
 
 // ----- performance ----------------------------------------------------------
 async function pagePerformance(main) {
-  const [history, config, overview] = await Promise.all([
+  const [history, overview] = await Promise.all([
     api("/metrics?hours=1"),
-    api("/metrics/config").catch(() => ({ interval_seconds: 10 })),
     api("/overview").catch(() => null),
   ]);
   S.perf = [];
@@ -2660,15 +2658,10 @@ async function pagePerformance(main) {
     setUptimeBaseline(current);
   }
   if (overview?.state) S.status = { state: overview.state, detail: overview.supervisor };
-  const configuredInterval = Number(config?.interval_seconds);
-  S.perfDefaultIntervalSeconds = Number.isFinite(configuredInterval) && configuredInterval >= 2
-    ? configuredInterval : 10;
-
   const intervalSelect = el("select", {
     id: "performance-interval",
     onchange: (event) => setPerformanceInterval(Number(event.target.value)),
   },
-  el("option", { value: "0" }, `Server default (${formatInterval(S.perfDefaultIntervalSeconds)})`),
   ...PERFORMANCE_INTERVAL_OPTIONS.map((seconds) =>
     el("option", { value: String(seconds) },
       `Every ${formatInterval(seconds)}${seconds === 2 ? " (Default)" : ""}`)));
@@ -2752,7 +2745,7 @@ function formatInterval(seconds) {
 }
 
 function setPerformanceInterval(seconds) {
-  S.perfIntervalSeconds = PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 0;
+  S.perfIntervalSeconds = PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 2;
   localStorage.setItem(PERFORMANCE_INTERVAL_KEY, String(S.perfIntervalSeconds));
   wsSend(performanceSubscription());
   syncDemoPerformanceStream();
@@ -3319,7 +3312,7 @@ function updatePerformanceFreshness() {
   const detail = $("#performance-feed-detail");
   const windowNode = $("#performance-feed-window");
   if (!label || !state) return;
-  const interval = S.perfIntervalSeconds || S.perfDefaultIntervalSeconds;
+  const interval = S.perfIntervalSeconds;
   const latest = latestPerformanceSample();
   const age = latest ? Math.max(0, Date.now() - sampleTimestamp(latest)) : Infinity;
   const connected = DEMO_MODE || (S.ws && S.ws.readyState === WebSocket.OPEN);
@@ -3347,7 +3340,7 @@ function syncDemoPerformanceStream() {
   if (demoPerformanceTimer) clearInterval(demoPerformanceTimer);
   demoPerformanceTimer = null;
   if (!DEMO_MODE || (S.page !== "performance" && S.page !== "overview")) return;
-  const seconds = S.perfIntervalSeconds || S.perfDefaultIntervalSeconds;
+  const seconds = S.page === "performance" ? S.perfIntervalSeconds : 10;
   demoPerformanceTimer = setInterval(() => {
     const previous = latestPerformanceSample() || DEMO_METRICS[DEMO_METRICS.length - 1];
     const tick = Date.now() / 1000;

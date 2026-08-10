@@ -224,15 +224,16 @@ func (a *App) bootAutostart(ctx context.Context) {
 }
 
 func (a *App) metricsLoop(ctx context.Context) {
-	interval := time.Duration(a.Cfg.MetricsIntervalSec) * time.Second
-	if interval < 2*time.Second {
-		interval = 10 * time.Second
+	historyInterval := time.Duration(a.Cfg.MetricsIntervalSec) * time.Second
+	if historyInterval < 2*time.Second {
+		historyInterval = 10 * time.Second
 	}
 	pulse := time.NewTicker(1 * time.Second)
 	defer pulse.Stop()
 	pruneT := time.NewTicker(1 * time.Hour)
 	defer pruneT.Stop()
 	var lastSampleAt time.Time
+	var lastHistoryAt time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -240,21 +241,25 @@ func (a *App) metricsLoop(ctx context.Context) {
 		case <-pruneT.C:
 			monitoring.Prune(a.DB, time.Duration(a.Cfg.MetricsRetentionDays)*24*time.Hour)
 		case now := <-pulse.C:
-			// Keep the configured history cadence, but temporarily collect faster
-			// when an open Performance view asks for a more responsive feed.
-			effective := interval
+			// Temporarily collect faster when an open Performance view asks for a
+			// more responsive feed. Persisted history stays on the configured
+			// cadence so a live dashboard does not multiply database writes.
+			effective := historyInterval
 			if a.Hub.SubscriberCount("performance") > 0 {
-				effective = a.Hub.MinimumInterval("performance", interval)
+				effective = a.Hub.MinimumInterval("performance", historyInterval)
 			}
 			if !lastSampleAt.IsZero() && now.Sub(lastSampleAt)+250*time.Millisecond < effective {
 				continue
 			}
 			s := a.collectSample()
-			instID := a.activeInstanceIDQuiet()
-			monitoring.StoreSample(a.DB, instID, s)
+			if lastHistoryAt.IsZero() || now.Sub(lastHistoryAt)+250*time.Millisecond >= historyInterval {
+				instID := a.activeInstanceIDQuiet()
+				monitoring.StoreSample(a.DB, instID, s)
+				lastHistoryAt = now
+			}
 			lastSampleAt = now
-			a.Hub.BroadcastDue("performance", "sample", s, interval)
-			a.Hub.BroadcastDue("overview", "sample", s, interval)
+			a.Hub.BroadcastDue("performance", "sample", s, historyInterval)
+			a.Hub.BroadcastDue("overview", "sample", s, historyInterval)
 		}
 	}
 }
