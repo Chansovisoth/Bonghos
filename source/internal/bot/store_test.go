@@ -96,3 +96,19 @@ func TestStorePatchAndEventFiltering(t *testing.T) {
 		t.Fatalf("ByID after delete = %v", err)
 	}
 }
+
+func TestStoreRejectsProviderChange(t *testing.T) {
+	store := testStore(t)
+	config, err := store.Create(CreateInput{
+		Name: "Alerts", Provider: ProviderTelegram,
+		Token: "123456789:telegram_test_token_secret", DestinationID: "-1001234567890",
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	discord := ProviderDiscord
+	if _, err := store.Patch(config.ID, Patch{Provider: &discord}); err == nil || !strings.Contains(err.Error(), "cannot be changed") {
+		t.Fatalf("provider change error = %v", err)
+	}
+}

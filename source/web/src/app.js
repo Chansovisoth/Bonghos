@@ -4143,7 +4143,7 @@ function botProviderName(provider) {
 
 function botProviderMark(provider) {
   return el("span", { class: `bot-provider-mark ${provider}`, "aria-hidden": "true" },
-    provider === "telegram" ? "TG" : "DC");
+    el("i", { class: `fa-brands fa-${provider}` }));
 }
 
 async function patchBot(bot, patch, control = null) {
@@ -4252,10 +4252,11 @@ function botEditor(existing = null) {
       ? "Add the bot to the chat first. Private chats, groups, and channels use a numeric chat ID; public channels may use @username."
       : "Invite the bot to the Discord server and grant Send Messages in this channel.";
   };
-  provider.addEventListener("change", renderDestination);
+  provider.disabled = !!existing;
+  if (!existing) provider.addEventListener("change", renderDestination);
   renderDestination();
 
-  const notificationRows = BOT_EVENT_FIELDS.map(([field, label, note]) => {
+  const notificationRows = existing ? [] : BOT_EVENT_FIELDS.map(([field, label, note]) => {
     const input = el("input", { type: "checkbox" });
     input.checked = existing ? !!existing[field] : true;
     eventInputs[field] = input;
@@ -4266,28 +4267,31 @@ function botEditor(existing = null) {
   modal(existing ? "Edit bot" : "Add bot", [
     el("p", { class: "muted" }, "Tokens are encrypted on this machine and are never shown again after saving."),
     el("div", { class: "field-row" }, el("label", {}, "Name", name)),
-    el("div", { class: "field-row" }, el("label", {}, "Provider", provider)),
+    el("div", { class: "field-row" }, el("label", {}, "Provider", provider),
+      existing ? el("p", { class: "hint" }, "The provider cannot be changed after a bot is added.") : null),
     el("div", { class: "field-row" }, el("label", {}, existing ? "New bot token (optional)" : "Bot token", token),
       existing ? el("p", { class: "hint" }, "Leave blank to keep the encrypted token already stored.") : null),
     el("div", { class: "field-row" }, el("label", {}, destinationTitle, destination), destinationHint),
-    el("label", { class: "check-row bot-enabled-row" }, enabled, " Bot enabled"),
-    el("h3", { class: "bot-modal-heading" }, "Notifications"),
-    el("div", { class: "bot-modal-events" }, notificationRows),
+    existing ? null : el("label", { class: "check-row bot-enabled-row" }, enabled, " Bot enabled"),
+    existing ? null : el("h3", { class: "bot-modal-heading" }, "Notifications"),
+    existing ? null : el("div", { class: "bot-modal-events" }, notificationRows),
   ], [
     ["Cancel", "ghost", (close) => close()],
     [existing ? "Save changes" : "Add bot", "primary", async (close) => {
-      const providerChanged = existing && provider.value !== existing.provider;
       if (!name.value.trim()) { toast("Bot name is required", "err"); name.focus(); return; }
-      if (!token.value.trim() && (!existing || providerChanged)) {
-        toast(providerChanged ? "Enter the token for the new provider" : "Bot token is required", "err");
+      if (!token.value.trim() && !existing) {
+        toast("Bot token is required", "err");
         token.focus(); return;
       }
       if (!destination.value.trim()) { toast("Destination is required", "err"); destination.focus(); return; }
       const body = {
-        name: name.value.trim(), provider: provider.value,
-        destination_id: destination.value.trim(), enabled: enabled.checked,
+        name: name.value.trim(), destination_id: destination.value.trim(),
       };
-      BOT_EVENT_FIELDS.forEach(([field]) => { body[field] = eventInputs[field].checked; });
+      if (!existing) {
+        body.provider = provider.value;
+        body.enabled = enabled.checked;
+        BOT_EVENT_FIELDS.forEach(([field]) => { body[field] = eventInputs[field].checked; });
+      }
       if (token.value.trim()) body.token = token.value.trim();
       try {
         if (existing) await api(`/bots/${existing.id}`, { method: "PATCH", json: body });

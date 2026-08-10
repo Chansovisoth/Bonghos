@@ -40,6 +40,12 @@ func TestBotAPIEncryptsTokenAndSupportsToggles(t *testing.T) {
 	if string(encrypted) == token || strings.Contains(string(encrypted), "api_secret") {
 		t.Fatal("database stored plaintext bot token")
 	}
+	status, body = client.do(http.MethodPatch, "/api/bots/"+itoa(created.ID), map[string]any{
+		"provider": "discord",
+	}, nil)
+	if status != http.StatusBadRequest || !strings.Contains(body, "cannot be changed") {
+		t.Fatalf("change provider: %d %s", status, body)
+	}
 
 	var updated bot.Config
 	status, body = client.do(http.MethodPatch, "/api/bots/"+itoa(created.ID), map[string]any{

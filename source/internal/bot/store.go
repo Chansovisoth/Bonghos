@@ -210,7 +210,10 @@ func (s *Store) Patch(id int64, patch Patch) (*Config, error) {
 		current.Name = strings.TrimSpace(*patch.Name)
 	}
 	if patch.Provider != nil {
-		current.Provider = normalizeProvider(*patch.Provider)
+		requestedProvider := normalizeProvider(*patch.Provider)
+		if requestedProvider != originalProvider {
+			return nil, errors.New("bot provider cannot be changed")
+		}
 	}
 	if patch.DestinationID != nil {
 		current.DestinationID = strings.TrimSpace(*patch.DestinationID)
@@ -233,9 +236,6 @@ func (s *Store) Patch(id int64, patch Patch) (*Config, error) {
 	newToken := ""
 	if patch.Token != nil {
 		newToken = strings.TrimSpace(*patch.Token)
-	}
-	if current.Provider != originalProvider && newToken == "" {
-		return nil, errors.New("a new token is required when changing provider")
 	}
 	if err := validate(current.Name, current.Provider, newToken, current.DestinationID, false); err != nil {
 		return nil, err
