@@ -279,12 +279,16 @@ h3 { font-size: 0.82rem; margin-bottom: var(--space-2); color: var(--muted); fon
 .metric-note { color: var(--faint); font-size: 0.78rem; }
 .player-summary-card { container-type: inline-size; color: var(--text); text-decoration: none; cursor: pointer; }
 .player-summary-card:hover { border-color: var(--accent); background: var(--surface-2); }
+.overview-performance-card { color: var(--text); text-decoration: none; cursor: pointer; }
+.overview-performance-card:hover { border-color: var(--accent); background: var(--surface-2); color: var(--text); }
+.overview-performance-label-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .player-summary-label-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .player-summary-main { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; }
 .player-summary-count { flex: 0 0 auto; white-space: nowrap; }
 .player-face-variants { min-width: 0; display: block; }
 .player-summary-arrow { width: 18px; height: 18px; flex: 0 0 18px; color: var(--muted); }
 .player-summary-card:hover .player-summary-arrow { color: var(--accent); }
+.overview-performance-card:hover .player-summary-arrow { color: var(--accent); }
 .player-face-stack { display: flex; align-items: center; justify-content: flex-end; padding-left: var(--space-2); }
 .player-face-stack.capacity-5, .player-face-stack.capacity-4, .player-face-stack.capacity-3, .player-face-stack.capacity-2, .player-face-stack.capacity-1 { display: none; }
 .overview-player-face { position: relative; width: 36px; height: 36px; display: block; flex: 0 0 36px; margin-left: -8px; border: 1px solid var(--border-strong); background: var(--inset); overflow: hidden; }
@@ -426,6 +430,8 @@ tr:hover td { background: var(--surface-2); }
 .performance-section-heading h2 > span { height: 44px; display: flex; align-items: center; line-height: 1; transform: translateY(3px); }
 .performance-section-heading h2 .performance-section-icon { width: 32px; height: 32px; flex: 0 0 32px; align-self: center; color: var(--accent); transform: none; }
 .performance-section-heading p { margin-bottom: 0; }
+.performance-jump-highlight { border-color: var(--accent) !important; outline: 2px solid var(--accent); outline-offset: -2px; }
+.performance-jump-highlight, .performance-jump-highlight * { color: var(--accent) !important; }
 .performance-storage-refresh { width: 40px; height: 40px; min-height: 40px; flex: 0 0 40px; align-self: flex-start; margin-top: var(--space-1); padding: 0; color: var(--accent); }
 .performance-storage-refresh .icon { width: 28px; height: 28px; }
 .performance-storage-refresh.is-loading .icon { animation: performance-refresh-spin 900ms linear infinite; }

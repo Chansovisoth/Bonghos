@@ -510,6 +510,7 @@ const S = {
   commandHistoryAt: -1,
   perf: [],
   perfStorage: null,
+  performanceTarget: "",
   perfDefaultIntervalSeconds: 10,
   perfIntervalSeconds: 0,
   uptimeBase: null,
@@ -564,6 +565,8 @@ const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
 const PERFORMANCE_INTERVAL_OPTIONS = [2, 5, 10, 30, 60];
 let demoPerformanceTimer = null;
 let performanceStorageRequest = 0;
+let performanceJumpStartTimer = null;
+let performanceJumpTimer = null;
 
 function savedPerformanceInterval() {
   const seconds = Number(localStorage.getItem(PERFORMANCE_INTERVAL_KEY) || 0);
@@ -904,6 +907,7 @@ function syncHash(page, replace) {
 function navigate(page, opts = {}) {
   const next = pageAllowed(page) ? page : defaultPage();
   S.page = next;
+  S.performanceTarget = next === "performance" ? (opts.performanceTarget || "") : "";
   S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers");
   setSidebarOpen(false);
   if (!opts.fromHash) syncHash(next, !!opts.replaceHash);
@@ -1063,16 +1067,21 @@ async function pageOverview(main) {
       serverStatusCard(d.state, inst),
       statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
       playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
-      statCard("CPU", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—", "whole-machine average", "overview-live-cpu")),
+      statCard("CPU", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—", "whole-machine average",
+        "overview-live-cpu", "performance-host-cpu-card")),
 
     // Host health, previously a separate tab.
     el("div", { class: "grid cols-4 flow-section overview-stat-grid" },
-      statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)", "overview-live-rss"),
+      statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)",
+        "overview-live-rss", "allocated-memory-card"),
       statCard("Host memory", hostMemTotal > 0 ? fmtBytes(memUsed) : "—",
-        hostMemTotal > 0 ? "of " + fmtBytes(hostMemTotal) : "", "overview-live-host-memory"),
+        hostMemTotal > 0 ? "of " + fmtBytes(hostMemTotal) : "",
+        "overview-live-host-memory", "host-memory-card"),
       statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
-        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure", "overview-live-disk-free"),
-      statCard("Load average", Number.isFinite(loadAverage) ? loadAverage.toFixed(2) : "—", "1 minute", "overview-live-load")),
+        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure",
+        "overview-live-disk-free", "performance-machine-storage-card"),
+      statCard("Load average", Number.isFinite(loadAverage) ? loadAverage.toFixed(2) : "—", "1 minute",
+        "overview-live-load", "performance-load-card")),
 
     // Trends, previously the Performance tab.
     el("div", { class: "grid cols-2 flow-section" },
@@ -1156,11 +1165,21 @@ function updateOverviewTrendCharts() {
     fmtBytes, "overview-trend-memory"));
 }
 
-function statCard(title, value, sub, valueId = "") {
+function statCard(title, value, sub, valueId = "", performanceTarget = "") {
   const valueAttrs = { class: "metric-value" };
   if (valueId) valueAttrs.id = valueId;
-  return el("div", { class: "card metric" },
-    el("div", { class: "metric-label" }, title),
+  const attrs = { class: "card metric" + (performanceTarget ? " overview-performance-card" : "") };
+  if (performanceTarget) {
+    attrs.href = "#performance";
+    attrs["aria-label"] = `${title}: ${value}. Open in Performance.`;
+    attrs.onclick = (event) => {
+      event.preventDefault();
+      navigate("performance", { performanceTarget });
+    };
+  }
+  return el(performanceTarget ? "a" : "div", attrs,
+    el("div", { class: "metric-label" + (performanceTarget ? " overview-performance-label-row" : "") },
+      title, performanceTarget ? solarIcon("alt-arrow-right-linear", "player-summary-arrow") : null),
     el("div", valueAttrs, String(value)),
     el("div", { class: "metric-note" }, sub || ""));
 }
@@ -2318,6 +2337,7 @@ async function pagePerformance(main) {
   syncPageSubscription("performance");
   updatePerformanceView(current || latestPerformanceSample());
   renderStorageVisual();
+  activatePendingPerformanceTarget();
   refreshPerformanceStorage();
 }
 
@@ -2357,7 +2377,7 @@ function latestPerformanceSample() {
 }
 
 function performanceReadout(label, id, note) {
-  return el("div", { class: "performance-readout" },
+  return el("div", { class: "performance-readout", id: `${id}-card` },
     el("div", { class: "metric-label" }, label),
     el("div", { class: "performance-readout-value mono", id }, "—"),
     el("div", { class: "metric-note", id: `${id}-note` }, note));
@@ -2370,7 +2390,7 @@ function performanceSectionTitle(id, label, description, icon) {
 }
 
 function performanceMeter(label, id) {
-  return el("div", { class: "performance-meter" },
+  return el("div", { class: "performance-meter", id: `${id}-card` },
     el("div", { class: "performance-meter-head" },
       el("span", { class: "metric-label" }, label),
       el("strong", { class: "mono", id: `${id}-percent` }, "—")),
@@ -2389,6 +2409,31 @@ function performanceChartPanel(title, description, id) {
 function setNodeText(id, value) {
   const node = $("#" + id);
   if (node) node.textContent = value;
+}
+
+function activatePendingPerformanceTarget() {
+  if (S.page !== "performance" || !S.performanceTarget) return false;
+  const target = document.getElementById(S.performanceTarget);
+  if (!target) return false;
+  S.performanceTarget = "";
+  if (performanceJumpStartTimer) clearTimeout(performanceJumpStartTimer);
+  if (performanceJumpTimer) clearTimeout(performanceJumpTimer);
+  document.querySelectorAll(".performance-jump-highlight").forEach((node) =>
+    node.classList.remove("performance-jump-highlight"));
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  requestAnimationFrame(() => {
+    target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
+    performanceJumpStartTimer = setTimeout(() => {
+      if (!target.isConnected || S.page !== "performance") return;
+      target.classList.add("performance-jump-highlight");
+      performanceJumpTimer = setTimeout(() => {
+        target.classList.remove("performance-jump-highlight");
+        performanceJumpTimer = null;
+      }, 2000);
+      performanceJumpStartTimer = null;
+    }, reduceMotion ? 0 : 350);
+  });
+  return true;
 }
 
 function updatePerformanceMeter(id, used, total, detail) {
@@ -2564,6 +2609,7 @@ function renderStorageVisual(sample = S.perfStorage) {
   const timestamp = sample.collected_at || sample.at;
   host.replaceChildren(el("div", { class: "grid cols-2 performance-storage-distributions" },
     storageDonutChart({
+      id: "performance-machine-storage-card",
       title: "Machine filesystem",
       description: "Filesystem containing Bonghos",
       total: diskTotal,
@@ -2588,12 +2634,15 @@ function renderStorageVisual(sample = S.perfStorage) {
         { label: "Other", value: remaining, tone: "warning" },
       ],
     })));
+  activatePendingPerformanceTarget();
 }
 
-function storageDonutChart({ title, description, total, segments, timestamp, emptyMessage }) {
+function storageDonutChart({ id = "", title, description, total, segments, timestamp, emptyMessage }) {
+  const attrs = { class: "card performance-storage-panel" };
+  if (id) attrs.id = id;
   const heading = el("div", { class: "performance-chart-heading" },
     el("div", {}, el("h3", {}, title), el("p", { class: "metric-note" }, description)));
-  if (total <= 0) return el("div", { class: "card performance-storage-panel" }, heading,
+  if (total <= 0) return el("div", attrs, heading,
     el("div", { class: "performance-chart-empty" }, emptyMessage));
 
   const svg = svgElement("svg", { class: "performance-donut", viewBox: "0 0 240 240", role: "img", "aria-label": `${title} distribution` });
@@ -2651,7 +2700,7 @@ function storageDonutChart({ title, description, total, segments, timestamp, emp
       target.addEventListener("blur", showTotal);
     });
   });
-  return el("div", { class: "card performance-storage-panel" }, heading,
+  return el("div", attrs, heading,
     el("div", { class: "performance-donut-layout" },
       el("div", { class: "performance-donut-plot" }, svg, el("div", { class: "performance-donut-center" }, centerValue, centerLabel)),
       el("div", { class: "performance-donut-legend" }, ...entries.map((entry) => entry.row), detail)));
