@@ -465,7 +465,6 @@ const S = {
   perf: [],
   perfDefaultIntervalSeconds: 10,
   perfIntervalSeconds: 0,
-  perfStorageView: "distribution",
   uptimeBase: null,
 };
 const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
@@ -515,7 +514,6 @@ const PAGE_TOPICS = {
 };
 let currentPageTopic = null;
 const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
-const PERFORMANCE_STORAGE_VIEW_KEY = "bonghos.performance.storage-view";
 const PERFORMANCE_INTERVAL_OPTIONS = [2, 5, 10, 30, 60];
 let demoPerformanceTimer = null;
 
@@ -525,7 +523,6 @@ function savedPerformanceInterval() {
 }
 
 S.perfIntervalSeconds = savedPerformanceInterval();
-S.perfStorageView = localStorage.getItem(PERFORMANCE_STORAGE_VIEW_KEY) === "trend" ? "trend" : "distribution";
 
 function performanceSubscription() {
   const message = { action: "subscribe", topic: "performance" };
@@ -2233,10 +2230,7 @@ async function pagePerformance(main) {
     el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-storage-title" },
       el("div", { class: "performance-section-heading" },
         performanceSectionTitle("performance-storage-title", "Storage",
-          "Machine filesystem capacity and storage managed by Bonghos.", "database-linear"),
-        el("div", { class: "performance-view-toggle", role: "group", "aria-label": "Storage chart view" },
-          el("button", { class: "btn small", type: "button", "data-storage-view": "distribution", onclick: () => setStorageView("distribution") }, "Distribution"),
-          el("button", { class: "btn small", type: "button", "data-storage-view": "trend", onclick: () => setStorageView("trend") }, "Trend"))),
+          "Machine filesystem capacity and storage managed by Bonghos.", "database-linear")),
       el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
 
   syncPageSubscription("performance");
@@ -2254,12 +2248,6 @@ function setPerformanceInterval(seconds) {
   wsSend(performanceSubscription());
   syncDemoPerformanceStream();
   updatePerformanceFreshness();
-}
-
-function setStorageView(view) {
-  S.perfStorageView = view === "trend" ? "trend" : "distribution";
-  localStorage.setItem(PERFORMANCE_STORAGE_VIEW_KEY, S.perfStorageView);
-  renderStorageVisual(latestPerformanceSample());
 }
 
 function sampleTimestamp(sample) {
@@ -2426,37 +2414,6 @@ function renderCPUCoreGrid(sample) {
 function renderStorageVisual(sample) {
   const host = $("#performance-storage-visual");
   if (!host || !sample) return;
-  document.querySelectorAll("[data-storage-view]").forEach((button) => {
-    const active = button.dataset.storageView === S.perfStorageView;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-pressed", String(active));
-  });
-  if (S.perfStorageView === "trend") {
-    const diskPanel = performanceChartPanel("Machine filesystem", "Total, used, and available filesystem capacity", "performance-chart-disk-trend");
-    const projectPanel = performanceChartPanel("Bonghos", "Total size split across servers, backups, and system files", "performance-chart-project-trend");
-    host.replaceChildren(el("div", { class: "grid cols-2 performance-storage-trends" }, diskPanel, projectPanel));
-    const diskHost = $("#performance-chart-disk-trend");
-    const projectHost = $("#performance-chart-project-trend");
-    if (diskHost) diskHost.replaceChildren(timeSeriesChart(S.perf, {
-      label: "Machine filesystem capacity over the last hour", min: 0, axisFormat: fmtBytes,
-      series: [
-        { label: "Used", tone: "accent", area: true, value: (s) => Number(s.disk_total) - Number(s.disk_free), format: fmtBytes },
-        { label: "Available", tone: "empty", value: (s) => Number(s.disk_free), format: fmtBytes },
-        { label: "Total", tone: "warning", value: (s) => Number(s.disk_total), format: fmtBytes },
-      ],
-    }));
-    if (projectHost) projectHost.replaceChildren(timeSeriesChart(S.perf, {
-      label: "Bonghos storage sizes over the last hour", min: 0, axisFormat: fmtBytes,
-      series: [
-        { label: "Total", tone: "warning", value: (s) => Number(s.bonghos_dir_bytes), format: fmtBytes },
-        { label: "Servers", tone: "accent", area: true, value: (s) => Number(s.server_dir_bytes), format: fmtBytes },
-        { label: "Backups", tone: "info", value: (s) => Number(s.backup_dir_bytes), format: fmtBytes },
-        { label: "System", tone: "success", value: (s) => Number(s.system_dir_bytes), format: fmtBytes },
-      ],
-    }));
-    return;
-  }
-
   const diskTotal = Math.max(0, Number(sample.disk_total) || 0);
   const diskFree = Math.max(0, Math.min(diskTotal, Number(sample.disk_free) || 0));
   const bonghosTotal = Math.max(0, Number(sample.bonghos_dir_bytes) || 0);
