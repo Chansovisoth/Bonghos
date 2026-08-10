@@ -61,6 +61,7 @@ const BUTTON_ICONS = {
   "Sign out": "logout-2-linear",
   "Start": "play-linear",
   "Stop": "stop-linear",
+  "Use crop": "gallery-linear",
   "Verify": "shield-check-linear",
   "list": "users-group-rounded-linear",
   "save-all": "diskette-linear",
@@ -1787,7 +1788,7 @@ function loadCropImage(src) {
   });
 }
 
-async function openServerIconCropper(file, server) {
+async function openServerIconCropper(file, onCropped) {
   if (!SERVER_ICON_TYPES.has(file.type)) {
     return toast("Choose a PNG, JPEG, or WebP image", "err");
   }
@@ -1819,7 +1820,6 @@ async function openServerIconCropper(file, server) {
   let centerX = image.naturalWidth / 2;
   let centerY = image.naturalHeight / 2;
   let drag = null;
-  let saving = false;
 
   function cropRect() {
     const size = Math.max(1, Math.min(image.naturalWidth, image.naturalHeight, cropSize));
@@ -1885,49 +1885,33 @@ async function openServerIconCropper(file, server) {
 
   modal("Crop server icon", [stage, controls], [
     ["Cancel", "ghost", (close) => close()],
-    ["Save icon", "primary", async (close) => {
-      if (saving) return;
-      saving = true;
+    ["Use crop", "primary", (close) => {
       const crop = cropRect();
       const size = Math.max(1, Math.floor(crop.size));
       const x = Math.max(0, Math.min(image.naturalWidth - size, Math.round(crop.x)));
       const y = Math.max(0, Math.min(image.naturalHeight - size, Math.round(crop.y)));
-      try {
-        if (DEMO_MODE) {
-          const output = document.createElement("canvas");
-          output.width = 64;
-          output.height = 64;
-          const outputContext = output.getContext("2d");
-          outputContext.imageSmoothingEnabled = true;
-          outputContext.imageSmoothingQuality = "high";
-          outputContext.drawImage(image, x, y, size, size, 0, 0, 64, 64);
-          const demoServer = DEMO_SERVERS.find((item) => item.id === server.id);
-          if (demoServer) {
-            demoServer.demo_icon = output.toDataURL("image/png");
-            demoServer.icon_revision = (demoServer.icon_revision || 0) + 1;
-          }
-        } else {
-          const form = new FormData();
-          form.append("icon", file, file.name);
-          form.append("crop", `${x},${y},${size}`);
-          const result = await api(`/servers/${server.id}/icon`, { method: "POST", body: form });
-          server.icon_revision = result.icon_revision;
-          const cached = S.servers.find((item) => item.id === server.id);
-          if (cached) cached.icon_revision = result.icon_revision;
-        }
-        close();
-        toast("Server icon updated", "ok");
-        renderPage();
-      } catch (error) {
-        saving = false;
-        toast(error.message, "err");
-      }
+      const output = document.createElement("canvas");
+      output.width = 64;
+      output.height = 64;
+      const outputContext = output.getContext("2d");
+      outputContext.imageSmoothingEnabled = true;
+      outputContext.imageSmoothingQuality = "high";
+      outputContext.drawImage(image, x, y, size, size, 0, 0, 64, 64);
+      onCropped({ file, x, y, size, previewURL: output.toDataURL("image/png") });
+      close();
     }],
   ]);
 }
 
-function serverIconConfigurationCard(server) {
+function serverIconConfigurationCard(server, onChange) {
   const preview = el("div", { class: "configuration-server-icon-preview" }, serverCardIcon(server));
+  const showPending = (pending) => preview.replaceChildren(el("img", {
+    class: "server-card-icon",
+    src: pending.previewURL,
+    alt: "Pending server icon",
+    width: 64,
+    height: 64,
+  }));
   const input = el("input", {
     class: "server-icon-file-input",
     type: "file",
@@ -1937,17 +1921,22 @@ function serverIconConfigurationCard(server) {
   input.addEventListener("change", () => {
     const file = input.files && input.files[0];
     input.value = "";
-    if (file) openServerIconCropper(file, server);
+    if (file) openServerIconCropper(file, (pending) => {
+      showPending(pending);
+      onChange(pending);
+    });
   });
   const changeButton = el("button", { class: "btn", onclick: () => input.click() },
     solarIcon("gallery-linear"), "Change icon");
-  return el("div", { class: "card configuration-server-icon-card" },
+  const card = el("div", { class: "card configuration-server-icon-card" },
     preview,
     el("div", { class: "configuration-server-icon-copy" },
       el("strong", {}, "Minecraft server icon"),
-      el("p", { class: "muted" }, "Upload a PNG, JPEG, or WebP image. Crop it here and Bonghos will save a 64×64 PNG."),
+      el("p", { class: "muted" }, "Upload a PNG, JPEG, or WebP image. Crop it here, then click Save changes to store the 64×64 PNG."),
       can("server.icon.manage") ? el("div", { class: "actions" }, changeButton, input) :
         el("p", { class: "hint" }, "You do not have permission to change this icon.")));
+  card.resetPreview = () => preview.replaceChildren(serverCardIcon(server));
+  return card;
 }
 
 async function pageConfiguration(main) {
@@ -1987,6 +1976,14 @@ async function pageConfiguration(main) {
     el("div", { class: "field-row" }, el("label", {}, "Crash restart policy", policy),
       el("span", { class: "hint" }, "Crash-loop protection pauses automatic restarts after repeated rapid crashes.")));
 
+  let pendingIcon = null;
+  let iconChangeVersion = 0;
+  const iconCard = serverIconConfigurationCard(inst, (pending) => {
+    pendingIcon = pending;
+    iconChangeVersion++;
+    updateActions();
+  });
+
   const currentState = () => ({
     xms: xms.value,
     xmx: xmx.value,
@@ -1997,6 +1994,7 @@ async function pageConfiguration(main) {
     recoverAfterUncleanShutdown: recover.checked,
     bootDelaySeconds: delay.value,
     restartPolicy: policy.value,
+    iconChangeVersion,
   });
   let baseline = currentState();
   let saving = false;
@@ -2029,6 +2027,9 @@ async function pageConfiguration(main) {
     recover.checked = baseline.recoverAfterUncleanShutdown;
     delay.value = baseline.bootDelaySeconds;
     policy.value = baseline.restartPolicy;
+    pendingIcon = null;
+    iconChangeVersion = baseline.iconChangeVersion;
+    iconCard.resetPreview();
     updateActions();
   }
 
@@ -2061,6 +2062,28 @@ async function pageConfiguration(main) {
         if (value === baseline.properties[key]) continue;
         await api("/configuration/property", { method: "POST", json: { key, value } });
         restartRequired = true;
+      }
+
+      if (pendingIcon && next.iconChangeVersion !== baseline.iconChangeVersion) {
+        if (DEMO_MODE) {
+          const demoServer = DEMO_SERVERS.find((item) => item.id === inst.id);
+          if (demoServer) {
+            demoServer.demo_icon = pendingIcon.previewURL;
+            demoServer.icon_revision = (demoServer.icon_revision || 0) + 1;
+            inst.demo_icon = demoServer.demo_icon;
+            inst.icon_revision = demoServer.icon_revision;
+          }
+        } else {
+          const form = new FormData();
+          form.append("icon", pendingIcon.file, pendingIcon.file.name);
+          form.append("crop", `${pendingIcon.x},${pendingIcon.y},${pendingIcon.size}`);
+          const result = await api(`/servers/${inst.id}/icon`, { method: "POST", body: form });
+          inst.icon_revision = result.icon_revision;
+          const cached = S.servers.find((item) => item.id === inst.id);
+          if (cached) cached.icon_revision = result.icon_revision;
+        }
+        pendingIcon = null;
+        iconCard.resetPreview();
       }
 
       baseline = currentState();
@@ -2113,7 +2136,7 @@ async function pageConfiguration(main) {
         el("div", { class: "field-row" }, el("label", {}, "Startup script", scriptSel)),
         el("div", { class: "field-row flow-section" }, el("label", {}, "Java installation", javaSel)))),
     el("h2", {}, "Server icon"),
-    serverIconConfigurationCard(inst),
+    iconCard,
     el("h2", {}, "server.properties"),
     el("div", { class: "card" }, propRows.length ? propRows : el("p", { class: "muted" }, "No server.properties found yet (it is created on first start).")),
     el("h2", {}, "Automation"),
