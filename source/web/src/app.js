@@ -442,8 +442,36 @@ const S = {
   commandHistory: [],
   commandHistoryAt: -1,
   perf: [],
+  uptimeBase: null,
 };
 const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
+
+function setUptimeBaseline(sample) {
+  const seconds = Number(sample?.uptime_seconds);
+  if (!Number.isFinite(seconds) || seconds < 0 || !sample?.java_pid) {
+    S.uptimeBase = null;
+    return;
+  }
+  S.uptimeBase = {
+    seconds: Math.floor(seconds),
+    at: Date.now(),
+    pid: sample.java_pid,
+  };
+}
+
+function currentUptimeSeconds() {
+  if (!S.uptimeBase) return null;
+  return S.uptimeBase.seconds + Math.floor((Date.now() - S.uptimeBase.at) / 1000);
+}
+
+function updateUptimeDisplay() {
+  const node = $("#uptime-value");
+  if (!node) return;
+  const seconds = currentUptimeSeconds();
+  node.textContent = seconds === null ? "—" : fmtDur(seconds);
+}
+
+setInterval(updateUptimeDisplay, 1000);
 
 // ---------------------------------------------------------------------------
 // websocket
@@ -525,6 +553,8 @@ function handleEvent(m) {
   } else if (topic === "performance" && type === "sample") {
     S.perf.push(data);
     if (S.perf.length > 360) S.perf.shift();
+    setUptimeBaseline(data);
+    updateUptimeDisplay();
     if (S.page === "performance" || S.page === "overview") updateLiveStats(data);
   } else if (topic === "players") {
     refreshPlayerCount();
@@ -903,6 +933,7 @@ async function pageOverview(main) {
   S.status = { state: d.state, detail: d.supervisor };
   renderStatusPill();
   const s = d.sample || {};
+  setUptimeBaseline(s);
   const inst = d.instance;
 
   // Health, host and trends live here together. Knowing whether the server is
@@ -928,7 +959,7 @@ async function pageOverview(main) {
     // What is happening right now.
     el("div", { class: "grid cols-4 overview-stat-grid" },
       serverStatusCard(d.state, inst),
-      statCard("Uptime", fmtDur(s.uptime_seconds), s.java_pid ? "Java PID " + s.java_pid : "not running"),
+      statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
       playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
       statCard("CPU", (s.cpu_percent ?? 0).toFixed(1) + "%", "of one core = 100%")),
 
@@ -1007,10 +1038,12 @@ function trendCard(title, samples, pick, fmt) {
     values.length > 1 ? sparklineNode(values) : el("p", { class: "muted" }, "Collecting samples…"));
 }
 
-function statCard(title, value, sub) {
+function statCard(title, value, sub, valueId = "") {
+  const valueAttrs = { class: "metric-value" };
+  if (valueId) valueAttrs.id = valueId;
   return el("div", { class: "card metric" },
     el("div", { class: "metric-label" }, title),
-    el("div", { class: "metric-value" }, String(value)),
+    el("div", valueAttrs, String(value)),
     el("div", { class: "metric-note" }, sub || ""));
 }
 
