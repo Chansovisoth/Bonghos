@@ -215,26 +215,33 @@ func (a *App) metricsLoop(ctx context.Context) {
 	if interval < 2*time.Second {
 		interval = 10 * time.Second
 	}
-	slow := time.NewTicker(interval)
-	defer slow.Stop()
+	pulse := time.NewTicker(1 * time.Second)
+	defer pulse.Stop()
 	pruneT := time.NewTicker(1 * time.Hour)
 	defer pruneT.Stop()
+	var lastSampleAt time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-pruneT.C:
 			monitoring.Prune(a.DB, time.Duration(a.Cfg.MetricsRetentionDays)*24*time.Hour)
-		case <-slow.C:
-			// Sample at a lower rate when nobody is watching.
-			watching := a.Hub.SubscriberCount("performance") > 0 || a.Hub.SubscriberCount("overview") > 0
+		case now := <-pulse.C:
+			// Keep the configured history cadence, but temporarily collect faster
+			// when an open Performance view asks for a more responsive feed.
+			effective := interval
+			if a.Hub.SubscriberCount("performance") > 0 {
+				effective = a.Hub.MinimumInterval("performance", interval)
+			}
+			if !lastSampleAt.IsZero() && now.Sub(lastSampleAt)+250*time.Millisecond < effective {
+				continue
+			}
 			s := a.collectSample()
 			instID := a.activeInstanceIDQuiet()
 			monitoring.StoreSample(a.DB, instID, s)
-			if watching {
-				a.Hub.Broadcast("performance", "sample", s)
-				a.Hub.Broadcast("overview", "sample", s)
-			}
+			lastSampleAt = now
+			a.Hub.BroadcastDue("performance", "sample", s, interval)
+			a.Hub.BroadcastDue("overview", "sample", s, interval)
 		}
 	}
 }

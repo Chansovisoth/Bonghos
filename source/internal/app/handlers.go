@@ -83,6 +83,7 @@ func (a *App) routes() http.Handler {
 
 	// --- monitoring ---------------------------------------------------------
 	mux.HandleFunc("GET /api/metrics", a.requirePerm(authorization.PermServerView, a.handleMetrics))
+	mux.HandleFunc("GET /api/metrics/config", a.requirePerm(authorization.PermServerView, a.handleMetricsConfig))
 	mux.HandleFunc("GET /api/overview", a.requirePerm(authorization.PermServerView, a.handleOverview))
 
 	// --- files --------------------------------------------------------------
@@ -825,6 +826,14 @@ func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, samples)
+}
+
+func (a *App) handleMetricsConfig(w http.ResponseWriter, r *http.Request) {
+	interval := a.Cfg.MetricsIntervalSec
+	if interval < 2 {
+		interval = 10
+	}
+	writeJSON(w, 200, map[string]int{"interval_seconds": interval})
 }
 
 func (a *App) handleHost(w http.ResponseWriter, r *http.Request) {

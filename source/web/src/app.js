@@ -278,11 +278,17 @@ const DEMO_CONSOLE = [
   "[19:29:04] [Server thread/ERROR]: Example datapack warning for visual review only",
 ];
 const DEMO_METRICS = Array.from({ length: 60 }, (_, i) => ({
-  at: new Date(Date.now() - (59 - i) * 60000).toISOString(),
+  collected_at: new Date(Date.now() - (59 - i) * 60000).toISOString(),
   cpu_percent: 18 + Math.sin(i / 6) * 11 + (i % 13),
   rss_bytes: (2600 + Math.sin(i / 8) * 220 + i * 3) * 1024 * 1024,
+  host_mem_total: 32 * 1024 * 1024 * 1024,
+  host_mem_avail: (18 - Math.sin(i / 9) * 1.4) * 1024 * 1024 * 1024,
+  load1: 0.65 + Math.sin(i / 7) * 0.32,
+  disk_total: 512 * 1024 * 1024 * 1024,
   online_players: i % 17 > 9 ? 4 : 3,
   disk_free: (186 - i * 0.08) * 1024 * 1024 * 1024,
+  uptime_seconds: 86400 + i * 60,
+  java_pid: 4281,
 }));
 
 const CONSOLE_LINE_LIMIT = 1000;
@@ -342,6 +348,7 @@ async function demoApi(path, opts = {}) {
     };
     case "/host": return {
       bind_address: "127.0.0.1", port: 8080, home: "/home/demo/bonghos",
+      metrics_interval_seconds: 10,
       mem_total: 32 * 1024 * 1024 * 1024, mem_available: 18 * 1024 * 1024 * 1024,
       disk_total: 512 * 1024 * 1024 * 1024, disk_free: 186 * 1024 * 1024 * 1024,
       load1: 0.82, systemd: true, service_bonghos: "active", service_minecraft: "running",
@@ -354,6 +361,7 @@ async function demoApi(path, opts = {}) {
       { occurred_at: new Date(Date.now() - 48 * 60000).toISOString(), severity: "info", message: "Scheduled restart completed" },
     ] };
     case "/metrics": return DEMO_METRICS;
+    case "/metrics/config": return { interval_seconds: 10 };
     case "/players": return { players: [
       { username: "iKlaude", online: true, op: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
       { username: "Alex", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 3922 },
@@ -442,6 +450,8 @@ const S = {
   commandHistory: [],
   commandHistoryAt: -1,
   perf: [],
+  perfDefaultIntervalSeconds: 10,
+  perfIntervalSeconds: 0,
   uptimeBase: null,
 };
 const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
@@ -490,6 +500,22 @@ const PAGE_TOPICS = {
   activity: "activity",
 };
 let currentPageTopic = null;
+const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
+const PERFORMANCE_INTERVAL_OPTIONS = [2, 5, 10, 30, 60];
+let demoPerformanceTimer = null;
+
+function savedPerformanceInterval() {
+  const seconds = Number(localStorage.getItem(PERFORMANCE_INTERVAL_KEY) || 0);
+  return PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 0;
+}
+
+S.perfIntervalSeconds = savedPerformanceInterval();
+
+function performanceSubscription() {
+  const message = { action: "subscribe", topic: "performance" };
+  if (S.perfIntervalSeconds) message.interval_seconds = S.perfIntervalSeconds;
+  return message;
+}
 
 function wsSend(obj) {
   if (S.ws && S.ws.readyState === WebSocket.OPEN) {
@@ -503,12 +529,17 @@ function wsSend(obj) {
 // new one. Base topics are untouched.
 function syncPageSubscription(page) {
   const next = PAGE_TOPICS[page] || null;
-  if (next === currentPageTopic) return;
+  if (next === currentPageTopic) {
+    if (next === "performance") wsSend(performanceSubscription());
+    syncDemoPerformanceStream();
+    return;
+  }
   if (currentPageTopic && !BASE_TOPICS.includes(currentPageTopic)) {
     wsSend({ action: "unsubscribe", topic: currentPageTopic });
   }
   currentPageTopic = next;
-  if (next) wsSend({ action: "subscribe", topic: next });
+  if (next) wsSend(next === "performance" ? performanceSubscription() : { action: "subscribe", topic: next });
+  syncDemoPerformanceStream();
 }
 
 function connectWS() {
@@ -526,12 +557,14 @@ function connectWS() {
     // what we think is subscribed and re-send for the current page.
     currentPageTopic = null;
     syncPageSubscription(S.page);
+    updatePerformanceFreshness();
   };
   ws.onmessage = (ev) => {
     let m; try { m = JSON.parse(ev.data); } catch { return; }
     handleEvent(m);
   };
   ws.onclose = () => {
+    updatePerformanceFreshness();
     if (!S.me) return;
     setTimeout(connectWS, wsRetry);
     wsRetry = Math.min(wsRetry * 2, 15000);
@@ -550,12 +583,11 @@ function handleEvent(m) {
     if (lifecycleSettled) S.lifecyclePending = null;
     renderStatusPill();
     if (S.page === "overview" || (lifecycleSettled && S.page === "console")) renderPage();
-  } else if (topic === "performance" && type === "sample") {
-    S.perf.push(data);
-    if (S.perf.length > 360) S.perf.shift();
+  } else if (type === "sample" && ((S.page === "performance" && topic === "performance") || (S.page === "overview" && topic === "overview"))) {
+    appendPerformanceSample(data);
     setUptimeBaseline(data);
     updateUptimeDisplay();
-    if (S.page === "performance" || S.page === "overview") updateLiveStats(data);
+    updateLiveStats(data);
   } else if (topic === "players") {
     refreshPlayerCount();
     if (S.page === "players" || S.page === "overview") renderPage();
@@ -961,7 +993,7 @@ async function pageOverview(main) {
       serverStatusCard(d.state, inst),
       statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
       playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
-      statCard("CPU", (s.cpu_percent ?? 0).toFixed(1) + "%", "of one core = 100%")),
+      statCard("CPU", (s.cpu_percent ?? 0).toFixed(1) + "%", "of one core = 100%", "overview-live-cpu")),
 
     // Host health, previously a separate tab.
     el("div", { class: "grid cols-4 flow-section overview-stat-grid" },
@@ -2112,27 +2144,464 @@ function scheduleForm(s) {
 
 // ----- performance ----------------------------------------------------------
 async function pagePerformance(main) {
-  const hist = await api("/metrics?hours=1");
-  S.perf = hist || [];
+  const [history, config, overview] = await Promise.all([
+    api("/metrics?hours=1"),
+    api("/metrics/config").catch(() => ({ interval_seconds: 10 })),
+    api("/overview").catch(() => null),
+  ]);
+  S.perf = [];
+  (history || []).forEach(appendPerformanceSample);
+  const current = overview?.sample;
+  if (current) {
+    appendPerformanceSample(current);
+    setUptimeBaseline(current);
+  }
+  if (overview?.state) S.status = { state: overview.state, detail: overview.supervisor };
+  const configuredInterval = Number(config?.interval_seconds);
+  S.perfDefaultIntervalSeconds = Number.isFinite(configuredInterval) && configuredInterval >= 2
+    ? configuredInterval : 10;
+
+  const intervalSelect = el("select", {
+    id: "performance-interval",
+    onchange: (event) => setPerformanceInterval(Number(event.target.value)),
+  },
+  el("option", { value: "0" }, `Default (${formatInterval(S.perfDefaultIntervalSeconds)})`),
+  ...PERFORMANCE_INTERVAL_OPTIONS.map((seconds) =>
+    el("option", { value: String(seconds) }, `Every ${formatInterval(seconds)}`)));
+  intervalSelect.value = String(S.perfIntervalSeconds);
+
   main.innerHTML = "";
   main.append(
-    pageHeader("Performance", "One-hour process and host history. Process memory is Java RSS, not configured heap."),
-    el("div", { class: "grid cols-2" },
-      el("div", { class: "card graph-card" }, el("h3", {}, "CPU (% of one core)"), el("div", { class: "chart", id: "chart-cpu" })),
-      el("div", { class: "card graph-card" }, el("h3", {}, "Process memory"), el("div", { class: "chart", id: "chart-mem" })),
-      el("div", { class: "card graph-card" }, el("h3", {}, "Players online"), el("div", { class: "chart", id: "chart-players" })),
-      el("div", { class: "card graph-card" }, el("h3", {}, "Disk free"), el("div", { class: "chart", id: "chart-disk" }))));
-  drawCharts();
+    pageHeader("Performance", "Live Java process and Linux host telemetry for the active server. History covers the last hour.", [
+      el("label", { class: "performance-interval-control" },
+        el("span", {}, "Update interval"),
+        intervalSelect,
+        el("span", { class: "performance-interval-note", id: "performance-interval-note" })),
+    ]),
+
+    el("div", { class: "performance-feedbar", "aria-live": "polite" },
+      el("span", { class: "performance-feed-state", id: "performance-feed-state" },
+        el("span", { class: "status-square", "aria-hidden": "true" }),
+        el("span", { id: "performance-feed-label" }, "Connecting")),
+      el("span", { class: "performance-feed-detail", id: "performance-feed-detail" }),
+      el("span", { class: "performance-feed-window mono", id: "performance-feed-window" })),
+
+    el("section", { class: "panel performance-readouts", "aria-label": "Current performance" },
+      performanceReadout("Java process", "performance-process", "Process state"),
+      performanceReadout("Uptime", "performance-uptime", "Current run"),
+      performanceReadout("CPU", "performance-cpu", "100% = one core"),
+      performanceReadout("Java RSS", "performance-rss", "Resident memory, not heap"),
+      performanceReadout("Load average", "performance-load", "1 minute"),
+      performanceReadout("Players", "performance-players", "Online now")),
+
+    el("section", { class: "panel performance-resources flow-section", "aria-label": "Resource pressure" },
+      el("div", { class: "performance-section-heading" },
+        el("div", {}, el("h2", {}, "Resource pressure"), el("p", { class: "muted" }, "Capacity used now; free capacity is shown alongside each meter."))),
+      el("div", { class: "performance-meter-grid" },
+        performanceMeter("Host memory", "host-memory"),
+        performanceMeter("Java share of host", "process-memory"),
+        performanceMeter("Filesystem", "disk"))),
+
+    el("section", { class: "performance-chart-section flow-section", "aria-labelledby": "performance-trends-title" },
+      el("div", { class: "performance-section-heading" },
+        el("div", {}, el("h2", { id: "performance-trends-title" }, "Live trends"),
+          el("p", { class: "muted" }, "Hover, tap, or use the arrow keys on a chart to inspect exact samples."))),
+      el("div", { class: "grid cols-2 performance-primary-charts" },
+        performanceChartPanel("CPU", "Percent of one CPU core", "performance-chart-cpu"),
+        performanceChartPanel("Java resident memory", "Process RSS, not configured heap", "performance-chart-rss")),
+      el("div", { class: "grid cols-3 performance-secondary-charts flow-section" },
+        performanceChartPanel("Host pressure", "Memory and filesystem utilization", "performance-chart-pressure"),
+        performanceChartPanel("System load", "One-minute load average", "performance-chart-load"),
+        performanceChartPanel("Players", "Online player count", "performance-chart-players"))),
+
+    el("section", { class: "flow-section", "aria-labelledby": "performance-samples-title" },
+      el("div", { class: "performance-section-heading" },
+        el("div", {}, el("h2", { id: "performance-samples-title" }, "Recent samples"),
+          el("p", { class: "muted" }, "Newest first. Historical samples do not retain transient PID and uptime fields."))),
+      el("div", { class: "table-wrap performance-samples" },
+        el("table", {},
+          el("thead", {}, el("tr", {},
+            ...["Time", "CPU", "Java RSS", "Host used", "Load", "Disk free", "Players"].map((label) => el("th", {}, label)))),
+          el("tbody", { id: "performance-sample-rows" })))));
+
+  syncPageSubscription("performance");
+  updatePerformanceView(current || latestPerformanceSample());
 }
 
-function updateLiveStats() { if (S.page === "performance") drawCharts(); }
-
-function drawCharts() {
-  sparkline("#chart-cpu", S.perf.map((s) => s.cpu_percent || 0));
-  sparkline("#chart-mem", S.perf.map((s) => s.rss_bytes || 0), fmtBytes);
-  sparkline("#chart-players", S.perf.map((s) => s.online_players || 0));
-  sparkline("#chart-disk", S.perf.map((s) => s.disk_free || 0), fmtBytes);
+function formatInterval(seconds) {
+  return seconds === 1 ? "1 second" : `${seconds} seconds`;
 }
+
+function setPerformanceInterval(seconds) {
+  S.perfIntervalSeconds = PERFORMANCE_INTERVAL_OPTIONS.includes(seconds) ? seconds : 0;
+  if (S.perfIntervalSeconds) localStorage.setItem(PERFORMANCE_INTERVAL_KEY, String(S.perfIntervalSeconds));
+  else localStorage.removeItem(PERFORMANCE_INTERVAL_KEY);
+  wsSend(performanceSubscription());
+  syncDemoPerformanceStream();
+  updatePerformanceFreshness();
+}
+
+function sampleTimestamp(sample) {
+  const timestamp = Date.parse(sample?.collected_at || sample?.at || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function appendPerformanceSample(sample) {
+  if (!sample || !sampleTimestamp(sample)) return;
+  const timestamp = sampleTimestamp(sample);
+  const existing = S.perf.findIndex((entry) => sampleTimestamp(entry) === timestamp);
+  if (existing >= 0) S.perf[existing] = { ...S.perf[existing], ...sample };
+  else S.perf.push(sample);
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  S.perf = S.perf
+    .filter((entry) => sampleTimestamp(entry) >= cutoff)
+    .sort((a, b) => sampleTimestamp(a) - sampleTimestamp(b))
+    .slice(-5000);
+}
+
+function latestPerformanceSample() {
+  return S.perf.length ? S.perf[S.perf.length - 1] : null;
+}
+
+function performanceReadout(label, id, note) {
+  return el("div", { class: "performance-readout" },
+    el("div", { class: "metric-label" }, label),
+    el("div", { class: "performance-readout-value mono", id }, "—"),
+    el("div", { class: "metric-note", id: `${id}-note` }, note));
+}
+
+function performanceMeter(label, id) {
+  return el("div", { class: "performance-meter" },
+    el("div", { class: "performance-meter-head" },
+      el("span", { class: "metric-label" }, label),
+      el("strong", { class: "mono", id: `${id}-percent` }, "—")),
+    el("div", { class: "performance-meter-track", role: "meter", "aria-valuemin": "0", "aria-valuemax": "100", id: `${id}-meter` },
+      el("span", { class: "performance-meter-fill", id: `${id}-fill` })),
+    el("div", { class: "performance-meter-detail", id: `${id}-detail` }, "Waiting for a sample"));
+}
+
+function performanceChartPanel(title, description, id) {
+  return el("div", { class: "card performance-chart-panel" },
+    el("div", { class: "performance-chart-heading" },
+      el("div", {}, el("h3", {}, title), el("p", { class: "metric-note" }, description))),
+    el("div", { class: "performance-chart-host", id }));
+}
+
+function setNodeText(id, value) {
+  const node = $("#" + id);
+  if (node) node.textContent = value;
+}
+
+function updatePerformanceMeter(id, used, total, detail) {
+  const valid = Number.isFinite(used) && Number.isFinite(total) && total > 0;
+  const percent = valid ? Math.max(0, Math.min(100, used / total * 100)) : 0;
+  const meter = $("#" + id + "-meter");
+  const fill = $("#" + id + "-fill");
+  if (meter) meter.setAttribute("aria-valuenow", valid ? percent.toFixed(1) : "0");
+  if (fill) {
+    fill.style.width = `${percent}%`;
+    fill.dataset.pressure = percent >= 90 ? "danger" : percent >= 80 ? "warning" : "normal";
+  }
+  setNodeText(id + "-percent", valid ? percent.toFixed(1) + "%" : "—");
+  setNodeText(id + "-detail", valid ? detail : "Not available");
+}
+
+function updateLiveStats(sample) {
+  if (S.page === "performance") updatePerformanceView(sample);
+  if (S.page === "overview" && sample) {
+    setNodeText("overview-live-cpu", Number(sample.cpu_percent || 0).toFixed(1) + "%");
+  }
+}
+
+function updatePerformanceView(sample = latestPerformanceSample()) {
+  if (S.page !== "performance" || !sample) {
+    updatePerformanceFreshness();
+    return;
+  }
+  const cpu = Number(sample.cpu_percent);
+  const rss = Number(sample.rss_bytes);
+  const hostTotal = Number(sample.host_mem_total);
+  const hostAvail = Number(sample.host_mem_avail);
+  const diskTotal = Number(sample.disk_total);
+  const diskFree = Number(sample.disk_free);
+  const hostUsed = hostTotal - hostAvail;
+  const diskUsed = diskTotal - diskFree;
+  const uptime = currentUptimeSeconds() ?? Number(sample.uptime_seconds);
+
+  setNodeText("performance-process", sample.java_pid ? `PID ${sample.java_pid}` : "Stopped");
+  setNodeText("performance-process-note", sample.java_pid ? "Java process detected" : "No active Java PID");
+  setNodeText("performance-uptime", Number.isFinite(uptime) && uptime >= 0 ? fmtDur(uptime) : "—");
+  setNodeText("performance-cpu", Number.isFinite(cpu) ? cpu.toFixed(1) + "%" : "—");
+  setNodeText("performance-rss", Number.isFinite(rss) ? fmtBytes(rss) : "—");
+  setNodeText("performance-load", Number.isFinite(Number(sample.load1)) ? Number(sample.load1).toFixed(2) : "—");
+  setNodeText("performance-players", Number.isFinite(Number(sample.online_players)) ? String(sample.online_players) : "—");
+
+  updatePerformanceMeter("host-memory", hostUsed, hostTotal,
+    `${fmtBytes(hostUsed)} used · ${fmtBytes(hostAvail)} available · ${fmtBytes(hostTotal)} total`);
+  updatePerformanceMeter("process-memory", rss, hostTotal,
+    `${fmtBytes(rss)} Java RSS · ${fmtBytes(hostTotal)} host total`);
+  updatePerformanceMeter("disk", diskUsed, diskTotal,
+    `${fmtBytes(diskUsed)} used · ${fmtBytes(diskFree)} free · ${fmtBytes(diskTotal)} total`);
+
+  renderPerformanceCharts();
+  renderPerformanceSampleRows();
+  updatePerformanceFreshness();
+}
+
+function renderPerformanceCharts() {
+  const samples = S.perf;
+  const pressureValue = (used, total) => total > 0 ? Math.max(0, Math.min(100, used / total * 100)) : 0;
+  const charts = [
+    ["#performance-chart-cpu", {
+      label: "CPU over the last hour", min: 0, floorMax: 100, axisFormat: (v) => v.toFixed(0) + "%",
+      series: [{ label: "CPU", tone: "accent", area: true, value: (s) => Number(s.cpu_percent), format: (v) => v.toFixed(1) + "%" }],
+    }],
+    ["#performance-chart-rss", {
+      label: "Java resident memory over the last hour", min: 0, axisFormat: fmtBytes,
+      series: [{ label: "Java RSS", tone: "info", area: true, value: (s) => Number(s.rss_bytes), format: fmtBytes }],
+    }],
+    ["#performance-chart-pressure", {
+      label: "Host memory and filesystem utilization over the last hour", min: 0, fixedMax: 100, axisFormat: (v) => v.toFixed(0) + "%",
+      series: [
+        { label: "Memory", tone: "accent", value: (s) => pressureValue(Number(s.host_mem_total) - Number(s.host_mem_avail), Number(s.host_mem_total)), format: (v) => v.toFixed(1) + "%" },
+        { label: "Disk", tone: "success", value: (s) => pressureValue(Number(s.disk_total) - Number(s.disk_free), Number(s.disk_total)), format: (v) => v.toFixed(1) + "%" },
+      ],
+    }],
+    ["#performance-chart-load", {
+      label: "One-minute system load average over the last hour", min: 0, axisFormat: (v) => v.toFixed(2),
+      series: [{ label: "Load 1m", tone: "warning", area: true, value: (s) => Number(s.load1), format: (v) => v.toFixed(2) }],
+    }],
+    ["#performance-chart-players", {
+      label: "Online players over the last hour", min: 0, step: true, axisFormat: (v) => Math.round(v).toString(),
+      series: [{ label: "Online", tone: "success", area: true, value: (s) => Number(s.online_players), format: (v) => Math.round(v).toString() }],
+    }],
+  ];
+  charts.forEach(([selector, options]) => {
+    const host = $(selector);
+    if (host) host.replaceChildren(timeSeriesChart(samples, options));
+  });
+}
+
+function chartSamples(samples, limit = 240) {
+  if (samples.length <= limit) return samples;
+  const result = [];
+  for (let index = 0; index < limit; index++) {
+    result.push(samples[Math.round(index / (limit - 1) * (samples.length - 1))]);
+  }
+  return result;
+}
+
+function svgElement(tag, attrs = {}) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+  return node;
+}
+
+function timeSeriesChart(inputSamples, options) {
+  const samples = chartSamples((inputSamples || []).filter((sample) => sampleTimestamp(sample)));
+  if (!samples.length) return el("div", { class: "performance-chart-empty" }, "No samples in this time window.");
+
+  const width = 720, height = 220, pad = 8;
+  const series = options.series.map((entry) => ({
+    ...entry,
+    values: samples.map((sample) => {
+      const value = entry.value(sample);
+      return Number.isFinite(value) ? value : 0;
+    }),
+  }));
+  const allValues = series.flatMap((entry) => entry.values);
+  const min = options.min ?? Math.min(...allValues);
+  let max = options.fixedMax ?? Math.max(...allValues, options.floorMax ?? -Infinity);
+  if (!Number.isFinite(max)) max = min + 1;
+  if (max <= min) max = min + 1;
+  const firstAt = sampleTimestamp(samples[0]);
+  const lastAt = sampleTimestamp(samples[samples.length - 1]);
+  const timeSpan = Math.max(1, lastAt - firstAt);
+  const xAt = (sample) => pad + (sampleTimestamp(sample) - firstAt) / timeSpan * (width - pad * 2);
+  const yAt = (value) => height - pad - (value - min) / (max - min) * (height - pad * 2);
+
+  const frame = el("div", { class: "performance-chart-frame", tabindex: "0", "aria-label": options.label });
+  const svg = svgElement("svg", { viewBox: `0 0 ${width} ${height}`, preserveAspectRatio: "none", role: "img", "aria-hidden": "true" });
+  for (let tick = 0; tick <= 4; tick++) {
+    const y = pad + tick / 4 * (height - pad * 2);
+    svg.append(svgElement("line", { x1: pad, y1: y, x2: width - pad, y2: y, class: "performance-chart-gridline" }));
+  }
+  for (let tick = 0; tick <= 4; tick++) {
+    const x = pad + tick / 4 * (width - pad * 2);
+    svg.append(svgElement("line", { x1: x, y1: pad, x2: x, y2: height - pad, class: "performance-chart-gridline" }));
+  }
+
+  series.forEach((entry) => {
+    const points = entry.values.map((value, index) => ({ x: xAt(samples[index]), y: yAt(value) }));
+    let pathData = "";
+    points.forEach((point, index) => {
+      if (!index) pathData = `M ${point.x} ${point.y}`;
+      else if (options.step) pathData += ` H ${point.x} V ${point.y}`;
+      else pathData += ` L ${point.x} ${point.y}`;
+    });
+    if (entry.area) {
+      const area = `${pathData} L ${points[points.length - 1].x} ${height - pad} L ${points[0].x} ${height - pad} Z`;
+      svg.append(svgElement("path", { d: area, class: `performance-chart-area tone-${entry.tone}` }));
+    }
+    svg.append(svgElement("path", { d: pathData, class: `performance-chart-line tone-${entry.tone}` }));
+  });
+
+  const crosshair = svgElement("line", { y1: pad, y2: height - pad, class: "performance-chart-crosshair" });
+  crosshair.setAttribute("visibility", "hidden");
+  svg.append(crosshair);
+  const markers = series.map((entry) => {
+    const marker = svgElement("circle", { r: 5, class: `performance-chart-marker tone-${entry.tone}` });
+    marker.setAttribute("visibility", "hidden");
+    svg.append(marker);
+    return marker;
+  });
+  const overlay = svgElement("rect", { x: 0, y: 0, width, height, class: "performance-chart-overlay" });
+  svg.append(overlay);
+
+  const tooltip = el("div", { class: "performance-chart-tooltip", hidden: "" });
+  const legend = el("div", { class: "performance-chart-legend" }, ...series.map((entry) =>
+    el("span", {}, el("span", { class: `performance-chart-swatch tone-${entry.tone}` }),
+      `${entry.label} `, el("strong", { class: "mono" }, entry.format(entry.values[entry.values.length - 1])))));
+  const range = el("div", { class: "performance-chart-range mono" },
+    el("span", {}, new Date(firstAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
+    el("span", {}, `${options.axisFormat(min)} – ${options.axisFormat(max)}`),
+    el("span", {}, new Date(lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
+  );
+
+  let activeIndex = samples.length - 1;
+  const showSample = (index) => {
+    activeIndex = Math.max(0, Math.min(samples.length - 1, index));
+    const sample = samples[activeIndex];
+    const x = xAt(sample);
+    crosshair.setAttribute("visibility", "visible");
+    crosshair.setAttribute("x1", x);
+    crosshair.setAttribute("x2", x);
+    markers.forEach((marker, seriesIndex) => {
+      marker.setAttribute("visibility", "visible");
+      marker.setAttribute("cx", x);
+      marker.setAttribute("cy", yAt(series[seriesIndex].values[activeIndex]));
+    });
+    tooltip.hidden = false;
+    tooltip.classList.toggle("align-right", x / width > 0.7);
+    tooltip.style.left = `${x / width * 100}%`;
+    tooltip.replaceChildren(
+      el("time", { class: "mono", datetime: sample.collected_at || sample.at }, fmtTime(sample.collected_at || sample.at)),
+      ...series.map((entry) => el("div", {},
+        el("span", {}, el("span", { class: `performance-chart-swatch tone-${entry.tone}` }), entry.label),
+        el("strong", { class: "mono" }, entry.format(entry.values[activeIndex])))));
+    frame.setAttribute("aria-label", `${options.label}. ${fmtTime(sample.collected_at || sample.at)}. ${series.map((entry) => `${entry.label} ${entry.format(entry.values[activeIndex])}`).join(", ")}`);
+  };
+  const hideSample = () => {
+    if (frame === document.activeElement) return;
+    crosshair.setAttribute("visibility", "hidden");
+    markers.forEach((marker) => marker.setAttribute("visibility", "hidden"));
+    tooltip.hidden = true;
+  };
+  overlay.addEventListener("pointermove", (event) => {
+    const rect = svg.getBoundingClientRect();
+    const pointerX = (event.clientX - rect.left) / Math.max(1, rect.width) * width;
+    let nearest = 0;
+    let distance = Infinity;
+    samples.forEach((sample, index) => {
+      const nextDistance = Math.abs(xAt(sample) - pointerX);
+      if (nextDistance < distance) { nearest = index; distance = nextDistance; }
+    });
+    showSample(nearest);
+  });
+  overlay.addEventListener("pointerleave", hideSample);
+  overlay.addEventListener("pointerdown", (event) => { event.preventDefault(); frame.focus(); });
+  frame.addEventListener("focus", () => showSample(activeIndex));
+  frame.addEventListener("blur", hideSample);
+  frame.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    showSample(activeIndex + (event.key === "ArrowRight" ? 1 : -1));
+  });
+
+  frame.append(legend, svg, range, tooltip);
+  return frame;
+}
+
+function renderPerformanceSampleRows() {
+  const body = $("#performance-sample-rows");
+  if (!body) return;
+  const samples = S.perf.slice(-12).reverse();
+  if (!samples.length) {
+    body.replaceChildren(el("tr", {}, el("td", { colspan: "7", class: "muted" }, "No samples in this time window.")));
+    return;
+  }
+  body.replaceChildren(...samples.map((sample) => {
+    const hostTotal = Number(sample.host_mem_total);
+    const hostUsed = hostTotal - Number(sample.host_mem_avail);
+    return el("tr", {},
+      el("td", { class: "mono" }, new Date(sampleTimestamp(sample)).toLocaleTimeString()),
+      el("td", { class: "mono" }, Number(sample.cpu_percent || 0).toFixed(1) + "%"),
+      el("td", { class: "mono" }, fmtBytes(sample.rss_bytes)),
+      el("td", { class: "mono" }, hostTotal > 0 ? fmtBytes(hostUsed) : "—"),
+      el("td", { class: "mono" }, Number(sample.load1 || 0).toFixed(2)),
+      el("td", { class: "mono" }, fmtBytes(sample.disk_free)),
+      el("td", { class: "mono" }, String(sample.online_players ?? 0)));
+  }));
+}
+
+function updatePerformanceFreshness() {
+  if (S.page !== "performance") return;
+  const label = $("#performance-feed-label");
+  const state = $("#performance-feed-state");
+  const detail = $("#performance-feed-detail");
+  const windowNode = $("#performance-feed-window");
+  const intervalNote = $("#performance-interval-note");
+  if (!label || !state) return;
+  const interval = S.perfIntervalSeconds || S.perfDefaultIntervalSeconds;
+  const latest = latestPerformanceSample();
+  const age = latest ? Math.max(0, Date.now() - sampleTimestamp(latest)) : Infinity;
+  const connected = DEMO_MODE || (S.ws && S.ws.readyState === WebSocket.OPEN);
+  const fresh = age <= Math.max(interval * 2500, 15000);
+  state.className = "performance-feed-state " + (connected && fresh ? "is-live" : connected ? "is-waiting" : "is-offline");
+  label.textContent = DEMO_MODE ? "Demo live" : !connected ? "Reconnecting" : fresh ? "Live" : "Waiting for sample";
+  if (detail) detail.textContent = latest
+    ? `Last sample ${relativeSampleAge(age)} · ${fmtTime(latest.collected_at || latest.at)}`
+    : "No sample received yet";
+  if (windowNode) windowNode.textContent = `${S.perf.length} samples · 1 hour`;
+  if (intervalNote) intervalNote.textContent = S.perfIntervalSeconds
+    ? `This view requests ${formatInterval(S.perfIntervalSeconds)}. Server default: ${formatInterval(S.perfDefaultIntervalSeconds)}.`
+    : `Using server default: ${formatInterval(S.perfDefaultIntervalSeconds)}.`;
+}
+
+function relativeSampleAge(milliseconds) {
+  if (!Number.isFinite(milliseconds)) return "never";
+  const seconds = Math.floor(milliseconds / 1000);
+  if (seconds < 2) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
+
+function syncDemoPerformanceStream() {
+  if (demoPerformanceTimer) clearInterval(demoPerformanceTimer);
+  demoPerformanceTimer = null;
+  if (!DEMO_MODE || S.page !== "performance") return;
+  const seconds = S.perfIntervalSeconds || S.perfDefaultIntervalSeconds;
+  demoPerformanceTimer = setInterval(() => {
+    const previous = latestPerformanceSample() || DEMO_METRICS[DEMO_METRICS.length - 1];
+    const tick = Date.now() / 1000;
+    const sample = {
+      ...previous,
+      collected_at: new Date().toISOString(),
+      cpu_percent: Math.max(0, 32 + Math.sin(tick / 7) * 18 + Math.sin(tick / 2) * 5),
+      rss_bytes: Math.max(0, Number(previous.rss_bytes) + Math.sin(tick / 11) * 6 * 1024 * 1024),
+      host_mem_avail: 18 * 1024 * 1024 * 1024 - Math.sin(tick / 9) * 1.4 * 1024 * 1024 * 1024,
+      load1: Math.max(0, 0.72 + Math.sin(tick / 8) * 0.38),
+      disk_free: Math.max(0, Number(previous.disk_free) - 2 * 1024 * 1024),
+      online_players: Math.max(0, Math.round(3 + Math.sin(tick / 20))),
+      uptime_seconds: Number(previous.uptime_seconds || 0) + seconds,
+    };
+    appendPerformanceSample(sample);
+    setUptimeBaseline(sample);
+    updatePerformanceView(sample);
+  }, seconds * 1000);
+}
+
+setInterval(updatePerformanceFreshness, 1000);
 
 // sparklineNode returns a standalone SVG element, for callers building a card
 // rather than filling a pre-existing container.
