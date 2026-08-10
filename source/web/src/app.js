@@ -2204,8 +2204,8 @@ async function pagePerformance(main) {
 
     el("section", { class: "performance-domain performance-cpu-domain", "aria-labelledby": "performance-cpu-title" },
       el("div", { class: "performance-section-heading" },
-        el("div", {}, el("h2", { id: "performance-cpu-title" }, "CPU"),
-          el("p", { class: "muted" }, "Whole-machine load, Java process usage, temperatures, and every logical CPU."))),
+        performanceSectionTitle("performance-cpu-title", "CPU",
+          "Whole-machine load, Java process usage, temperatures, and every logical CPU.", "command-linear")),
       el("div", { class: "performance-domain-readouts" },
         performanceReadout("Machine usage", "performance-host-cpu", "Average across all logical CPUs"),
         performanceReadout("Average temperature", "performance-cpu-temp", "Best available Linux CPU sensors"),
@@ -2221,8 +2221,8 @@ async function pagePerformance(main) {
 
     el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-memory-title" },
       el("div", { class: "performance-section-heading" },
-        el("div", {}, el("h2", { id: "performance-memory-title" }, "Memory"),
-          el("p", { class: "muted" }, "Host physical memory, configured Java allocation, and current resident process memory."))),
+        performanceSectionTitle("performance-memory-title", "Memory",
+          "Host physical memory, configured Java allocation, and current resident process memory.", "server-2-linear")),
       el("div", { class: "performance-meter-grid" },
         performanceMeter("Machine memory", "host-memory"),
         performanceMeter("Configured Java maximum (-Xmx)", "allocated-memory"),
@@ -2233,15 +2233,15 @@ async function pagePerformance(main) {
 
     el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-storage-title" },
       el("div", { class: "performance-section-heading" },
-        el("div", {}, el("h2", { id: "performance-storage-title" }, "Storage"),
-          el("p", { class: "muted" }, "Machine filesystem capacity and the complete Bonghos home directory.")),
+        performanceSectionTitle("performance-storage-title", "Storage",
+          "Machine filesystem capacity and storage managed by Bonghos.", "database-linear"),
         el("div", { class: "performance-view-toggle", role: "group", "aria-label": "Storage chart view" },
           el("button", { class: "btn small", type: "button", "data-storage-view": "distribution", onclick: () => setStorageView("distribution") }, "Distribution"),
           el("button", { class: "btn small", type: "button", "data-storage-view": "trend", onclick: () => setStorageView("trend") }, "Trend"))),
       el("div", { class: "performance-domain-readouts performance-storage-readouts" },
         performanceReadout("Machine disk", "performance-disk-total", "Filesystem containing Bonghos"),
         performanceReadout("Disk used", "performance-disk-used", "Across the host filesystem"),
-        performanceReadout("Bonghos home", "performance-bonghos-size", "Servers, backups, and system files"),
+        performanceReadout("Bonghos", "performance-bonghos-size", "Servers, backups, and system files"),
         performanceReadout("Servers", "performance-server-size", "All managed server directories")),
       el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
 
@@ -2295,6 +2295,12 @@ function performanceReadout(label, id, note) {
     el("div", { class: "metric-label" }, label),
     el("div", { class: "performance-readout-value mono", id }, "—"),
     el("div", { class: "metric-note", id: `${id}-note` }, note));
+}
+
+function performanceSectionTitle(id, label, description, icon) {
+  return el("div", { class: "performance-section-title" },
+    el("h2", { id }, solarIcon(icon, "performance-section-icon"), el("span", {}, label)),
+    el("p", { class: "muted" }, description));
 }
 
 function performanceMeter(label, id) {
@@ -2446,7 +2452,7 @@ function renderStorageVisual(sample) {
   });
   if (S.perfStorageView === "trend") {
     const diskPanel = performanceChartPanel("Machine filesystem", "Total, used, and available filesystem capacity", "performance-chart-disk-trend");
-    const projectPanel = performanceChartPanel("Bonghos home", "Total size split across servers, backups, and system files", "performance-chart-project-trend");
+    const projectPanel = performanceChartPanel("Bonghos", "Total size split across servers, backups, and system files", "performance-chart-project-trend");
     host.replaceChildren(el("div", { class: "grid cols-2 performance-storage-trends" }, diskPanel, projectPanel));
     const diskHost = $("#performance-chart-disk-trend");
     const projectHost = $("#performance-chart-project-trend");
@@ -2459,7 +2465,7 @@ function renderStorageVisual(sample) {
       ],
     }));
     if (projectHost) projectHost.replaceChildren(timeSeriesChart(S.perf, {
-      label: "Bonghos home directory sizes over the last hour", min: 0, axisFormat: fmtBytes,
+      label: "Bonghos storage sizes over the last hour", min: 0, axisFormat: fmtBytes,
       series: [
         { label: "Total", tone: "warning", value: (s) => Number(s.bonghos_dir_bytes), format: fmtBytes },
         { label: "Servers", tone: "accent", area: true, value: (s) => Number(s.server_dir_bytes), format: fmtBytes },
@@ -2484,7 +2490,7 @@ function renderStorageVisual(sample) {
   host.replaceChildren(el("div", { class: "grid cols-2 performance-storage-distributions" },
     storageDonutChart({
       title: "Machine filesystem",
-      description: "Filesystem containing the Bonghos home directory",
+      description: "Filesystem containing Bonghos",
       total: diskTotal,
       timestamp,
       emptyMessage: "Filesystem capacity is not available.",
@@ -2494,11 +2500,11 @@ function renderStorageVisual(sample) {
       ],
     }),
     storageDonutChart({
-      title: "Bonghos home",
-      description: "Everything stored below BONGHOS_HOME",
+      title: "Bonghos",
+      description: "Servers, backups, system files, and other managed data",
       total: bonghosTotal,
       timestamp,
-      emptyMessage: sample.storage_scanning ? "Scanning the Bonghos home directory…" : "Bonghos directory size is not available.",
+      emptyMessage: sample.storage_scanning ? "Scanning Bonghos storage…" : "Bonghos storage size is not available.",
       segments: [
         { label: "Servers", value: servers, tone: "accent" },
         { label: "Backups", value: backups, tone: "info" },
@@ -3255,7 +3261,7 @@ function importWizard() {
           if (dirMode.value === "link") {
             c();
             confirmModal("Link external directory",
-              "Linked directories stay outside the Bonghos home: they are NOT included in exports or the normal Bonghos migration, and Bonghos will operate on files in place. Continue?",
+              "Linked directories stay outside Bonghos storage: they are NOT included in exports or the normal Bonghos migration, and Bonghos will operate on files in place. Continue?",
               "Link it", async () => {
                 await api("/imports/existing-directory", { method: "POST", json: { path: dirPath.value, display_name: name.value, mode: "link", confirm_link: true } });
                 navigate("servers");
@@ -3384,7 +3390,7 @@ async function pageHost(main) {
       el("h3", {}, "Services & panel"),
       el("dl", { class: "kv" },
         el("dt", {}, "Panel address"), el("dd", { class: "mono" }, `${d.bind_address}:${d.port}`),
-        el("dt", {}, "Bonghos home"), el("dd", { class: "mono" }, d.home),
+        el("dt", {}, "Bonghos"), el("dd", { class: "mono" }, d.home),
         el("dt", {}, "systemd"), el("dd", {}, d.systemd ? "available" : "unavailable"),
         el("dt", {}, "bonghos.service"), el("dd", {}, d.service_bonghos || "—"),
         el("dt", {}, "bonghos-minecraft.service"), el("dd", {}, d.service_minecraft || "—"),
