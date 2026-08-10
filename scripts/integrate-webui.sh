@@ -94,24 +94,36 @@ cleanup() {
   return "$exit_code"
 }
 
-on_error() {
-  local exit_code=$?
-  local line="${BASH_LINENO[0]:-unknown}"
+trap cleanup EXIT
 
-  KEEP_WORKTREE=1
-
-  echo >&2
-  err "Integration stopped with exit code $exit_code near line $line."
-  if [[ -n "${WORKTREE:-}" && -d "${WORKTREE:-}" ]]; then
-    warn "The temporary worktree was preserved for inspection:"
-    warn "  $WORKTREE"
-  fi
-
-  exit "$exit_code"
+print_preserved_worktree_help() {
+  echo
+  echo "Inspect the failed integration in:"
+  echo "  $WORKTREE"
+  echo
+  echo "Clean it up when done with:"
+  echo "  git -C '$ROOT' worktree remove '$WORKTREE'"
+  echo "  git -C '$ROOT' branch -D '$INTEGRATION_BRANCH'"
 }
 
-trap cleanup EXIT
-trap on_error ERR
+validation_failed() {
+  local step="$1"
+  KEEP_WORKTREE=1
+  err "Validation failed during: $step"
+  err "main has NOT been modified."
+  print_preserved_worktree_help
+  exit 12
+}
+
+run_source_step() {
+  local label="$1"
+  shift
+  say "$label"
+  (
+    cd "$WORKTREE/source"
+    "$@"
+  ) || validation_failed "$label"
+}
 
 while (($#)); do
   case "$1" in
@@ -244,52 +256,25 @@ fi
 ok "Merge completed in temporary worktree."
 
 say "Checking merged diff..."
-git -C "$WORKTREE" diff --check "$REMOTE/$MAIN_BRANCH..HEAD"
+git -C "$WORKTREE" diff --check "$REMOTE/$MAIN_BRANCH..HEAD" || validation_failed "git diff --check"
 
-say "Running Bonghos Web UI build..."
-(
-  cd "$WORKTREE/source"
-  make web
-)
-
-say "Checking formatting..."
-(
-  cd "$WORKTREE/source"
-  make fmt-check
-)
-
-say "Running go vet..."
-(
-  cd "$WORKTREE/source"
-  go vet ./...
-)
-
-say "Running Go tests..."
-(
-  cd "$WORKTREE/source"
-  go test ./...
-)
+run_source_step "Running Bonghos Web UI build..." make web
+run_source_step "Checking formatting..." make fmt-check
+run_source_step "Running go vet..." go vet ./...
+run_source_step "Running Go tests..." go test ./...
 
 if (( RUN_RACE )); then
-  say "Running Go race tests..."
-  (
-    cd "$WORKTREE/source"
-    go test -race ./...
-  )
+  run_source_step "Running Go race tests..." go test -race ./...
 else
   warn "Race tests skipped. Use --race to enable them."
 fi
 
-say "Building all Go packages..."
-(
-  cd "$WORKTREE/source"
-  go build ./...
-)
+run_source_step "Building all Go packages..." go build ./...
 
 if command -v node >/dev/null 2>&1; then
   if [[ -f "$WORKTREE/source/web/src/app.js" ]]; then
     say "Checking web/src/app.js syntax..."
-    node --check "$WORKTREE/source/web/src/app.js"
+    node --check "$WORKTREE/source/web/src/app.js" || validation_failed "node --check web/src/app.js"
   fi
 else
   warn "Node.js is unavailable; standalone JS syntax check skipped."
@@ -303,6 +288,7 @@ if [[ -n "$(git -C "$WORKTREE" status --porcelain --untracked-files=no)" ]]; the
 
   echo
   git -C "$WORKTREE" status --short
+  print_preserved_worktree_help
 
   exit 11
 fi
