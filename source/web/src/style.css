@@ -390,11 +390,8 @@ tr:hover td { background: var(--surface-2); }
 .bot-card { display: flex; flex-direction: column; gap: var(--space-4); transition: border-color 160ms ease, opacity 160ms ease; }
 .bot-card.is-disabled { opacity: 0.72; }
 .bot-card-head { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); }
-.bot-provider-mark { width: 44px; height: 44px; display: grid; place-items: center; border: 1px solid var(--border-strong); background: var(--inset); color: var(--accent); }
-.bot-provider-mark.discord { color: var(--info); }
-.fa-brands { width: 25px; height: 25px; display: block; background: currentColor; -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: contain; mask-size: contain; }
-.fa-brands.fa-telegram { -webkit-mask-image: url("/fa-telegram.svg"); mask-image: url("/fa-telegram.svg"); }
-.fa-brands.fa-discord { width: 27px; height: 24px; -webkit-mask-image: url("/fa-discord.svg"); mask-image: url("/fa-discord.svg"); }
+.bot-provider-mark { width: 44px; height: 44px; display: grid; place-items: center; }
+.bot-provider-logo { width: 40px; height: 40px; display: block; object-fit: contain; }
 .bot-card-identity { min-width: 0; display: grid; }
 .bot-card-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bot-power { min-width: 82px; min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); border: 1px solid var(--border); background: var(--inset); color: var(--muted); cursor: pointer; font-weight: 800; }

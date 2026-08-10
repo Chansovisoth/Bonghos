@@ -4143,7 +4143,11 @@ function botProviderName(provider) {
 
 function botProviderMark(provider) {
   return el("span", { class: `bot-provider-mark ${provider}`, "aria-hidden": "true" },
-    el("i", { class: `fa-brands fa-${provider}` }));
+    el("img", {
+      class: "bot-provider-logo",
+      src: provider === "telegram" ? "/Telegram.png" : "/Discord.png",
+      alt: "",
+    }));
 }
 
 async function patchBot(bot, patch, control = null) {
