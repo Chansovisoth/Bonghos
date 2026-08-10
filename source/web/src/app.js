@@ -2934,14 +2934,14 @@ function overviewSparklineNode(title, points, fmt) {
   });
   const line = svgElement("polyline", { points: linePoints, class: "overview-sparkline-line" });
   const crosshair = svgElement("line", { y1: pad, y2: H - pad, class: "overview-sparkline-crosshair" });
-  const marker = svgElement("circle", { r: 3.5, class: "overview-sparkline-marker" });
+  const marker = el("span", { class: "overview-sparkline-marker", "aria-hidden": "true" });
   const overlay = svgElement("rect", { x: 0, y: 0, width: W, height: H, class: "overview-sparkline-overlay" });
   const tooltip = el("div", { class: "overview-sparkline-tooltip mono", role: "status", "aria-live": "polite", hidden: "" });
   const wrapper = el("div", {
     class: "overview-sparkline", tabindex: "0",
     "aria-label": `${title} history. Focus and use left or right arrow keys to inspect samples.`,
-  }, svg, tooltip);
-  svg.append(line, crosshair, marker, overlay);
+  }, svg, marker, tooltip);
+  svg.append(line, crosshair, overlay);
   let activeIndex = points.length - 1;
 
   const showPoint = (index) => {
@@ -2951,8 +2951,8 @@ function overviewSparklineNode(title, points, fmt) {
     const y = yAt(point);
     crosshair.setAttribute("x1", x);
     crosshair.setAttribute("x2", x);
-    marker.setAttribute("cx", x);
-    marker.setAttribute("cy", y);
+    marker.style.left = `${x / W * 100}%`;
+    marker.style.top = `${y / H * 100}%`;
     wrapper.classList.add("is-active");
     tooltip.hidden = false;
     tooltip.textContent = `${fmtTime(point.timestamp)} · ${title} ${fmt(point.value)}`;
