@@ -1475,20 +1475,36 @@ async function pageConsole(main) {
     try { await api("/server/command", { method: "POST", json: { command: cmd } }); toast("Command sent: " + cmd, "ok"); }
     catch (err) { toast(err.message, "err"); }
   };
-  const wrapButton = el("button", {
-    class: "btn ghost console-icon-control console-wrap-control" + (S.consoleWrap ? " is-active" : ""),
+  const toggleConsoleWrap = () => {
+    S.consoleWrap = !S.consoleWrap;
+    const actionLabel = S.consoleWrap ? "Disable text wrapping" : "Wrap text";
+    box.classList.toggle("is-wrapped", S.consoleWrap);
+    mobileWrapButton.classList.toggle("is-active", S.consoleWrap);
+    desktopWrapButton.classList.toggle("is-on", S.consoleWrap);
+    [mobileWrapButton, desktopWrapButton].forEach((button) => {
+      button.setAttribute("aria-pressed", String(S.consoleWrap));
+      button.setAttribute("aria-label", actionLabel);
+      button.setAttribute("title", actionLabel);
+    });
+    desktopWrapButton.querySelector(".bot-power-label").textContent = S.consoleWrap ? "On" : "Off";
+  };
+  const mobileWrapButton = el("button", {
+    class: "btn ghost console-icon-control console-wrap-control console-wrap-mobile" + (S.consoleWrap ? " is-active" : ""),
     "aria-label": S.consoleWrap ? "Disable text wrapping" : "Wrap text",
     "aria-pressed": String(S.consoleWrap),
     title: S.consoleWrap ? "Disable text wrapping" : "Wrap text",
-    onclick: () => {
-      S.consoleWrap = !S.consoleWrap;
-      box.classList.toggle("is-wrapped", S.consoleWrap);
-      wrapButton.classList.toggle("is-active", S.consoleWrap);
-      wrapButton.setAttribute("aria-pressed", String(S.consoleWrap));
-      wrapButton.setAttribute("aria-label", S.consoleWrap ? "Disable text wrapping" : "Wrap text");
-      wrapButton.setAttribute("title", S.consoleWrap ? "Disable text wrapping" : "Wrap text");
-    },
+    onclick: toggleConsoleWrap,
   }, solarIcon("wrap-text"));
+  const desktopWrapButton = el("button", {
+    class: "bot-power console-wrap-desktop-toggle" + (S.consoleWrap ? " is-on" : ""),
+    type: "button",
+    "aria-label": S.consoleWrap ? "Disable text wrapping" : "Wrap text",
+    "aria-pressed": String(S.consoleWrap),
+    title: S.consoleWrap ? "Disable text wrapping" : "Wrap text",
+    onclick: toggleConsoleWrap,
+  },
+  el("span", { class: "bot-power-track", "aria-hidden": "true" }, el("span", {})),
+  el("span", { class: "bot-power-label" }, S.consoleWrap ? "On" : "Off"));
   main.append(
     pageHeader("Console", "Live Minecraft output and command entry for the active server.", [renderStatusPillNode(), lifecycleButtons()]),
     el("div", { class: "console-shell" },
@@ -1500,7 +1516,7 @@ async function pageConsole(main) {
           title: S.consolePaused ? "Resume console" : "Pause console",
           onclick: () => { S.consolePaused = !S.consolePaused; pageConsole(main); },
         }, S.consolePaused ? "Resume" : "Pause"),
-        wrapButton,
+        mobileWrapButton,
         el("button", { class: "btn ghost console-icon-control", "aria-label": "Copy console", title: "Copy console", onclick: async () => {
           try { await navigator.clipboard.writeText(S.consoleLines.join("\n")); toast("Console buffer copied", "ok"); }
           catch { toast("Copy failed in this browser", "err"); }
@@ -1508,7 +1524,10 @@ async function pageConsole(main) {
         el("button", { class: "btn ghost console-clear-control", onclick: () => { S.consoleHistoryRequest++; box.innerHTML = ""; S.consoleLines = []; } }, "Clear"),
         !DEMO_MODE ? el("span", { class: "status-label " + (S.ws && S.ws.readyState === WebSocket.OPEN ? "running" : "stopped") },
           el("span", { class: "status-square", "aria-hidden": "true" }),
-          S.ws && S.ws.readyState === WebSocket.OPEN ? "Connected" : "Reconnecting") : null),
+          S.ws && S.ws.readyState === WebSocket.OPEN ? "Connected" : "Reconnecting") : null,
+        el("span", { class: "console-wrap-desktop-group" },
+          el("span", { class: "console-wrap-desktop-label" }, "Wrap text"),
+          desktopWrapButton)),
       box,
       el("div", { class: "console-input" },
         input,
