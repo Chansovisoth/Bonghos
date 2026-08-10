@@ -1766,6 +1766,190 @@ function openFileInEditor(path) {
   navigate("files");
 }
 
+const SERVER_ICON_MAX_BYTES = 10 * 1024 * 1024;
+const SERVER_ICON_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+function readFileAsDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve(reader.result));
+    reader.addEventListener("error", () => reject(new Error("Could not read that image")));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadCropImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => resolve(image));
+    image.addEventListener("error", () => reject(new Error("Could not decode that image")));
+    image.src = src;
+  });
+}
+
+async function openServerIconCropper(file, server) {
+  if (!SERVER_ICON_TYPES.has(file.type)) {
+    return toast("Choose a PNG, JPEG, or WebP image", "err");
+  }
+  if (file.size > SERVER_ICON_MAX_BYTES) {
+    return toast("Server icons must be 10 MiB or smaller", "err");
+  }
+
+  let sourceURL;
+  let image;
+  try {
+    sourceURL = await readFileAsDataURL(file);
+    image = await loadCropImage(sourceURL);
+  } catch (error) {
+    return toast(error.message, "err");
+  }
+
+  const stageSize = 320;
+  const canvas = el("canvas", {
+    class: "server-icon-crop-canvas",
+    width: stageSize,
+    height: stageSize,
+    role: "img",
+    "aria-label": "Cropped server icon preview",
+  });
+  const context = canvas.getContext("2d");
+  const zoom = el("input", { type: "range", min: "100", max: "400", step: "1", value: "100", "aria-label": "Crop zoom" });
+  const zoomValue = el("span", { class: "mono" }, "100%");
+  let cropSize = Math.min(image.naturalWidth, image.naturalHeight);
+  let centerX = image.naturalWidth / 2;
+  let centerY = image.naturalHeight / 2;
+  let drag = null;
+  let saving = false;
+
+  function cropRect() {
+    const size = Math.max(1, Math.min(image.naturalWidth, image.naturalHeight, cropSize));
+    centerX = Math.max(size / 2, Math.min(image.naturalWidth - size / 2, centerX));
+    centerY = Math.max(size / 2, Math.min(image.naturalHeight - size / 2, centerY));
+    return { x: centerX - size / 2, y: centerY - size / 2, size };
+  }
+
+  function drawCrop() {
+    const crop = cropRect();
+    context.clearRect(0, 0, stageSize, stageSize);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, crop.x, crop.y, crop.size, crop.size, 0, 0, stageSize, stageSize);
+    context.save();
+    context.strokeStyle = "rgba(255, 255, 255, 0.38)";
+    context.lineWidth = 1;
+    context.beginPath();
+    for (const point of [stageSize / 3, stageSize * 2 / 3]) {
+      context.moveTo(point, 0); context.lineTo(point, stageSize);
+      context.moveTo(0, point); context.lineTo(stageSize, point);
+    }
+    context.stroke();
+    context.restore();
+  }
+
+  zoom.addEventListener("input", () => {
+    const factor = Number(zoom.value) / 100;
+    cropSize = Math.min(image.naturalWidth, image.naturalHeight) / factor;
+    zoomValue.textContent = `${zoom.value}%`;
+    drawCrop();
+  });
+  canvas.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    canvas.classList.add("is-dragging");
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const bounds = canvas.getBoundingClientRect();
+    const visible = cropRect().size;
+    centerX -= (event.clientX - drag.x) * visible / bounds.width;
+    centerY -= (event.clientY - drag.y) * visible / bounds.height;
+    drag.x = event.clientX;
+    drag.y = event.clientY;
+    drawCrop();
+  });
+  const endDrag = (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    drag = null;
+    canvas.classList.remove("is-dragging");
+  };
+  canvas.addEventListener("pointerup", endDrag);
+  canvas.addEventListener("pointercancel", endDrag);
+  drawCrop();
+
+  const stage = el("div", { class: "server-icon-crop-stage" }, canvas);
+  const controls = el("div", { class: "server-icon-crop-controls" },
+    el("div", { class: "server-icon-crop-label" }, el("span", {}, "Zoom"), zoomValue),
+    zoom,
+    el("p", { class: "hint" }, `Drag to reposition. The saved icon will be converted from ${image.naturalWidth}×${image.naturalHeight} to 64×64 PNG.`));
+
+  modal("Crop server icon", [stage, controls], [
+    ["Cancel", "ghost", (close) => close()],
+    ["Save icon", "primary", async (close) => {
+      if (saving) return;
+      saving = true;
+      const crop = cropRect();
+      const size = Math.max(1, Math.floor(crop.size));
+      const x = Math.max(0, Math.min(image.naturalWidth - size, Math.round(crop.x)));
+      const y = Math.max(0, Math.min(image.naturalHeight - size, Math.round(crop.y)));
+      try {
+        if (DEMO_MODE) {
+          const output = document.createElement("canvas");
+          output.width = 64;
+          output.height = 64;
+          const outputContext = output.getContext("2d");
+          outputContext.imageSmoothingEnabled = true;
+          outputContext.imageSmoothingQuality = "high";
+          outputContext.drawImage(image, x, y, size, size, 0, 0, 64, 64);
+          const demoServer = DEMO_SERVERS.find((item) => item.id === server.id);
+          if (demoServer) {
+            demoServer.demo_icon = output.toDataURL("image/png");
+            demoServer.icon_revision = (demoServer.icon_revision || 0) + 1;
+          }
+        } else {
+          const form = new FormData();
+          form.append("icon", file, file.name);
+          form.append("crop", `${x},${y},${size}`);
+          const result = await api(`/servers/${server.id}/icon`, { method: "POST", body: form });
+          server.icon_revision = result.icon_revision;
+          const cached = S.servers.find((item) => item.id === server.id);
+          if (cached) cached.icon_revision = result.icon_revision;
+        }
+        close();
+        toast("Server icon updated", "ok");
+        renderPage();
+      } catch (error) {
+        saving = false;
+        toast(error.message, "err");
+      }
+    }],
+  ]);
+}
+
+function serverIconConfigurationCard(server) {
+  const preview = el("div", { class: "configuration-server-icon-preview" }, serverCardIcon(server));
+  const input = el("input", {
+    class: "server-icon-file-input",
+    type: "file",
+    accept: "image/png,image/jpeg,image/webp",
+    tabindex: "-1",
+  });
+  input.addEventListener("change", () => {
+    const file = input.files && input.files[0];
+    input.value = "";
+    if (file) openServerIconCropper(file, server);
+  });
+  const changeButton = el("button", { class: "btn", onclick: () => input.click() },
+    solarIcon("gallery-linear"), "Change icon");
+  return el("div", { class: "card configuration-server-icon-card" },
+    preview,
+    el("div", { class: "configuration-server-icon-copy" },
+      el("strong", {}, "Minecraft server icon"),
+      el("p", { class: "muted" }, "Upload a PNG, JPEG, or WebP image. Crop it here and Bonghos will save a 64×64 PNG."),
+      can("server.icon.manage") ? el("div", { class: "actions" }, changeButton, input) :
+        el("p", { class: "hint" }, "You do not have permission to change this icon.")));
+}
+
 async function pageConfiguration(main) {
   const d = await api("/configuration");
   const inst = d.instance;
@@ -1928,6 +2112,8 @@ async function pageConfiguration(main) {
         el("h3", {}, "Startup"),
         el("div", { class: "field-row" }, el("label", {}, "Startup script", scriptSel)),
         el("div", { class: "field-row flow-section" }, el("label", {}, "Java installation", javaSel)))),
+    el("h2", {}, "Server icon"),
+    serverIconConfigurationCard(inst),
     el("h2", {}, "server.properties"),
     el("div", { class: "card" }, propRows.length ? propRows : el("p", { class: "muted" }, "No server.properties found yet (it is created on first start).")),
     el("h2", {}, "Automation"),

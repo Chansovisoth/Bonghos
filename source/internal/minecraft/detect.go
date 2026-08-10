@@ -406,13 +406,7 @@ func DetectJVMConfig(root, startupRel string) (*JVMConfig, error) {
 	}
 	// Priority 2: variable assignment inside the startup script or sourced files.
 	if startupRel != "" {
-		files := []string{startupRel}
-		if data, err := os.ReadFile(filepath.Join(root, startupRel)); err == nil {
-			for _, m := range reSourced.FindAllStringSubmatch(string(data), 5) {
-				files = append(files, filepath.ToSlash(filepath.Join(filepath.Dir(startupRel), strings.Trim(m[1], `"'`))))
-			}
-		}
-		for _, f := range files {
+		for _, f := range scriptFamily(root, startupRel) {
 			data, err := os.ReadFile(filepath.Join(root, f))
 			if err != nil {
 				continue
