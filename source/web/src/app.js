@@ -939,9 +939,9 @@ async function refreshServers() {
     const d = await api("/servers");
     S.servers = d.servers || [];
     S.activeId = d.active_id || 0;
+    const st = await api("/server/status").catch(() => null);
+    if (st) S.status = st;
     renderServerPicker();
-    const st = await api("/server/status");
-    S.status = st;
   } catch (e) { /* server list may 403 for some roles */ }
 }
 
@@ -951,7 +951,7 @@ function renderServerPicker() {
   host.append(
     el("div", { class: "server-picker-head" },
       el("span", { class: "server-kicker" }, "Active project"),
-      renderStatusPillNode({ compact: true, id: "status-pill" })),
+      renderStatusPillNode({ id: "status-pill" })),
     el("div", { class: "server-name", title: active ? active.display_name : "None selected" },
       active ? active.display_name : "None selected"));
 }
@@ -965,7 +965,7 @@ function renderStatusPillNode(opts = {}) {
 }
 function renderStatusPill() {
   const p = $("#status-pill");
-  if (p) p.replaceWith(renderStatusPillNode());
+  if (p) p.replaceWith(renderStatusPillNode({ id: "status-pill" }));
 }
 
 // ---------------------------------------------------------------------------
