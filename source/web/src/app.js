@@ -114,8 +114,7 @@ function gameVersionIcon() {
   return svg;
 }
 
-const LIFECYCLE_LOADING_STEP_SECONDS = 0.2;
-const LIFECYCLE_LOADING_CYCLE_MS = LIFECYCLE_LOADING_STEP_SECONDS * 12 * 1000;
+const LIFECYCLE_LOADING_CYCLE_MS = 2400;
 let lifecycleLoadingIconId = 0;
 function lifecycleLoadingIcon(onCycleEnd = null) {
   const id = `lifecycle-loading-${++lifecycleLoadingIconId}`;
@@ -125,23 +124,24 @@ function lifecycleLoadingIcon(onCycleEnd = null) {
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
   svg.innerHTML = `
+    <path d="M0 0h24v24H0z" fill="none"/>
     <rect width="10" height="10" x="1" y="1" fill="currentColor" rx="1">
-      <animate id="${id}-a" fill="freeze" attributeName="x" begin="0;${id}-l.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
-      <animate id="${id}-d" fill="freeze" attributeName="y" begin="${id}-c.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
-      <animate id="${id}-g" fill="freeze" attributeName="x" begin="${id}-f.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
-      <animate id="${id}-j" fill="freeze" attributeName="y" begin="${id}-i.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
+      <animate id="${id}-a" fill="freeze" attributeName="x" begin="0;${id}-l.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-d" fill="freeze" attributeName="y" begin="${id}-c.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-g" fill="freeze" attributeName="x" begin="${id}-f.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-j" fill="freeze" attributeName="y" begin="${id}-i.end" dur="0.2s" values="13;1"/>
     </rect>
     <rect width="10" height="10" x="1" y="13" fill="currentColor" rx="1">
-      <animate id="${id}-b" fill="freeze" attributeName="y" begin="${id}-a.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
-      <animate id="${id}-e" fill="freeze" attributeName="x" begin="${id}-d.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
-      <animate id="${id}-h" fill="freeze" attributeName="y" begin="${id}-g.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
-      <animate id="${id}-k" fill="freeze" attributeName="x" begin="${id}-j.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
+      <animate id="${id}-b" fill="freeze" attributeName="y" begin="${id}-a.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-e" fill="freeze" attributeName="x" begin="${id}-d.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-h" fill="freeze" attributeName="y" begin="${id}-g.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-k" fill="freeze" attributeName="x" begin="${id}-j.end" dur="0.2s" values="13;1"/>
     </rect>
     <rect width="10" height="10" x="13" y="13" fill="currentColor" rx="1">
-      <animate id="${id}-c" fill="freeze" attributeName="x" begin="${id}-b.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
-      <animate id="${id}-f" fill="freeze" attributeName="y" begin="${id}-e.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="13;1"/>
-      <animate id="${id}-i" fill="freeze" attributeName="x" begin="${id}-h.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
-      <animate id="${id}-l" fill="freeze" attributeName="y" begin="${id}-k.end" dur="${LIFECYCLE_LOADING_STEP_SECONDS}s" values="1;13"/>
+      <animate id="${id}-c" fill="freeze" attributeName="x" begin="${id}-b.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-f" fill="freeze" attributeName="y" begin="${id}-e.end" dur="0.2s" values="13;1"/>
+      <animate id="${id}-i" fill="freeze" attributeName="x" begin="${id}-h.end" dur="0.2s" values="1;13"/>
+      <animate id="${id}-l" fill="freeze" attributeName="y" begin="${id}-k.end" dur="0.2s" values="1;13"/>
     </rect>`;
   if (onCycleEnd) svg.querySelector(`#${id}-l`)?.addEventListener("endEvent", onCycleEnd);
   return svg;
