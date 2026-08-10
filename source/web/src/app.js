@@ -1113,8 +1113,10 @@ async function pageOverview(main) {
 
     // Trends, previously the Performance tab.
     el("div", { class: "grid cols-2 flow-section" },
-      trendCard("CPU", S.perf, (x) => x.host_cpu_percent, (v) => v.toFixed(0) + "%", "overview-trend-cpu"),
-      trendCard("Process memory", S.perf, (x) => x.rss_bytes, fmtBytes, "overview-trend-memory")),
+      trendCard("CPU", S.perf, (x) => x.host_cpu_percent, (v) => v.toFixed(0) + "%", "overview-trend-cpu",
+        { min: 0, max: 100, axisFormat: (value) => value.toFixed(0) + "%" }),
+      trendCard("Process memory", S.perf, (x) => x.rss_bytes, fmtBytes, "overview-trend-memory",
+        { min: 0, max: overviewMemoryCeiling(S.perf), axisFormat: fmtBytes })),
 
     el("div", { class: "grid cols-2 flow-section" },
       // The timeline: what the server did, in its own words.
@@ -1168,7 +1170,7 @@ function eventRow(e) {
 }
 
 // trendCard draws a compact interactive sparkline plus the latest value.
-function trendCard(title, samples, pick, fmt, id = "") {
+function trendCard(title, samples, pick, fmt, id = "", chartOptions = {}) {
   const points = (samples || []).map((sample) => ({
     timestamp: sampleTimestamp(sample),
     value: Number(pick(sample)),
@@ -1180,7 +1182,12 @@ function trendCard(title, samples, pick, fmt, id = "") {
     el("div", { class: "metric-label" }, title),
     el("div", { class: "metric-value" }, fmt(latest)),
     el("div", { class: "metric-note" }, "last hour"),
-    points.length > 1 ? overviewSparklineNode(title, points, fmt) : el("p", { class: "muted" }, "Collecting samples…"));
+    points.length > 1 ? overviewSparklineNode(title, points, fmt, chartOptions) : el("p", { class: "muted" }, "Collecting samples…"));
+}
+
+function overviewMemoryCeiling(samples) {
+  return Math.max(1, ...(samples || []).flatMap((sample) =>
+    [Number(sample.rss_bytes), Number(sample.jvm_xmx_bytes)].filter(Number.isFinite)));
 }
 
 function updateOverviewTrendCharts() {
@@ -1188,9 +1195,11 @@ function updateOverviewTrendCharts() {
   const cpu = $("#overview-trend-cpu");
   const memory = $("#overview-trend-memory");
   cpu?.replaceWith(trendCard("CPU", S.perf, (sample) => sample.host_cpu_percent,
-    (value) => value.toFixed(0) + "%", "overview-trend-cpu"));
+    (value) => value.toFixed(0) + "%", "overview-trend-cpu",
+    { min: 0, max: 100, axisFormat: (value) => value.toFixed(0) + "%" }));
   memory?.replaceWith(trendCard("Process memory", S.perf, (sample) => sample.rss_bytes,
-    fmtBytes, "overview-trend-memory"));
+    fmtBytes, "overview-trend-memory",
+    { min: 0, max: overviewMemoryCeiling(S.perf), axisFormat: fmtBytes }));
 }
 
 function statCard(title, value, sub, valueId = "", performanceTarget = "") {
@@ -3210,12 +3219,15 @@ setInterval(updatePerformanceFreshness, 1000);
 
 // overviewSparklineNode keeps Overview graphs visually light while exposing
 // exact samples through pointer and keyboard interaction.
-function overviewSparklineNode(title, points, fmt) {
+function overviewSparklineNode(title, points, fmt, options = {}) {
   const W = 320, H = 56, pad = 2;
   const values = points.map((point) => point.value);
-  const max = Math.max(...values, 1), min = Math.min(...values, 0);
+  const observedMax = Math.max(...values, 1);
+  const min = Number.isFinite(options.min) ? options.min : Math.min(...values, 0);
+  const max = Math.max(observedMax, Number.isFinite(options.max) ? options.max : observedMax);
   const span = (max - min) || 1;
   const firstAt = points[0].timestamp;
+  const lastAt = points[points.length - 1].timestamp;
   const timeSpan = Math.max(1, points[points.length - 1].timestamp - firstAt);
   const xAt = (point, index) => points.length > 1
     ? pad + ((point.timestamp - firstAt) / timeSpan) * (W - pad * 2)
@@ -3231,10 +3243,16 @@ function overviewSparklineNode(title, points, fmt) {
   const marker = el("span", { class: "overview-sparkline-marker", "aria-hidden": "true" });
   const overlay = svgElement("rect", { x: 0, y: 0, width: W, height: H, class: "overview-sparkline-overlay" });
   const tooltip = el("div", { class: "overview-sparkline-tooltip mono", role: "status", "aria-live": "polite", hidden: "" });
+  const axisFormat = options.axisFormat || fmt;
+  const range = el("div", { class: "overview-sparkline-range mono", "aria-hidden": "true" },
+    el("span", {}, new Date(firstAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
+    el("span", {}, `${axisFormat(min)} – ${axisFormat(max)}`),
+    el("span", {}, new Date(lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })));
+  const plot = el("div", { class: "overview-sparkline-plot" }, svg, marker, tooltip);
   const wrapper = el("div", {
     class: "overview-sparkline", tabindex: "0",
-    "aria-label": `${title} history. Focus and use left or right arrow keys to inspect samples.`,
-  }, svg, marker, tooltip);
+    "aria-label": `${title} history from ${fmtTime(firstAt)} to ${fmtTime(lastAt)}, range ${axisFormat(min)} to ${axisFormat(max)}. Focus and use left or right arrow keys to inspect samples.`,
+  }, plot, range);
   svg.append(line, crosshair, overlay);
   let activeIndex = points.length - 1;
 

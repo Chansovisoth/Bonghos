@@ -410,8 +410,9 @@ tr:hover td { background: var(--surface-2); }
 }
 .chart { width: 100%; height: 210px; }
 .chart svg { width: 100%; height: 100%; display: block; }
-.overview-sparkline { position: relative; width: 100%; height: 58px; margin-top: var(--space-2); outline: none; }
+.overview-sparkline { width: 100%; display: grid; gap: var(--space-2); margin-top: var(--space-2); outline: none; }
 .overview-sparkline:focus-visible { box-shadow: var(--focus); }
+.overview-sparkline-plot { position: relative; width: 100%; height: 58px; }
 .sparkline { width: 100%; height: 58px; color: var(--accent); display: block; overflow: visible; }
 .overview-sparkline-line { fill: none; stroke: currentColor; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .overview-sparkline-crosshair { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; opacity: 0; }
@@ -422,6 +423,10 @@ tr:hover td { background: var(--surface-2); }
 .overview-sparkline-tooltip { position: absolute; z-index: 5; max-width: calc(100% - var(--space-2)); overflow: hidden; padding: 3px var(--space-2); border: 1px solid var(--border-strong); background: var(--inset); color: var(--text); box-shadow: 0 5px 16px rgba(0, 0, 0, 0.22); font-size: 0.68rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; transform: translate(-50%, calc(-100% - 5px)); }
 .overview-sparkline-tooltip[data-align="left"] { transform: translate(0, calc(-100% - 5px)); }
 .overview-sparkline-tooltip[data-align="right"] { transform: translate(-100%, calc(-100% - 5px)); }
+.overview-sparkline-range { display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--space-2); align-items: center; color: var(--faint); font-size: 0.68rem; line-height: 1.35; }
+.overview-sparkline-range span { position: relative; z-index: 1; width: max-content; padding: 1px var(--space-1); background: var(--surface); box-shadow: 0 0 0 2px var(--surface); white-space: nowrap; }
+.overview-sparkline-range span:nth-child(2) { justify-self: center; text-align: center; }
+.overview-sparkline-range span:last-child { justify-self: end; text-align: right; }
 
 .performance-interval-control { width: 288px; display: flex; flex-direction: column; gap: var(--space-1); }
 .performance-interval-row { display: flex; align-items: center; gap: var(--space-2); }
