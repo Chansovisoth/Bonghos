@@ -206,7 +206,7 @@ nav { flex: 1; overflow-y: auto; padding: var(--space-2); }
 .server-picker { display: grid; gap: var(--space-2); padding: var(--space-3) var(--space-4) var(--space-4); border-bottom: 1px solid var(--border); }
 .server-picker-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
 .server-kicker { color: var(--faint); font-size: 0.72rem; font-weight: 700; }
-.server-name { display: -webkit-box; min-width: 0; overflow: hidden; color: var(--text); font-size: 0.86rem; font-weight: 750; line-height: 1.3; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.server-name { display: -webkit-box; min-width: 0; overflow: hidden; color: var(--text); font-size: 0.86rem; line-height: 1.3; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 main { width: min(100%, 1440px); min-width: 0; margin-inline: auto; padding: var(--space-6) var(--layout-gutter); }
 main, .page-header, .page-header .title, .grid, .card, .panel { min-width: 0; }
 
@@ -501,7 +501,7 @@ tr:hover td { background: var(--surface-2); }
 .performance-feed-window { margin-left: auto; color: var(--faint); white-space: nowrap; }
 
 .performance-domain { padding-top: var(--space-3); }
-.performance-domain + .performance-domain { margin-top: var(--space-5); }
+.performance-domain + .performance-domain { margin-top: var(--space-7); }
 .performance-domain-readouts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--border); background: var(--surface); }
 .performance-readout { min-width: 0; min-height: 112px; display: grid; align-content: space-between; gap: var(--space-2); padding: var(--space-4); border-right: 1px solid var(--border); }
 .performance-readout:last-child { border-right: 0; }
