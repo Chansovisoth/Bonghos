@@ -511,6 +511,7 @@ const S = {
   perf: [],
   perfStorage: null,
   performanceTarget: "",
+  serverTargetId: null,
   perfDefaultIntervalSeconds: 10,
   perfIntervalSeconds: 0,
   uptimeBase: null,
@@ -565,8 +566,8 @@ const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
 const PERFORMANCE_INTERVAL_OPTIONS = [2, 5, 10, 30, 60];
 let demoPerformanceTimer = null;
 let performanceStorageRequest = 0;
-let performanceJumpStartTimer = null;
-let performanceJumpTimer = null;
+let navigationJumpStartTimer = null;
+let navigationJumpTimer = null;
 
 function savedPerformanceInterval() {
   const seconds = Number(localStorage.getItem(PERFORMANCE_INTERVAL_KEY) || 0);
@@ -908,6 +909,7 @@ function navigate(page, opts = {}) {
   const next = pageAllowed(page) ? page : defaultPage();
   S.page = next;
   S.performanceTarget = next === "performance" ? (opts.performanceTarget || "") : "";
+  S.serverTargetId = next === "servers" ? (opts.serverTargetId ?? null) : null;
   S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers");
   setSidebarOpen(false);
   if (!opts.fromHash) syncHash(next, !!opts.replaceHash);
@@ -1235,8 +1237,18 @@ function serverStatusCard(state, server) {
   const icon = server
     ? el("span", { class: "server-status-icon" }, serverCardIcon(server))
     : null;
-  return el("div", { class: "card metric " + normalized },
-    el("div", { class: "metric-label" }, "Server status"),
+  const targetId = server?.id ?? S.activeId;
+  return el("a", {
+    class: "card metric server-status-card " + normalized,
+    href: "#servers",
+    "aria-label": `Server status: ${label}. Open ${server?.display_name || "the active server"} in Servers.`,
+    onclick: (event) => {
+      event.preventDefault();
+      navigate("servers", { fromOverview: true, serverTargetId: targetId });
+    },
+  },
+    el("div", { class: "metric-label server-status-label-row" },
+      "Server status", solarIcon("alt-arrow-right-linear", "player-summary-arrow")),
     el("div", { class: "metric-value server-status-value" },
       icon,
       el("span", { class: "server-status-state" },
@@ -2416,24 +2428,28 @@ function activatePendingPerformanceTarget() {
   const target = document.getElementById(S.performanceTarget);
   if (!target) return false;
   S.performanceTarget = "";
-  if (performanceJumpStartTimer) clearTimeout(performanceJumpStartTimer);
-  if (performanceJumpTimer) clearTimeout(performanceJumpTimer);
-  document.querySelectorAll(".performance-jump-highlight").forEach((node) =>
-    node.classList.remove("performance-jump-highlight"));
+  activateNavigationTarget(target, "performance");
+  return true;
+}
+
+function activateNavigationTarget(target, page) {
+  if (navigationJumpStartTimer) clearTimeout(navigationJumpStartTimer);
+  if (navigationJumpTimer) clearTimeout(navigationJumpTimer);
+  document.querySelectorAll(".navigation-jump-highlight").forEach((node) =>
+    node.classList.remove("navigation-jump-highlight"));
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   requestAnimationFrame(() => {
     target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center", inline: "nearest" });
-    performanceJumpStartTimer = setTimeout(() => {
-      if (!target.isConnected || S.page !== "performance") return;
-      target.classList.add("performance-jump-highlight");
-      performanceJumpTimer = setTimeout(() => {
-        target.classList.remove("performance-jump-highlight");
-        performanceJumpTimer = null;
+    navigationJumpStartTimer = setTimeout(() => {
+      if (!target.isConnected || S.page !== page) return;
+      target.classList.add("navigation-jump-highlight");
+      navigationJumpTimer = setTimeout(() => {
+        target.classList.remove("navigation-jump-highlight");
+        navigationJumpTimer = null;
       }, 2000);
-      performanceJumpStartTimer = null;
+      navigationJumpStartTimer = null;
     }, reduceMotion ? 0 : 350);
   });
-  return true;
 }
 
 function updatePerformanceMeter(id, used, total, detail) {
@@ -3228,7 +3244,7 @@ async function pageServers(main) {
   await refreshServers();
   const ops = await api("/operations?active=true").catch(() => []);
   main.innerHTML = "";
-  const cards = S.servers.map((s2) => el("div", { class: "card server-card" },
+  const cards = S.servers.map((s2) => el("div", { class: "card server-card", id: `server-card-${s2.id}` },
     serverCardIcon(s2),
     s2.id === S.activeId ? el("span", { class: "tag server-card-active-mobile" }, "active") : null,
     el("div", { class: "server-card-body" },
@@ -3254,6 +3270,16 @@ async function pageServers(main) {
     ], overviewBackButton()),
     el("div", { id: "ops-host" }, ...(ops || []).map(opCard)),
     el("div", { class: "grid cols-2" }, cards.length ? cards : el("p", { class: "muted" }, "No servers imported yet — use “Import server”.")));
+  activatePendingServerTarget();
+}
+
+function activatePendingServerTarget() {
+  if (S.page !== "servers" || S.serverTargetId == null) return false;
+  const target = document.getElementById(`server-card-${S.serverTargetId}`);
+  if (!target) return false;
+  S.serverTargetId = null;
+  activateNavigationTarget(target, "servers");
+  return true;
 }
 
 function opCard(op) {
