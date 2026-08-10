@@ -23,6 +23,9 @@ const INLINE_SOLAR_ICONS = {
   "storage-refresh": {
     body: '<path d="M0 0h24v24H0z" fill="none"/><path fill="currentColor" d="M12.077 19q-2.931 0-4.966-2.033q-2.034-2.034-2.034-4.964t2.034-4.966T12.077 5q1.783 0 3.339.847q1.555.847 2.507 2.365V5h1v5.23h-5.23v-1h3.7q-.782-1.495-2.198-2.363T12.077 6q-2.5 0-4.25 1.75T6.077 12t1.75 4.25t4.25 1.75q1.925 0 3.475-1.1t2.175-2.9h1.062q-.662 2.246-2.514 3.623T12.077 19"/>',
   },
+  "wrap-text": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M4 7h16M4 17h5m-5-5h13.5a2.5 2.5 0 0 1 2.5 2.5v0a2.5 2.5 0 0 1-2.5 2.5h-5"/><path d="M15 15.5L12.5 17l2.5 1.5z"/></g>',
+  },
 };
 const BUTTON_ICONS = {
   "Activate": "check-circle-linear",
@@ -198,6 +201,22 @@ const fmtDur = (s) => {
   return `${m}m ${s % 60}s`;
 };
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleString() : "—";
+
+function recordMatchesSearch(record, query, ...formattedValues) {
+  if (!query) return true;
+  return `${JSON.stringify(record)} ${formattedValues.join(" ")}`.toLowerCase().includes(query);
+}
+
+function pageSearchInput(label, onSearch) {
+  const input = el("input", {
+    class: "page-search",
+    type: "search",
+    placeholder: `Search ${label.toLowerCase()}`,
+    "aria-label": `Search ${label.toLowerCase()}`,
+  });
+  input.addEventListener("input", () => onSearch(input.value.trim().toLowerCase()));
+  return input;
+}
 
 function toast(msg, kind = "") {
   const t = el("div", { class: "toast " + kind, role: "status" }, msg);
@@ -561,6 +580,7 @@ const S = {
   onlinePlayerCount: null,
   consoleLines: [],
   consolePaused: false,
+  consoleWrap: false,
   consoleSearch: "",
   consoleHistoryRequest: 0,
   commandHistory: [],
@@ -1413,7 +1433,7 @@ function lifecycleButtons(includeServers = false) {
 async function pageConsole(main) {
   main.innerHTML = "";
   const stopped = (S.status.state || "stopped") === "stopped";
-  const box = el("div", { class: "console" + (S.consolePaused ? " paused" : ""), id: "console-box", role: "log", "aria-live": S.consolePaused ? "off" : "polite" });
+  const box = el("div", { class: "console" + (S.consolePaused ? " paused" : "") + (S.consoleWrap ? " is-wrapped" : ""), id: "console-box", role: "log", "aria-live": S.consolePaused ? "off" : "polite" });
   const search = el("input", { value: S.consoleSearch, placeholder: "Search buffer", "aria-label": "Search console buffer" });
   const input = el("input", { placeholder: can("server.console.use") ? (stopped ? "Start the server to send commands" : "Command, for example: say hello") : "Read-only console", spellcheck: "false", autocomplete: "off" });
   if (!can("server.console.use") || stopped) input.disabled = true;
@@ -1444,6 +1464,20 @@ async function pageConsole(main) {
     try { await api("/server/command", { method: "POST", json: { command: cmd } }); toast("Command sent: " + cmd, "ok"); }
     catch (err) { toast(err.message, "err"); }
   };
+  const wrapButton = el("button", {
+    class: "btn ghost console-icon-control console-wrap-control" + (S.consoleWrap ? " is-active" : ""),
+    "aria-label": S.consoleWrap ? "Disable text wrapping" : "Wrap text",
+    "aria-pressed": String(S.consoleWrap),
+    title: S.consoleWrap ? "Disable text wrapping" : "Wrap text",
+    onclick: () => {
+      S.consoleWrap = !S.consoleWrap;
+      box.classList.toggle("is-wrapped", S.consoleWrap);
+      wrapButton.classList.toggle("is-active", S.consoleWrap);
+      wrapButton.setAttribute("aria-pressed", String(S.consoleWrap));
+      wrapButton.setAttribute("aria-label", S.consoleWrap ? "Disable text wrapping" : "Wrap text");
+      wrapButton.setAttribute("title", S.consoleWrap ? "Disable text wrapping" : "Wrap text");
+    },
+  }, solarIcon("wrap-text"));
   main.append(
     pageHeader("Console", "Live Minecraft output and command entry for the active server.", [renderStatusPillNode(), lifecycleButtons()]),
     el("div", { class: "console-shell" },
@@ -1455,6 +1489,7 @@ async function pageConsole(main) {
           title: S.consolePaused ? "Resume console" : "Pause console",
           onclick: () => { S.consolePaused = !S.consolePaused; pageConsole(main); },
         }, S.consolePaused ? "Resume" : "Pause"),
+        wrapButton,
         el("button", { class: "btn ghost console-icon-control", "aria-label": "Copy console", title: "Copy console", onclick: async () => {
           try { await navigator.clipboard.writeText(S.consoleLines.join("\n")); toast("Console buffer copied", "ok"); }
           catch { toast("Copy failed in this browser", "err"); }
@@ -1701,17 +1736,31 @@ async function pageFiles(main, path = filePath) {
       toast("Uploaded", "ok"); pageFiles(main, path);
     } catch (e) { toast(e.message, "err"); }
   });
-  const rows = (entries || []).map((e2) => el("tr", {},
+  const fileRow = (e2) => el("tr", {},
     el("td", { class: "mono", style: "cursor:pointer", onclick: () => {
       if (e2.is_dir) pageFiles(main, (path ? path + "/" : "") + e2.name);
       else openFileEditor(main, (path ? path + "/" : "") + e2.name);
     } }, fileIdentity(e2)),
     el("td", { class: "file-size-column" }, e2.is_dir ? "—" : fmtBytes(e2.size)),
     el("td", { class: "mobile-hide" }, fmtTime(e2.mod_time)),
-    el("td", { class: "table-actions file-actions-cell" }, fileActions(main, path, e2))));
+    el("td", { class: "table-actions file-actions-cell" }, fileActions(main, path, e2)));
+  const tbody = el("tbody");
+  const draw = (query = "") => {
+    const visible = (entries || []).filter((entry) => recordMatchesSearch(entry, query, fmtBytes(entry.size), fmtTime(entry.mod_time)));
+    tbody.replaceChildren(...(visible.length
+      ? visible.map(fileRow)
+      : [el("tr", {}, el("td", { colspan: "4", class: "muted" }, (entries || []).length ? "No matching files." : "Empty directory"))]));
+  };
+  const search = pageSearchInput("files", draw);
+  const project = S.servers.find((server) => server.id === S.managedServerId)
+    || S.servers.find((server) => server.id === S.activeId);
+  const projectState = project?.id === S.activeId ? "an Active" : "a Non-Active";
+  const subtitle = project
+    ? `Currently in ${projectState} project “${project.display_name}”.`
+    : "No server project selected.";
   main.append(
-    pageHeader("Files", `Constrained file manager for the “${(S.servers.find((server) => server.id === S.managedServerId)
-      || S.servers.find((server) => server.id === S.activeId))?.display_name || "active"}” server directory.`, [
+    pageHeader("Files", subtitle, [
+      search,
       el("button", { class: "btn", title: "Upload", onclick: () => upInput.click() }, solarIcon("upload-linear"), "Upload"),
       el("button", { class: "btn", title: "New folder", onclick: () => mkdirPrompt(main, path) }, solarIcon("folder-linear"), "New folder"),
       upInput,
@@ -1720,7 +1769,8 @@ async function pageFiles(main, path = filePath) {
     el("div", { class: "file-list" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", { class: "file-size-column" }, "Size"), el("th", { class: "mobile-hide" }, "Modified"), el("th", {}, ""))),
-        el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "4", class: "muted" }, "Empty directory"))))));
+        tbody)));
+  draw();
 }
 
 function fileActions(main, path, entry) {
@@ -2186,6 +2236,17 @@ async function pageConfiguration(main) {
     control.addEventListener("change", updateActions);
   });
 
+  const openServerProperties = () => {
+    if (!isDirty()) return openFileInEditor("server.properties");
+    confirmModal(
+      "Open server.properties",
+      "Open server.properties and discard the unsaved changes on this page?",
+      "Open file",
+      async () => openFileInEditor("server.properties"),
+      false,
+    );
+  };
+
   main.append(
     pageHeader("Configuration", `Startup, Java, memory, Minecraft properties, and recovery policy for ${inst.display_name}.`, [headerDiscard, headerSave]),
     d.eula ? null : el("div", { class: "notice" },
@@ -2209,7 +2270,9 @@ async function pageConfiguration(main) {
         el("div", { class: "field-row flow-section" }, el("label", {}, "Java installation", javaSel)))),
     el("h2", {}, "Server icon"),
     iconCard,
-    el("h2", {}, "server.properties"),
+    el("div", { class: "configuration-section-heading" },
+      el("h2", {}, "server.properties"),
+      can("server.files.manage") ? el("button", { class: "btn ghost", onclick: openServerProperties }, "Open server.properties") : null),
     el("div", { class: "card" }, propRows.length ? propRows : el("p", { class: "muted" }, "No server.properties found yet (it is created on first start).")),
     el("h2", {}, "Automation"),
     automationCard,
@@ -2241,7 +2304,7 @@ async function pageBackups(main) {
       false,
     );
   } }, label);
-  const rows = (list || []).map((b) => el("tr", {},
+  const backupRow = (b) => el("tr", {},
     el("td", { class: "mono" },
       el("span", {}, b.backup_id),
       el("span", { class: "mobile-only mobile-row-detail" }, `${b.backup_type.replace(/_/g, " ")} · ${fmtBytes(b.compressed_size)}`)),
@@ -2250,9 +2313,18 @@ async function pageBackups(main) {
     el("td", {}, fmtBytes(b.compressed_size)),
     el("td", { class: "mobile-hide" }, b.verification_status || "—"),
     el("td", { class: "mobile-hide" }, fmtTime(b.created_at)),
-    el("td", { class: "table-actions" }, backupActions(b))));
+    el("td", { class: "table-actions" }, backupActions(b)));
+  const tbody = el("tbody");
+  const draw = (query = "") => {
+    const visible = (list || []).filter((backup) => recordMatchesSearch(backup, query, fmtBytes(backup.compressed_size), fmtTime(backup.created_at)));
+    tbody.replaceChildren(...(visible.length
+      ? visible.map(backupRow)
+      : [el("tr", {}, el("td", { colspan: "7", class: "muted" }, (list || []).length ? "No matching backups." : "No backups yet."))]));
+  };
+  const search = pageSearchInput("backups", draw);
   main.append(
     pageHeader("Backups", "Verified archives, retention decisions, and restore controls. Online backups briefly pause world saving.", [
+      search,
       can("server.backups.create") ? mkBtn("world", "World backup") : null,
       can("server.backups.create") ? mkBtn("full", "Full backup") : null,
       can("server.backups.create") ? mkBtn("configuration", "Config backup") : null,
@@ -2261,7 +2333,8 @@ async function pageBackups(main) {
     el("div", { class: "table-wrap backups-table" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", { class: "mobile-hide" }, "Mode"), el("th", {}, "Size"), el("th", { class: "mobile-hide" }, "Verified"), el("th", { class: "mobile-hide" }, "Created"), el("th", {}, ""))),
-        el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "7", class: "muted" }, "No backups yet."))))));
+        tbody)));
+  draw();
 }
 
 function backupActions(backup) {
@@ -2342,7 +2415,7 @@ function restoreBackup(b) {
 async function pageSchedules(main) {
   const list = await api("/schedules");
   main.innerHTML = "";
-  const rows = (list || []).map((s) => el("tr", {},
+  const scheduleRow = (s) => el("tr", {},
     el("td", {}, s.name, s.enabled ? "" : el("span", { class: "tag inline-offset" }, "disabled")),
     el("td", {}, s.action.replace(/_/g, " ")),
     el("td", { class: "mono" }, s.schedule_type + ": " + s.schedule_expression + " (" + (s.timezone || "UTC") + ")"),
@@ -2358,15 +2431,25 @@ async function pageSchedules(main) {
         el("button", { class: "btn danger", onclick: () =>
           confirmModal("Delete schedule", `Delete schedule "${s.name}"?`, "Delete", async () => {
             try { await api(`/schedules/${s.id}`, { method: "DELETE" }); renderPage(); } catch (e) { toast(e.message, "err"); }
-          }) }, "Delete")] : "")));
+          }) }, "Delete")] : ""));
+  const tbody = el("tbody");
+  const draw = (query = "") => {
+    const visible = (list || []).filter((schedule) => recordMatchesSearch(schedule, query, fmtTime(schedule.next_run_at)));
+    tbody.replaceChildren(...(visible.length
+      ? visible.map(scheduleRow)
+      : [el("tr", {}, el("td", { colspan: "6", class: "muted" }, (list || []).length ? "No matching schedules." : "No schedules yet."))]));
+  };
+  const search = pageSearchInput("schedules", draw);
   main.append(
     pageHeader("Schedules", "Persistent Linux-host schedules with next run, last result, and manual run controls.", [
+      search,
       can("server.schedules.manage") ? el("button", { class: "btn primary", onclick: () => scheduleForm(null) }, "New schedule") : null,
     ]),
     el("div", { class: "table-wrap" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", {}, "Action"), el("th", {}, "When"), el("th", {}, "Next run"), el("th", {}, "Last result"), el("th", {}, ""))),
-        el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "6", class: "muted" }, "No schedules yet."))))));
+        tbody)));
+  draw();
 }
 
 function timezoneOffsetMinutes(timeZone, date) {
@@ -2971,7 +3054,7 @@ function renderStorageVisual(sample = S.perfStorage) {
       timestamp,
       emptyMessage: "Filesystem capacity is not available.",
       segments: [
-        { label: "Other used", value: otherUsed, tone: "info" },
+        { label: "Other used", value: otherUsed, tone: "warning" },
         { label: "Bonghos", value: bonghosOnDisk, tone: "accent" },
         { label: "Available", value: diskFree, tone: "empty" },
       ],
@@ -3663,7 +3746,7 @@ async function pageServers(main) {
   await refreshServers();
   const ops = await api("/operations?active=true").catch(() => []);
   main.innerHTML = "";
-  const cards = S.servers.map((s2) => el("div", { class: "card server-card", id: `server-card-${s2.id}` },
+  const serverCard = (s2) => el("div", { class: "card server-card", id: `server-card-${s2.id}` },
     serverCardIcon(s2),
     s2.id === S.activeId ? el("span", { class: "tag server-card-active-mobile" }, "active") : null,
     el("div", { class: "server-card-body" },
@@ -3685,13 +3768,23 @@ async function pageServers(main) {
           ? serverManagementButton(s2, "files", "Files", "folder-with-files-linear") : "",
         can("server.configuration.manage")
           ? serverManagementButton(s2, "configuration", "Configuration", "tuning-2-linear") : "",
-        serverActionsMenu(s2)))));
+        serverActionsMenu(s2))));
+  const cardsHost = el("div", { class: "grid cols-2" });
+  const draw = (query = "") => {
+    const visible = S.servers.filter((server) => recordMatchesSearch(server, query));
+    cardsHost.replaceChildren(...(visible.length
+      ? visible.map(serverCard)
+      : [el("p", { class: "muted" }, S.servers.length ? "No matching servers." : "No servers imported yet — use “Import server”.")]));
+  };
+  const search = pageSearchInput("servers", draw);
   main.append(
     pageHeader("Servers", "Project inventory, active-project selection, and persistent import progress.", [
+      search,
       can("server.import.manage") ? el("button", { class: "btn primary", onclick: importWizard }, "Import server") : null,
     ], overviewBackButton()),
     el("div", { id: "ops-host" }, ...(ops || []).map(opCard)),
-    el("div", { class: "grid cols-2" }, cards.length ? cards : el("p", { class: "muted" }, "No servers imported yet — use “Import server”.")));
+    cardsHost);
+  draw();
   activatePendingServerTarget();
 }
 
@@ -3976,36 +4069,55 @@ function importWizard() {
 async function pageActivity(main) {
   const list = await api("/activity");
   main.innerHTML = "";
+  const activityRow = (event) => el("tr", {},
+    el("td", {}, fmtTime(event.at)), el("td", {}, event.username), el("td", {}, event.action.replace(/_/g, " ")),
+    el("td", { class: "mono" }, event.target || ""), el("td", { class: "muted" }, event.detail || ""));
+  const tbody = el("tbody");
+  const draw = (query = "") => {
+    const visible = (list || []).filter((event) => recordMatchesSearch(event, query, fmtTime(event.at), event.action.replace(/_/g, " ")));
+    tbody.replaceChildren(...(visible.length
+      ? visible.map(activityRow)
+      : [el("tr", {}, el("td", { colspan: "5", class: "muted" }, (list || []).length ? "No matching activity." : "No audit events recorded yet."))]));
+  };
+  const search = pageSearchInput("activity", draw);
   main.append(
-    pageHeader("Activity", "Audit trail of account and server-management actions."),
+    pageHeader("Activity", "Audit trail of account and server-management actions.", [search]),
     el("div", { class: "table-wrap" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "User"), el("th", {}, "Action"), el("th", {}, "Target"), el("th", {}, "Detail"))),
-        el("tbody", {}, (list || []).length ? (list || []).map((a2) => el("tr", {},
-          el("td", {}, fmtTime(a2.at)), el("td", {}, a2.username), el("td", {}, a2.action.replace(/_/g, " ")),
-          el("td", { class: "mono" }, a2.target || ""), el("td", { class: "muted" }, a2.detail || "")))
-          : el("tr", {}, el("td", { colspan: "5", class: "muted" }, "No audit events recorded yet."))))));
+        tbody)));
+  draw();
 }
 
 // ----- users -----------------------------------------------------------------
 async function pageUsers(main) {
   const users = await api("/users");
   main.innerHTML = "";
-  const rows = (users || []).map((u) => el("tr", {},
+  const userRow = (u) => el("tr", {},
     el("td", {}, el("div", { class: "user-identity" },
       el("strong", {}, u.Username),
       el("span", { class: "mobile-only mobile-row-detail" }, `${u.Role} · ${u.Disabled ? "Disabled" : "Active"}`))),
     el("td", {}, el("span", { class: "tag" }, u.Role)),
     el("td", {}, u.Disabled ? "Disabled" : "Active"),
-    el("td", { class: "table-actions" }, userActions(u))));
+    el("td", { class: "table-actions" }, userActions(u)));
+  const tbody = el("tbody");
+  const draw = (query = "") => {
+    const visible = (users || []).filter((user) => recordMatchesSearch(user, query, user.Disabled ? "disabled" : "active"));
+    tbody.replaceChildren(...(visible.length
+      ? visible.map(userRow)
+      : [el("tr", {}, el("td", { colspan: "4", class: "muted" }, (users || []).length ? "No matching users." : "No users returned by the API."))]));
+  };
+  const search = pageSearchInput("users", draw);
   main.append(
     pageHeader("Users", "Accounts, roles, invitations, sessions, and final-Owner protection.", [
+      search,
       el("button", { class: "btn primary", onclick: inviteUser }, "Invite user"),
     ]),
     el("div", { class: "table-wrap users-table" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "Username"), el("th", {}, "Role"), el("th", {}, "Status"), el("th", {}, ""))),
-        el("tbody", {}, rows.length ? rows : el("tr", {}, el("td", { colspan: "4", class: "muted" }, "No users returned by the API."))))));
+        tbody)));
+  draw();
 }
 
 function userActions(user) {
@@ -4319,11 +4431,15 @@ function removeBot(bot) {
     });
 }
 
+function settingsSectionHeading(id, title, subtitle, action = null) {
+  return el("div", { class: "settings-section-head" },
+    el("div", {}, el("h2", { id }, title), subtitle ? el("p", { class: "muted" }, subtitle) : null),
+    action);
+}
+
 function botsSettingsSection(bots) {
-  return el("section", { class: "bots-settings", "aria-labelledby": "bots-settings-title" },
-    el("div", { class: "bots-section-head" },
-      el("div", {}, el("h2", { id: "bots-settings-title" }, "Bots"),
-        el("p", { class: "muted" }, "Send server and player activity to Telegram or Discord.")),
+  return el("section", { class: "settings-page-section", "aria-labelledby": "bots-settings-title" },
+    settingsSectionHeading("bots-settings-title", "Bots", "Send server and player activity to Telegram or Discord.",
       el("button", { class: "btn primary", onclick: () => botEditor() }, "Add bot")),
     bots.length
       ? el("div", { class: "bot-grid" }, ...bots.map(botCard))
@@ -4346,13 +4462,19 @@ async function pageSettings(main) {
   main.innerHTML = "";
   main.append(
     pageHeader("Settings", "Local preferences, notification bots, and application metadata."),
-    el("div", { class: "card" },
+    el("section", { class: "settings-page-section", "aria-labelledby": "general-settings-title" },
+      settingsSectionHeading("general-settings-title", "General", "Appearance and local preferences."),
+      el("div", { class: "card" },
       el("div", { class: "settings-row" },
         el("div", {}, el("h3", {}, "Theme"), el("p", { class: "muted" }, "System follows the operating-system color scheme and reacts to changes.")),
         el("div", { class: "theme-choice" },
           makeThemeButton("system", "System"),
           makeThemeButton("dark", "Dark"),
-          makeThemeButton("light", "Light"))),
+          makeThemeButton("light", "Light"))))),
+    can("security.manage") ? botsSettingsSection(bots) : null,
+    el("section", { class: "settings-page-section", "aria-labelledby": "about-settings-title" },
+      settingsSectionHeading("about-settings-title", "About", "Application details and monitoring behavior."),
+      el("div", { class: "card" },
       el("div", { class: "settings-row" },
         el("div", {}, el("h3", {}, "Monitoring"), el("p", { class: "muted" }, "Live metrics are subscribed only on Overview and Performance.")),
         el("dl", { class: "kv" },
@@ -4362,8 +4484,7 @@ async function pageSettings(main) {
         el("div", {}, el("h3", {}, "Application"), el("p", { class: "muted" }, "Runtime settings not exposed by the API are shown honestly rather than mocked.")),
         el("dl", { class: "kv" },
           el("dt", {}, "Version"), el("dd", { class: "mono" }, version.version),
-          el("dt", {}, "Frontend"), el("dd", {}, "Dependency-free vanilla HTML, CSS, and JavaScript embedded in the Go binary")))),
-    can("security.manage") ? botsSettingsSection(bots) : null);
+          el("dt", {}, "Frontend"), el("dd", {}, "Dependency-free vanilla HTML, CSS, and JavaScript embedded in the Go binary"))))));
 }
 
 // ---------------------------------------------------------------------------
