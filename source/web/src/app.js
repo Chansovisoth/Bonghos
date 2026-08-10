@@ -352,7 +352,13 @@ async function demoApi(path, opts = {}) {
   if (method !== "GET") {
     if (clean === "/server/start") { S.status = { state: "running" }; return { ok: true }; }
     if (clean === "/server/stop") { S.status = { state: "stopped" }; return { ok: true }; }
-    if (clean === "/server/restart") { S.status = { state: "restarting" }; return { ok: true }; }
+    if (clean === "/server/restart") {
+      S.status = { state: "stopping" };
+      lifecyclePendingSettled(S.status.state);
+      await demoDelay();
+      S.status = { state: "running" };
+      return { ok: true };
+    }
     if (clean === "/server/command") {
       S.consoleLines.push("> " + ((opts.json && opts.json.command) || ""));
       return { ok: true };
@@ -657,7 +663,7 @@ function handleEvent(m) {
     appendConsoleLine(data.line);
   } else if (type === "status") {
     S.status = data || S.status;
-    const lifecycleSettled = S.lifecyclePending && S.status.state === S.lifecyclePending.target;
+    const lifecycleSettled = lifecyclePendingSettled(S.status.state);
     if (lifecycleSettled) S.lifecyclePending = null;
     renderStatusPill();
     if (S.page === "overview" || (lifecycleSettled && S.page === "console")) renderPage();
@@ -962,6 +968,13 @@ async function refreshServers() {
     if (st) S.status = st;
     renderServerPicker();
   } catch (e) { /* server list may 403 for some roles */ }
+}
+
+function lifecyclePendingSettled(state) {
+  const pending = S.lifecyclePending;
+  if (!pending) return false;
+  if (pending.action === "restart" && state !== pending.target) pending.departed = true;
+  return state === pending.target && (pending.action !== "restart" || pending.departed);
 }
 
 function renderServerPicker() {
@@ -1272,8 +1285,8 @@ function serverStatusCard(state, server) {
 function lifecycleButtons(includeServers = false) {
   const st = S.status.state || "stopped";
   const running = st === "running" || st === "starting";
-  const pending = S.lifecyclePending && S.lifecyclePending.target !== st ? S.lifecyclePending : null;
-  if (S.lifecyclePending && !pending) S.lifecyclePending = null;
+  if (lifecyclePendingSettled(st)) S.lifecyclePending = null;
+  const pending = S.lifecyclePending;
   const wrap = el("div", { class: "row-actions" + (includeServers ? " overview-lifecycle-actions" : "") });
   const showLoading = (button) => {
     const icon = button.querySelector(":scope > .icon");
@@ -1284,12 +1297,12 @@ function lifecycleButtons(includeServers = false) {
     button.setAttribute("aria-busy", "true");
   };
   const act = async (path, label, action = "", target = "", button = null) => {
-    if (action && target) S.lifecyclePending = { action, target };
+    if (action && target) S.lifecyclePending = { action, target, departed: action !== "restart" };
     if (button) showLoading(button);
     try {
       await api(path, { method: "POST", json: {} });
       toast(label + " requested", "ok");
-      if (target && S.status.state === target) {
+      if (target && lifecyclePendingSettled(S.status.state)) {
         S.lifecyclePending = null;
         if (S.page === "overview" || S.page === "console") renderPage();
       }
@@ -1317,6 +1330,8 @@ function lifecycleButtons(includeServers = false) {
       wrap.append(lifecycleButton("start", "/server/start", "Start", "running", "btn primary"));
     if (pending.action === "stop" && can("server.stop"))
       wrap.append(lifecycleButton("stop", "/server/stop", "Stop", "stopped", "btn"));
+    if (pending.action === "restart" && can("server.restart"))
+      wrap.append(lifecycleButton("restart", "/server/restart", "Restart", "running", "btn"));
     if (includeServers && pending.action === "stop") wrap.append(serversButton());
     return wrap;
   }
@@ -1326,7 +1341,7 @@ function lifecycleButtons(includeServers = false) {
   if (can("server.stop") && running)
     wrap.append(lifecycleButton("stop", "/server/stop", "Stop", "stopped", "btn"));
   if (can("server.restart") && running)
-    wrap.append(el("button", { class: "btn", onclick: () => act("/server/restart", "Restart") }, "Restart"));
+    wrap.append(lifecycleButton("restart", "/server/restart", "Restart", "running", "btn"));
   if (can("server.force_stop") && st !== "stopped")
     wrap.append(el("button", { class: "btn danger", onclick: () =>
       confirmModal("Force stop", "Force stop kills the Java process immediately. Unsaved world data may be lost. Continue?",

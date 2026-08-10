@@ -74,7 +74,10 @@ func (r *Runner) Start(ctx context.Context) error {
 		return err
 	}
 	defer release()
+	return r.startLocked(ctx)
+}
 
+func (r *Runner) startLocked(ctx context.Context) error {
 	if r.Online() {
 		return errors.New("server is already running")
 	}
@@ -230,7 +233,9 @@ func (r *Runner) stopLocked(ctx context.Context) error {
 	return errors.New("graceful stop timed out; use Force Stop if required")
 }
 
-// Restart asks the supervisor to restart in place.
+// Restart performs a complete stop before starting a fresh supervisor. Keeping
+// the lifecycle lock across both phases prevents another operation from
+// slipping in while the server is stopped between them.
 func (r *Runner) Restart(ctx context.Context) error {
 	release, err := r.acquire("restart")
 	if err != nil {
@@ -238,43 +243,14 @@ func (r *Runner) Restart(ctx context.Context) error {
 	}
 	defer release()
 
-	if !r.Online() {
-		return r.startNoLock(ctx)
-	}
-	c, err := console.Dial(r.app.Home)
-	if err != nil {
-		return fmt.Errorf("cannot reach supervisor: %w", err)
-	}
-	defer c.Close()
-	if err := c.Control("restart"); err != nil {
-		return err
-	}
-	r.app.broadcastStatus()
-	return nil
-}
-
-func (r *Runner) startNoLock(ctx context.Context) error {
-	// Start without re-acquiring the lock (used inside Restart).
-	inst, err := r.app.activeInstance()
-	if err != nil {
-		return err
-	}
-	if err := r.validateStartable(inst); err != nil {
-		return err
-	}
-	if systemd.Available() {
-		if err := systemd.Start(systemd.ServiceMinecraft); err != nil {
-			return err
+	if r.Online() {
+		if err := r.stopLocked(ctx); err != nil {
+			return fmt.Errorf("stopping server for restart: %w", err)
 		}
-	} else if err := r.spawnDetachedSupervisor(); err != nil {
-		return err
 	}
-	r.app.Instances.TouchStarted(inst.ID)
-	r.app.resetPhases()
-	r.app.recordEvent(inst.ID, CatLifecycle, "starting", SevInfo,
-		"Starting "+inst.DisplayName, nil)
-	r.app.broadcastStatus()
-	go r.attachConsole()
+	if err := r.startLocked(ctx); err != nil {
+		return fmt.Errorf("server stopped but could not start again: %w", err)
+	}
 	return nil
 }
 
