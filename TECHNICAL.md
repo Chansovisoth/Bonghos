@@ -268,7 +268,7 @@ See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) before contributing.
 
 ## Validation status and limitations
 
-This section describes the v0.2.0-rc.1 prerelease.
+This section describes the v0.2.0-rc.1 release.
 
 ### Automated coverage
 
@@ -287,7 +287,7 @@ This section describes the v0.2.0-rc.1 prerelease.
 - The ARM64 build has not yet been tested on physical ARM hardware.
 - Interrupted URL downloads restart from zero; HTTP range resume is not implemented.
 
-Treat the prerelease as unproven for irreplaceable worlds until you have independent backups and have tested a restore yourself.
+Treat this early release as unproven for irreplaceable worlds until you have independent backups and have tested a restore yourself.
 
 ## Roadmap boundaries
 

@@ -6,7 +6,7 @@
 
 Bonghos lets you import, configure, run, monitor, schedule, back up, restore, and manage Minecraft Java Edition servers from a browser. It runs directly on your Linux machine with no Docker, cloud account, subscription, or required telemetry.
 
-> **Current release:** v0.2.0-rc.1 is a prerelease. Keep independent backups and test restores before using it with an important world.
+> **Status: v0.2.0-rc.1** — latest release. Keep independent backups and test restores before using it with an important world.
 
 For implementation details, security design, data layout, development instructions, and current limitations, see [TECHNICAL.md](TECHNICAL.md).
 
