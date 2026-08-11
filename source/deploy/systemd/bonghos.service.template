@@ -24,13 +24,12 @@ ExecStart="<resolved-root>/system/bin/bonghos" --home "<resolved-root>" serve
 Restart=on-failure
 RestartSec=5s
 
-# Conservative hardening. These are compatible with the control plane, which
-# only touches BONGHOS_HOME and spawns the Minecraft user service.
+# Portable hardening for an unprivileged user service. Do not add
+# ProtectControlGroups, ProtectKernelModules or ProtectKernelTunables here:
+# systemd implements them with capability-boundary changes that restricted
+# hosts can reject with 218/CAPABILITIES before Bonghos starts.
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectControlGroups=yes
-ProtectKernelModules=yes
-ProtectKernelTunables=yes
 RestrictSUIDSGID=yes
 
 [Install]

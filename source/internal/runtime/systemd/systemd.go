@@ -76,9 +76,6 @@ Restart=on-failure
 RestartSec=5s
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectControlGroups=yes
-ProtectKernelModules=yes
-ProtectKernelTunables=yes
 RestrictSUIDSGID=yes
 
 [Install]

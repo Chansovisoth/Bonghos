@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The generated control-plane systemd user service no longer applies
+  capability-derived kernel and control-group hardening that restricted hosts
+  reject with `218/CAPABILITIES`. It remains an unprivileged service with
+  `NoNewPrivileges`, `RestrictSUIDSGID`, and a private temporary directory.
+
 ## [0.2.0-rc.1] - 2026-08-11
 
 ### Security

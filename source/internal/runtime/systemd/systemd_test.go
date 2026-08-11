@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestGeneratedUnitsQuotePathsAndApplyHardening(t *testing.T) {
+func TestGeneratedUnitsQuotePathsAndApplyPortableHardening(t *testing.T) {
 	home := `/srv/Bonghos Server/100% ready`
 	bin := home + `/system/bin/bonghos`
 	control := ControlPlaneUnit(home, bin)
@@ -28,14 +28,20 @@ func TestGeneratedUnitsQuotePathsAndApplyHardening(t *testing.T) {
 		}
 	}
 
-	for _, want := range []string{
-		`PrivateTmp=yes`,
-		`ProtectControlGroups=yes`,
-		`ProtectKernelModules=yes`,
-		`ProtectKernelTunables=yes`,
+	if !strings.Contains(control, `PrivateTmp=yes`) {
+		t.Error("control-plane unit does not contain PrivateTmp=yes")
+	}
+	// ProtectControlGroups, ProtectKernelModules and ProtectKernelTunables
+	// implicitly alter the capability bounding set. Some restricted Linux
+	// hosts reject those changes in user units with 218/CAPABILITIES before
+	// Bonghos can start. The process is already an unprivileged user service.
+	for _, incompatible := range []string{
+		`ProtectControlGroups=`,
+		`ProtectKernelModules=`,
+		`ProtectKernelTunables=`,
 	} {
-		if !strings.Contains(control, want) {
-			t.Errorf("control-plane unit does not contain %q", want)
+		if strings.Contains(control, incompatible) {
+			t.Errorf("control-plane unit contains non-portable hardening %q", incompatible)
 		}
 	}
 	if strings.Contains(minecraft, "\n[Install]\n") {
