@@ -67,13 +67,41 @@ func TestBotAPIEncryptsTokenAndSupportsToggles(t *testing.T) {
 	}
 }
 
-func TestBotAPIRequiresOwnerSecurityPermission(t *testing.T) {
+func TestBotAPIEmptyListReturnsJSONArray(t *testing.T) {
 	env := newTestEnv(t)
-	secret := env.createUser("member", "correct horse battery", authorization.RoleMember)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
 	client := env.newClient()
-	client.mustLogin("member", "correct horse battery", secret)
-	if status, _ := client.do(http.MethodGet, "/api/bots", nil, nil); status != http.StatusForbidden {
-		t.Fatalf("member GET /api/bots = %d, want 403", status)
+	client.mustLogin("owner", "correct horse battery", secret)
+
+	var listed []*bot.Config
+	status, body := client.do(http.MethodGet, "/api/bots", nil, &listed)
+	if status != http.StatusOK {
+		t.Fatalf("list empty bots: %d %s", status, body)
+	}
+	if strings.TrimSpace(body) != "[]" {
+		t.Fatalf("empty bot list JSON = %q, want []", body)
+	}
+	if listed == nil || len(listed) != 0 {
+		t.Fatalf("decoded empty bot list = %#v, want non-nil empty slice", listed)
+	}
+}
+
+func TestBotAPIRequiresOwnerSecurityPermission(t *testing.T) {
+	for _, role := range []authorization.Role{
+		authorization.RoleAdmin,
+		authorization.RoleMember,
+		authorization.RoleViewer,
+	} {
+		t.Run(string(role), func(t *testing.T) {
+			env := newTestEnv(t)
+			username := string(role)
+			secret := env.createUser(username, "correct horse battery", role)
+			client := env.newClient()
+			client.mustLogin(username, "correct horse battery", secret)
+			if status, _ := client.do(http.MethodGet, "/api/bots", nil, nil); status != http.StatusForbidden {
+				t.Fatalf("%s GET /api/bots = %d, want 403", role, status)
+			}
+		})
 	}
 }
 

@@ -5732,11 +5732,12 @@ function botsSettingsSection(bots) {
 }
 
 async function pageSettings(main) {
-  const [version, bots, host] = await Promise.all([
+  const [version, rawBots, host] = await Promise.all([
     api("/version").catch(() => ({ version: "unknown" })),
     can("security.manage") ? api("/bots") : Promise.resolve([]),
     can("server.configuration.manage") ? api("/host").catch(() => null) : Promise.resolve(null),
   ]);
+  const bots = Array.isArray(rawBots) ? rawBots : [];
   const makeThemeButton = (value, label) => el("button", {
     class: "btn ghost" + (themeChoice() === value ? " active" : ""),
     "data-theme-choice": value,

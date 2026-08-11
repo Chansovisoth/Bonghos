@@ -55,6 +55,16 @@ func TestStoreEncryptsAndRedactsTokens(t *testing.T) {
 	}
 }
 
+func TestStoreListEmptyReturnsNonNilSlice(t *testing.T) {
+	configs, err := testStore(t).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configs == nil || len(configs) != 0 {
+		t.Fatalf("empty list = %#v, want non-nil empty slice", configs)
+	}
+}
+
 func TestStorePatchAndEventFiltering(t *testing.T) {
 	store := testStore(t)
 	config, err := store.Create(CreateInput{

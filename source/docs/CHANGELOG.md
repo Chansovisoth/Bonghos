@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability-derived kernel and control-group hardening that restricted hosts
   reject with `218/CAPABILITIES`. It remains an unprivileged service with
   `NoNewPrivileges`, `RestrictSUIDSGID`, and a private temporary directory.
+- Settings no longer crashes when no notification bots exist: the Bots API now
+  returns an empty JSON array and the Web UI also tolerates a legacy `null`
+  response.
 
 ## [0.2.0-rc.1] - 2026-08-11
 

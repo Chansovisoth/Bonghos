@@ -174,7 +174,7 @@ func (s *Store) List() ([]*Config, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var configs []*Config
+	configs := make([]*Config, 0)
 	for rows.Next() {
 		config, scanErr := scanConfig(rows)
 		if scanErr != nil {
