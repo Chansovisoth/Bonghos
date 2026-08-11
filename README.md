@@ -6,7 +6,7 @@
 
 - Repository: <https://github.com/Chansovisoth/Bonghos>
 - License: AGPL-3.0-only
-- Status: v0.1.1 — early, actively developed. See [Known limitations](#known-limitations).
+- Status: v0.2.0-rc.1 — prerelease, actively developed. See [Known limitations](#known-limitations).
 
 Bonghos imports, configures, runs, monitors, schedules, backs up, restores and manages
 Minecraft Java Edition modded servers directly on Linux — no Docker, no cloud account,
@@ -135,7 +135,7 @@ Bonghos and Minecraft run as a **normal Linux user**. Root is never required.
 
 | Layer | Choice |
 |---|---|
-| Backend, CLI, supervisor | Go 1.22+ |
+| Backend, CLI, supervisor | Go 1.26.5 |
 | Database | SQLite (WAL, foreign keys, versioned migrations) |
 | Frontend | Dependency-free HTML/CSS/JavaScript, embedded via Go `embed` |
 | Process management | systemd **user** services |
@@ -197,7 +197,7 @@ cd ~/bonghos-source
 ### From an extracted source archive
 
 ```bash
-cd ~/Downloads/Bonghos-0.1.1
+cd ~/Downloads/Bonghos-0.2.0-rc.1
 chmod +x setup.sh
 ./setup.sh
 ```
@@ -220,10 +220,12 @@ chmod +x setup.sh
 
 ### Runtime dependencies
 
-Required: a 64-bit Linux system, Java 17 or 21 (for Minecraft), `tar`, `gzip`.
-Optional: `tmux` (console), `unzip`, `xz-utils`, `zstd`, `p7zip-full`, `unrar`.
+Required: a 64-bit Linux system and Java 17 or 21 for Minecraft.
+Optional: `tmux` (console). Archive imports use built-in readers for `.zip`,
+`.tar`, `.tar.gz`, and `.tar.zst`; external archive extractors are not used.
 
-Build-time only: Go 1.22+, Git, and a C compiler (`gcc`, usually already
+Build-time only: patched Go 1.26.5+ (older Go installations can select it
+automatically through `go.mod`), Git, and a C compiler (`gcc`, usually already
 present). The SQLite driver is a cgo package, so `CGO_ENABLED=0` builds link
 successfully but fail at the first database access — keep cgo enabled. Building
 for ARM64 from an x86 machine additionally needs `gcc-aarch64-linux-gnu`.
@@ -291,8 +293,9 @@ rsync -a ~/bonghos/ user@new-host:~/bonghos/
 ~/bonghos/system/bin/bonghos doctor --repair
 ```
 
-Because `system/config/secret.key` travels with it, accounts and authenticator apps
-keep working. **Losing `secret.key` makes encrypted data permanently unrecoverable.**
+Because `system/config/secret.key` travels with it, accounts, authenticator apps and
+notification bots keep working. **Losing `secret.key` makes encrypted TOTP secrets
+and bot tokens permanently unrecoverable.**
 
 Or use portable exports:
 
@@ -421,8 +424,9 @@ make fmt       # gofmt
 Or verify your environment first with `./setup.sh --dev`.
 
 The frontend has no JavaScript build step: edit `source/web/src/` and rebuild to
-re-embed. Dependencies are vendored under `source/third_party/`, so the project builds
-offline (`GOPROXY=direct`).
+re-embed. Selected dependencies are maintained as local replacements under
+`source/third_party/`; remaining Go modules are verified through `go.sum` and
+the standard Go checksum database.
 
 To safely merge the `webui` branch into `main`, use the guarded integration helper:
 
@@ -442,7 +446,7 @@ Contributions welcome — see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.m
 
 ## Known limitations
 
-This is v0.1.1. Being honest about what is and is not proven:
+This is v0.2.0-rc.1. Being honest about what is and is not proven:
 
 - **Covered by unit tests** (`source/internal/*/`): canonical path containment,
   archive-extraction safety, authenticated encryption, TOTP against the RFC 6238
@@ -460,11 +464,14 @@ This is v0.1.1. Being honest about what is and is not proven:
   is verified by hand. A subscription-key mismatch that silently disabled every live
   update survived release precisely because nothing tested the browser side; treat UI
   behaviour as the least-proven part of the project.
-- **Not yet verified against a real modded server on real hardware.** The test fixtures
-  are synthetic.
-- systemd integration is implemented but was validated in an environment without a live
+- **Not yet verified against a complete modded server on real hardware.** The Linux
+  suite now launches OpenJDK and verifies Java-process discovery and cleanup, but its
+  server-pack fixtures remain synthetic.
+- Generated systemd units pass `systemd-analyze verify`, including custom home paths
+  containing spaces. Boot and restart lifecycle behaviour still needs a live systemd
   user manager.
-- ARM64 builds are supported by the toolchain but have not been run on ARM hardware.
+- The CGO-enabled ARM64 release binary is cross-built and run under ARM64 emulation,
+  including opening its SQLite database. Physical ARM hardware remains untested.
 - URL downloads restart from zero if interrupted (range-resume is designed for, not
   implemented).
 

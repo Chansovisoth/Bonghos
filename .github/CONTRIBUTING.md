@@ -27,8 +27,9 @@ make fmt       # gofmt the tree
 make run       # run with BONGHOS_HOME=./devhome
 ```
 
-Dependencies are vendored under `source/third_party/`, so the project builds
-offline with `GOPROXY=direct`.
+Selected dependencies are maintained as local replacements under
+`source/third_party/`. Remaining modules use the normal Go module proxy and
+checksum database.
 
 **cgo is required.** The SQLite driver is a cgo package, so a `CGO_ENABLED=0`
 build links and starts but fails at the first database access. Keep cgo enabled;

@@ -2,6 +2,8 @@
 #
 # Generated automatically by `bonghos service install` / `bonghos service repair`
 # and installed to ~/.config/systemd/user/bonghos-minecraft.service.
+# In WorkingDirectory, escape spaces as \x20; the generated unit does this
+# automatically.
 #
 # IMPORTANT: this unit has NO [Install] section on purpose. It must never start
 # unconditionally at boot. The Bonghos control plane starts it on demand after
@@ -19,9 +21,9 @@ After=network.target
 
 [Service]
 Type=exec
-Environment=BONGHOS_HOME=<resolved-root>
+Environment="BONGHOS_HOME=<resolved-root>"
 WorkingDirectory=<resolved-root>
-ExecStart=<resolved-root>/system/bin/bonghos --home <resolved-root> supervisor
+ExecStart="<resolved-root>/system/bin/bonghos" --home "<resolved-root>" supervisor
 Restart=on-failure
 RestartSec=5s
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -37,7 +38,7 @@ import (
 //go:embed all:webdist
 var webEmbed embed.FS
 
-var version = "0.1.1"
+var version = "0.2.0-rc.1"
 
 func main() {
 	app.Version = version
@@ -65,6 +66,8 @@ func main() {
 		err = cmdConsole(*home, args)
 	case "doctor":
 		err = cmdDoctor(*home, args)
+	case "database":
+		err = cmdDatabase(*home, args)
 	case "fix-permissions":
 		err = cmdFixPerms(*home)
 	case "export":
@@ -142,6 +145,7 @@ Backups:
 
 Maintenance:
   doctor [--repair]         Diagnose (and optionally repair) the installation
+  database checkpoint       Integrity-check and checkpoint the SQLite database
   fix-permissions           Restore expected file modes inside the home
   export [flags]            Create a portable export archive
   import [--force] <file>   Import a portable export archive
@@ -297,7 +301,7 @@ func cmdSetup(home string) error {
 			if err := systemd.Install(home, a.Cfg.GracefulStopSeconds); err != nil {
 				fmt.Println("Service install failed:", err)
 			} else {
-				fmt.Println("Services installed and enabled.")
+				fmt.Println("Services installed. Enable bonghos.service when you are ready to start the panel.")
 				if hint, err := systemd.LingerHint(); err == nil && hint != "" {
 					fmt.Println(hint)
 				}
@@ -450,6 +454,25 @@ func cmdConsoleDirect(home string) error {
 // ---------------------------------------------------------------------------
 // doctor / fix-permissions
 // ---------------------------------------------------------------------------
+
+func cmdDatabase(home string, args []string) error {
+	if len(args) != 1 || args[0] != "checkpoint" {
+		return errors.New("usage: bonghos database checkpoint")
+	}
+	db, err := database.OpenForMaintenance(filepath.Join(home, config.FileDatabase))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := database.IntegrityCheck(db); err != nil {
+		return err
+	}
+	if err := database.Checkpoint(db); err != nil {
+		return err
+	}
+	fmt.Println("Database integrity check passed and WAL checkpoint completed.")
+	return nil
+}
 
 func cmdDoctor(home string, args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)

@@ -14,11 +14,13 @@ jobs:
     name: Build and test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          go-version: '1.22'
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: source/go.mod
           cache-dependency-path: source/go.sum
 
       - name: gofmt
@@ -35,6 +37,17 @@ jobs:
         working-directory: source
         run: go vet ./cmd/... ./internal/...
 
+      - name: Vulnerability scan
+        working-directory: source
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./cmd/... ./internal/...
+
+      - name: Credential leak scan
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          gitleaks git --redact --config .gitleaks.toml --no-banner
+
       - name: Test
         working-directory: source
         run: go test -race ./internal/...
@@ -50,10 +63,10 @@ jobs:
       matrix:
         goarch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version: '1.22'
+          go-version-file: source/go.mod
           cache-dependency-path: source/go.sum
 
       # The SQLite driver is a cgo package: CGO_ENABLED=0 builds link fine but
@@ -88,7 +101,7 @@ jobs:
           ./bonghos-linux-amd64 --home "$tmp/home" user list
           ./bonghos-linux-amd64 version
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bonghos-linux-${{ matrix.goarch }}
           path: source/bonghos-linux-${{ matrix.goarch }}
@@ -98,7 +111,7 @@ jobs:
     name: Shell script checks
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Syntax check
         run: bash -n setup.sh
@@ -107,7 +120,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y shellcheck
-          shellcheck -S warning setup.sh || true
+          shellcheck -S warning setup.sh scripts/integrate-webui.sh
 
       - name: setup.sh --help works
         run: ./setup.sh --help
@@ -123,7 +136,7 @@ jobs:
     name: Documentation consistency
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Required root files exist
         run: |
@@ -189,10 +202,14 @@ jobs:
           setup_v=$(sed -n 's/^BONGHOS_VERSION="\(.*\)"$/\1/p' setup.sh)
           main_v=$(sed -n 's/^var version = "\(.*\)"$/\1/p' source/cmd/bonghos/main.go)
           make_v=$(sed -n 's/^VERSION *?= *\(.*\)$/\1/p' source/Makefile | tr -d ' ')
-          echo "setup.sh=$setup_v main.go=$main_v Makefile=$make_v"
+          app_v=$(sed -n 's/^var Version = "\(.*\)-dev"$/\1/p' source/internal/app/app.go)
+          echo "setup.sh=$setup_v main.go=$main_v Makefile=$make_v app.go=$app_v"
           if [ "$setup_v" != "$main_v" ] || [ "$setup_v" != "$make_v" ]; then
             echo "version strings disagree"; exit 1
           fi
+          [ "$setup_v" = "$app_v" ] || { echo "app fallback version disagrees"; exit 1; }
+          grep -q "version: \"$setup_v-demo\"" source/web/src/app.js \
+            || { echo "demo API version disagrees"; exit 1; }
           grep -q "Bonghos version: *$setup_v" Tutorial.txt \
             || { echo "Tutorial.txt does not state version $setup_v"; exit 1; }
           grep -q "Status: v$setup_v" README.md \

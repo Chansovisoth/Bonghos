@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -49,7 +50,17 @@ func readJSON(r *http.Request, v any, maxBytes int64) error {
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxBytes))
 	dec.DisallowUnknownFields()
-	return dec.Decode(v)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("request body must contain one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 // secureHeaders sets standard security headers and a CSP suitable for the
@@ -59,8 +70,9 @@ func (a *App) secureHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet, noimageindex")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(self), publickey-credentials-get=(self)")
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' data: https://minotar.net; style-src 'self' 'unsafe-inline'; "+
 				"script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'")
@@ -88,15 +100,28 @@ func (a *App) csrfProtect(next http.Handler) http.Handler {
 }
 
 func (a *App) issueCSRF(w http.ResponseWriter, r *http.Request) string {
+	var tok string
+	existing := false
 	if c, err := r.Cookie(csrfCookie); err == nil && len(c.Value) == 64 {
-		return c.Value
+		tok = c.Value
+		existing = true
+	} else {
+		b := make([]byte, 32)
+		_, _ = rand.Read(b)
+		tok = hex.EncodeToString(b)
 	}
-	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	tok := hex.EncodeToString(b)
+	secure := requestUsesHTTPS(r)
+	// Same-origin GET requests made through a TLS-terminating tunnel may omit
+	// Origin. If a valid cookie already exists, do not reissue it without the
+	// Secure attribute and accidentally downgrade the cookie created at login.
+	// A later HTTPS POST still reissues it as Secure, which also upgrades a token
+	// first obtained from the unauthenticated login page.
+	if existing && !secure {
+		return tok
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name: csrfCookie, Value: tok, Path: "/",
-		SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secure,
 	})
 	return tok
 }
@@ -138,15 +163,28 @@ func (a *App) setSessionCookie(w http.ResponseWriter, r *http.Request, token str
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: token, Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteStrictMode,
-		Secure: r.TLS != nil, Expires: expires,
+		Secure: requestUsesHTTPS(r), Expires: expires,
 	})
 }
 
-func (a *App) clearSessionCookie(w http.ResponseWriter) {
+func (a *App) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: "", Path: "/",
-		HttpOnly: true, MaxAge: -1, SameSite: http.SameSiteStrictMode,
+		HttpOnly: true, Secure: requestUsesHTTPS(r), MaxAge: -1, SameSite: http.SameSiteStrictMode,
 	})
+}
+
+// requestUsesHTTPS recognizes direct TLS and a same-origin HTTPS request made
+// through a local reverse proxy or tunnel. It deliberately does not trust
+// forwarding headers, which an exposed client could forge when Bonghos is
+// bound directly.
+func requestUsesHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	origin := r.Header.Get("Origin")
+	u, err := url.Parse(origin)
+	return err == nil && u.Scheme == "https" && strings.EqualFold(u.Host, r.Host)
 }
 
 // spaHandler serves the embedded frontend, falling back to index.html for

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
+<meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
 <title>Bonghos</title>
 <script>
 (() => {
@@ -35,6 +36,8 @@
       <label>Username<input id="login-user" autocomplete="username" required></label>
       <label>Password<input id="login-pass" type="password" autocomplete="current-password" required></label>
       <button type="submit" class="btn primary" id="login-continue">Continue</button>
+      <div class="auth-divider"><span>or</span></div>
+      <button type="button" class="btn ghost login-passkey-button" id="login-passkey">Sign in with a passkey</button>
     </div>
 
     <div id="login-step-2" class="hidden">
@@ -45,8 +48,10 @@
       </div>
       <input id="login-code" class="otp-input" inputmode="numeric" pattern="[0-9A-Za-z-]*" maxlength="32" placeholder="6-digit code or recovery code" autocomplete="one-time-code" aria-describedby="login-code-help">
       <p id="login-code-help" class="hint">Paste a six-digit code or enter a recovery code.</p>
-      <button type="submit" class="btn primary" id="login-btn">Verify</button>
-      <button type="button" class="btn ghost" id="login-back">Back</button>
+      <div class="auth-actions">
+        <button type="button" class="btn ghost" id="login-back">Back</button>
+        <button type="submit" class="btn primary" id="login-btn">Verify</button>
+      </div>
     </div>
 
     <div id="login-error" class="error hidden"></div>
@@ -56,24 +61,24 @@
 <div id="app-view" class="app hidden">
   <header class="mobile-topbar">
     <button id="sidebar-toggle" class="btn ghost icon-button" type="button" aria-label="Open navigation" aria-controls="app-sidebar" aria-expanded="false"></button>
-    <div class="brand brand-logo mobile-brand" aria-label="Bonghos">
+    <a class="brand brand-logo mobile-brand" href="#overview" aria-label="Go to Overview">
       <span class="brand-name">&gt;BONGHOS</span>
       <svg class="brand-symbol" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M0 0h24v24H0z" fill="none"></path>
         <path fill="currentColor" d="M23 11v2h-1v1h-7v1h-1v2h-1v1h-1v2h-1v1h-1v1H7v-3h1v-3h1v-2H5v1H4v1H3v1H1v-3h1v-4H1V7h2v1h1v1h1v1h4V8H8V5H7V2h3v1h1v1h1v2h1v1h1v2h1v1h7v1z"></path>
       </svg>
-    </div>
+    </a>
     <button class="btn ghost icon-button theme-toggle mobile-theme-toggle" type="button" data-theme-toggle></button>
   </header>
   <button id="sidebar-scrim" class="sidebar-scrim" type="button" aria-label="Close navigation" tabindex="-1"></button>
   <aside id="app-sidebar" class="sidebar">
-    <div class="brand brand-logo small" aria-label="Bonghos">
+    <a class="brand brand-logo small" href="#overview" aria-label="Go to Overview">
       <span class="brand-name">&gt;BONGHOS</span>
       <svg class="brand-symbol" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M0 0h24v24H0z" fill="none"></path>
         <path fill="currentColor" d="M23 11v2h-1v1h-7v1h-1v2h-1v1h-1v2h-1v1h-1v1H7v-3h1v-3h1v-2H5v1H4v1H3v1H1v-3h1v-4H1V7h2v1h1v1h1v1h4V8H8V5H7V2h3v1h1v1h1v2h1v1h1v2h1v1h7v1z"></path>
       </svg>
-    </div>
+    </a>
     <div id="server-picker" class="server-picker"></div>
     <nav id="nav"></nav>
     <div class="sidebar-foot">

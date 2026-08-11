@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0-rc.1] - 2026-08-11
+
+### Security
+
+- WebSocket subscriptions now use an explicit topic allowlist. Activity,
+  backup, schedule and console-command events require their matching backend
+  permissions; unknown topics are rejected instead of inheriting
+  `server.view`.
+- Live WebSocket sessions are disconnected immediately after logout, session
+  revocation, account disable/delete or a role change, and are revalidated
+  every five seconds to cover out-of-process administration.
+- External `.tar.xz`, `.7z` and `.rar` extractors are no longer used for
+  untrusted imports because they wrote to disk before Bonghos could validate
+  archive paths. In-process `.zip`, `.tar`, `.tar.gz` and `.tar.zst` imports
+  remain supported with traversal, link, size, file-count and disk-reserve
+  checks.
+- Session and CSRF cookies now retain secure attributes behind a same-origin
+  HTTPS reverse proxy or tunnel; the CSRF cookie is HttpOnly, JSON request
+  bodies reject trailing values, and the fixed player-avatar proxy refuses
+  redirects.
+- Builds now select Go 1.26.5, `golang-jwt/jwt` is updated to 5.2.2 and
+  `klauspost/compress` to 1.18.7. The audit found no reachable or package-level
+  advisories; the remaining inactive module advisory was removed by the
+  `klauspost/compress` update.
+
 ### Fixed (reported from a live modded server)
 
 - The supervisor looked up its active project in an `app_state` table that does
@@ -39,9 +64,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   console. Bookkeeping commands are now suppressed from the console stream
   while still being parsed and logged. The suppressible list is closed, so
   nothing can be run invisibly.
+- Generated systemd units omitted hardening present in their reference
+  templates and produced invalid `WorkingDirectory` values for custom Bonghos
+  homes containing spaces. Unit values are now safely escaped and the generated
+  services pass `systemd-analyze verify`.
 
 ### Added
 
+- WebAuthn passkeys can now be enrolled, renamed and removed from Security, then used
+  for username-free sign-in. Enrollment requires password and TOTP
+  re-verification, discoverable credentials and user verification; the native
+  browser prompt supports the current device, cross-device sign-in and
+  hardware security keys without exposing private key material to Bonghos.
 - Settings can now manage encrypted Telegram and Discord notification bots,
   including a master enable switch, independent ready/stopped/player-join/
   player-leave switches, a test-message action, and removal. Ready alerts are
@@ -68,7 +102,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings, explains when a pack regenerates its argument file, and links
   straight to that file in the editor.
 - Vendored `rsc.io/qr` (BSD-3-Clause) under `source/third_party/qr`, consistent
-  with the other vendored dependencies, so builds stay offline-reproducible.
+  with the other locally maintained dependency replacements. QR rendering does
+  not add a browser-side or runtime network dependency.
+
+### Changed
+
+- The embedded Web UI has been expanded across Overview, Performance,
+  Servers, Files, Configuration, Players, Backups, Schedules, Users, Activity,
+  Security and Settings while preserving the compact Bonghos visual language.
+  This includes responsive search/filter controls, table action menus, direct
+  project navigation, light/dark themes and clearer mobile layouts.
+- Overview and Performance now expose host and Java CPU/memory choices,
+  per-core CPU detail, temperature, host/Bonghos storage breakdowns, explicit
+  refresh controls and hoverable history charts. Disk scans occur on page
+  entry or manual refresh rather than every metrics interval.
+- Server management now includes rename, server icon crop/resize, inactive
+  project file/config access, mod-loader and game-version detection, and
+  configuration inputs for common `server.properties` values and JVM argument
+  files.
+- CI and release vulnerability scans target the application package roots
+  explicitly, so ignored developer caches under `source/bin` cannot make a
+  local release audit fail package discovery.
+- CI now enforces ShellCheck warnings for both `setup.sh` and the guarded Web
+  UI integration helper instead of discarding the result.
+- The installer now removes stale embedded Web UI assets, verifies the new
+  provider images, accepts only exact official Git remote URL forms without a
+  warning, and selects the patched Go 1.26.5 toolchain declared by `go.mod`.
+- Updates now stop database writers before taking a private SQLite snapshot,
+  integrity-check and checkpoint without applying migrations, and restore the
+  previous executable, database and configuration if post-migration validation
+  fails. The snapshot also protects existing bot tokens and passkey metadata.
 
 ## [0.1.1] — 2026-08-03
 
@@ -278,7 +341,8 @@ no Docker or containers.
   React, TypeScript, Vite and Tailwind stack originally specified, so the
   project builds reproducibly offline with no JavaScript supply chain. The
   rationale is documented in `source/web/README.md`.
-- Go dependencies are vendored under `source/third_party/`.
+- Selected Go dependencies are maintained as local replacements under
+  `source/third_party/`; remaining modules are pinned in `go.sum`.
 - The SQLite driver requires cgo. Builds must use `CGO_ENABLED=1`; a
   `CGO_ENABLED=0` build compiles and starts but fails on the first database
   access. Cross-compiling for ARM64 needs `gcc-aarch64-linux-gnu`.
@@ -312,6 +376,7 @@ Docker or any container runtime; billing or subscriptions; public registration;
 browser shell access; automatic router, firewall, port-forwarding or tunnel
 configuration; required telemetry.
 
-[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.2.0-rc.1...HEAD
+[0.2.0-rc.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.1...v0.2.0-rc.1
 [0.1.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Chansovisoth/Bonghos/releases/tag/v0.1.0

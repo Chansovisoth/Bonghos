@@ -12,7 +12,7 @@
 BINARY      := bonghos
 BIN_DIR     := bin
 OUT         := $(BIN_DIR)/$(BINARY)
-VERSION     ?= 0.1.1
+VERSION     ?= 0.2.0-rc.1
 DEV_HOME    ?= $(CURDIR)/devhome
 
 WEB_SRC     := web/src
@@ -20,9 +20,8 @@ WEB_DIST    := cmd/bonghos/webdist
 
 LDFLAGS     := -s -w -X github.com/Chansovisoth/Bonghos/internal/app.Version=$(VERSION)
 
-# Dependencies are vendored under third_party/, so builds work offline.
-export GOPROXY ?= direct
-export GOSUMDB ?= off
+# Selected dependencies are maintained as local replacements under third_party/.
+# Remaining modules use the normal Go proxy and checksum database.
 
 .PHONY: all build web test vet fmt fmt-check run clean tidy install-local help
 
@@ -32,9 +31,11 @@ all: build
 ## There is no JavaScript build step by design — see web/README.md.
 web:
 	@mkdir -p $(WEB_DIST)
-	@rm -f $(WEB_DIST)/*.html $(WEB_DIST)/*.css $(WEB_DIST)/*.js
+	@find $(WEB_DIST) -mindepth 1 -maxdepth 1 ! -name .gitkeep -delete
 	@cp $(WEB_SRC)/* $(WEB_DIST)/
-	@test -f $(WEB_DIST)/index.html || (echo "frontend build produced no index.html" && exit 1)
+	@for asset in index.html app.js style.css Telegram.png Discord.png; do \
+		test -f $(WEB_DIST)/$$asset || { echo "frontend build produced no $$asset"; exit 1; }; \
+	done
 	@echo "Web UI prepared for embedding"
 
 build: web

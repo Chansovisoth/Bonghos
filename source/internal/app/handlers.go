@@ -29,12 +29,19 @@ func (a *App) routes() http.Handler {
 
 	// --- session / auth -----------------------------------------------------
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
+	mux.HandleFunc("POST /api/auth/passkey/begin", a.handlePasskeyLoginBegin)
+	mux.HandleFunc("POST /api/auth/passkey/finish", a.handlePasskeyLoginFinish)
 	mux.HandleFunc("POST /api/auth/logout", a.requireAuth(a.handleLogout))
 	mux.HandleFunc("GET /api/auth/me", a.requireAuth(a.handleMe))
 	mux.HandleFunc("GET /api/auth/csrf", a.handleCSRF)
 	mux.HandleFunc("GET /api/invitations/{token}", a.handleInvitationCheck)
 	mux.HandleFunc("POST /api/invitations/{token}/activate", a.handleInvitationActivate)
 	mux.HandleFunc("POST /api/invitations/{token}/totp", a.handleInvitationTOTP)
+	mux.HandleFunc("GET /api/passkeys", a.requireAuth(a.handlePasskeyList))
+	mux.HandleFunc("POST /api/passkeys/register/begin", a.requireAuth(a.handlePasskeyRegisterBegin))
+	mux.HandleFunc("POST /api/passkeys/register/finish", a.requireAuth(a.handlePasskeyRegisterFinish))
+	mux.HandleFunc("PATCH /api/passkeys/{id}", a.requireAuth(a.handlePasskeyUpdate))
+	mux.HandleFunc("DELETE /api/passkeys/{id}", a.requireAuth(a.handlePasskeyDelete))
 
 	// --- users --------------------------------------------------------------
 	mux.HandleFunc("GET /api/users", a.requirePerm(authorization.PermUsersManage, a.handleUserList))
@@ -193,10 +200,14 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {
+	u, _ := a.sessionUser(r)
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		_ = a.Auth.RevokeSession(c.Value)
 	}
-	a.clearSessionCookie(w)
+	if u != nil {
+		a.Hub.DisconnectUser(u.ID)
+	}
+	a.clearSessionCookie(w, r)
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -343,6 +354,7 @@ func (a *App) handleUserRole(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
+	a.Hub.DisconnectUser(target.ID)
 	a.audit(actor.ID, actor.Username, "role_changed", target.Username, string(newRole), remoteIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -369,6 +381,7 @@ func (a *App) handleUserDisable(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
+	a.Hub.DisconnectUser(target.ID)
 	a.audit(actor.ID, actor.Username, "account_disabled", target.Username, fmt.Sprint(req.Disabled), remoteIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -388,6 +401,7 @@ func (a *App) handleUserRevoke(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
+	a.Hub.DisconnectUser(target.ID)
 	a.audit(actor.ID, actor.Username, "sessions_revoked", target.Username, "", remoteIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -407,6 +421,7 @@ func (a *App) handleUserDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
+	a.Hub.DisconnectUser(target.ID)
 	a.audit(actor.ID, actor.Username, "user_deleted", target.Username, "", remoteIP(r))
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
@@ -906,6 +921,7 @@ func (a *App) handleHost(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"bind_address":      a.Cfg.BindAddress,
 		"port":              a.Cfg.Port,
+		"session_hours":     a.Cfg.SessionHours,
 		"home":              a.Home,
 		"mem_total":         memT,
 		"mem_available":     memA,
@@ -913,8 +929,8 @@ func (a *App) handleHost(w http.ResponseWriter, r *http.Request) {
 		"disk_free":         storage.DiskFree,
 		"load1":             monitoring.LoadAvg(),
 		"systemd":           systemd.Available(),
-		"service_bonghos":   systemd.Status(systemd.ServiceControlPlane),
-		"service_minecraft": systemd.Status(systemd.ServiceMinecraft),
+		"service_bonghos":   systemd.State(systemd.ServiceControlPlane),
+		"service_minecraft": systemd.State(systemd.ServiceMinecraft),
 		"version":           Version,
 		"note":              "Local listening does not prove public accessibility. Port forwarding, firewalls and tunnels remain your responsibility.",
 	}
@@ -970,10 +986,31 @@ func (a *App) handleActivity(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, map[string]any{
 			"id": id, "username": username, "action": action,
-			"target": target, "detail": detail, "at": at,
+			"target": target, "detail": detail, "remote_addr": remote, "at": at,
 		})
 	}
 	writeJSON(w, 200, out)
+}
+
+func websocketTopicAllowed(role authorization.Role, topic string) bool {
+	switch topic {
+	case "overview", "performance", "servers":
+		return authorization.Has(role, authorization.PermServerView)
+	case "console":
+		return authorization.Has(role, authorization.PermConsoleView)
+	case "console_use":
+		return authorization.Has(role, authorization.PermConsoleUse)
+	case "players":
+		return authorization.Has(role, authorization.PermPlayersView)
+	case "backups":
+		return authorization.Has(role, authorization.PermBackupsView)
+	case "schedules":
+		return authorization.Has(role, authorization.PermSchedulesManage)
+	case "activity":
+		return authorization.Has(role, authorization.PermConfigManage)
+	default:
+		return false
+	}
 }
 
 // handleWS upgrades the authenticated websocket.
@@ -983,17 +1020,14 @@ func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, errors.New("authentication required"))
 		return
 	}
-	canUse := func(topic string) bool {
-		switch topic {
-		case "console":
-			return authorization.Has(u.Role, authorization.PermConsoleView)
-		case "players":
-			return authorization.Has(u.Role, authorization.PermPlayersView)
-		case "backups":
-			return authorization.Has(u.Role, authorization.PermBackupsView)
-		default:
-			return authorization.Has(u.Role, authorization.PermServerView)
+	canUse := func(topic string) bool { return websocketTopicAllowed(u.Role, topic) }
+	cookie, _ := r.Cookie(sessionCookie)
+	stillAuthorized := func() bool {
+		if cookie == nil || cookie.Value == "" {
+			return false
 		}
+		current, err := a.Auth.ValidateSession(cookie.Value)
+		return err == nil && current.ID == u.ID && current.Role == u.Role
 	}
 	onCommand := func(cmd string) {
 		if !authorization.Has(u.Role, authorization.PermConsoleUse) {
@@ -1007,5 +1041,5 @@ func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
 			a.audit(u.ID, u.Username, "console_command", "", cmd, remoteIP(r))
 		}
 	}
-	a.Hub.Serve(w, r, u.ID, canUse, onCommand)
+	a.Hub.Serve(w, r, u.ID, canUse, stillAuthorized, onCommand)
 }

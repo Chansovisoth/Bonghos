@@ -18,6 +18,7 @@ const (
 	writeWait       = 10 * time.Second
 	pongWait        = 60 * time.Second
 	pingPeriod      = 45 * time.Second
+	authCheckPeriod = 5 * time.Second
 )
 
 var upgrader = ws.Upgrader{
@@ -62,6 +63,23 @@ type Hub struct {
 
 func NewHub() *Hub {
 	return &Hub{clients: map[*client]bool{}}
+}
+
+// DisconnectUser closes every live connection for userID. Session revocation,
+// account disabling and role changes call this so stale WebSocket permissions
+// do not survive an administrative action.
+func (h *Hub) DisconnectUser(userID int64) {
+	h.mu.RLock()
+	var conns []*ws.Conn
+	for c := range h.clients {
+		if c.userID == userID {
+			conns = append(conns, c.conn)
+		}
+	}
+	h.mu.RUnlock()
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 }
 
 // SubscriberCount returns how many clients subscribe to a topic (used to
@@ -161,7 +179,8 @@ func (h *Hub) broadcastDueAt(topic, typ string, data any, fallback time.Duration
 // Serve upgrades an already-authenticated request. canUse gates topics by
 // the user's role (e.g. Members cannot subscribe to console).
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID int64,
-	canUse func(topic string) bool, onCommand func(command string)) {
+	canUse func(topic string) bool, stillAuthorized func() bool,
+	onCommand func(command string)) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -175,7 +194,7 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID int64,
 	h.clients[c] = true
 	h.mu.Unlock()
 
-	go c.writeLoop()
+	go c.writeLoop(stillAuthorized)
 	c.readLoop(h, onCommand)
 
 	h.mu.Lock()
@@ -248,9 +267,12 @@ func (c *client) readLoop(h *Hub, onCommand func(string)) {
 	}
 }
 
-func (c *client) writeLoop() {
-	ticker := time.NewTicker(pingPeriod)
-	defer ticker.Stop()
+func (c *client) writeLoop(stillAuthorized func() bool) {
+	pingTicker := time.NewTicker(pingPeriod)
+	authTicker := time.NewTicker(authCheckPeriod)
+	defer pingTicker.Stop()
+	defer authTicker.Stop()
+	defer c.conn.Close()
 	for {
 		select {
 		case msg, ok := <-c.send:
@@ -262,9 +284,13 @@ func (c *client) writeLoop() {
 			if err := c.conn.WriteMessage(ws.TextMessage, msg); err != nil {
 				return
 			}
-		case <-ticker.C:
+		case <-pingTicker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(ws.PingMessage, nil); err != nil {
+				return
+			}
+		case <-authTicker.C:
+			if stillAuthorized != nil && !stillAuthorized() {
 				return
 			}
 		}

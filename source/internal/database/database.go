@@ -16,9 +16,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/migrations"
 )
 
-// Open opens (creating if needed) the SQLite database at path with WAL mode,
-// foreign keys and busy timeout, then applies pending migrations.
-func Open(path string) (*sql.DB, error) {
+func open(path string) (*sql.DB, error) {
 	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_foreign_keys=on&_busy_timeout=5000&_txlock=immediate", path)
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
@@ -29,11 +27,29 @@ func Open(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	return db, nil
+}
+
+// Open opens (creating if needed) the SQLite database at path with WAL mode,
+// foreign keys and busy timeout, then applies pending migrations.
+func Open(path string) (*sql.DB, error) {
+	db, err := open(path)
+	if err != nil {
+		return nil, err
+	}
 	if err := Migrate(db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return db, nil
+}
+
+// OpenForMaintenance opens the database without applying migrations. The
+// installer uses it to integrity-check and checkpoint an older database before
+// taking the pre-update snapshot; applying a migration first would make that
+// snapshot unsuitable for a rollback to the previous executable.
+func OpenForMaintenance(path string) (*sql.DB, error) {
+	return open(path)
 }
 
 // IntegrityCheck runs PRAGMA integrity_check and returns an error on failure.

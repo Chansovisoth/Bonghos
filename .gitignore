@@ -1,7 +1,17 @@
 # Build artifacts
 /source/bin/
 /source/bonghos
+/source/bonghos.exe
 /source/bonghos-linux-*
+/source/*.test
+/source/coverage.out
+/source/coverage.*
+/source/*.prof
+
+# Locally reproduced release artifacts
+/bonghos-linux-*
+/Bonghos-*-source.tar.gz
+/SHA256SUMS.txt
 
 # Embedded frontend is generated from web/src by `make web` / setup.sh
 /source/cmd/bonghos/webdist/*
@@ -9,16 +19,32 @@
 
 # Local development runtime
 /source/devhome/
+/.tmp/
+
+# Local environment and diagnostic output
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
 
 # Editors and OS
 *.swp
+*.swo
 *~
 .DS_Store
+Thumbs.db
+Desktop.ini
+.vs/
 .idea/
 .vscode/
 
 # Never commit secrets or runtime data
 secret.key
+bonghos.toml
+*.key
+*.p12
+*.pfx
 *.db
 *.db-wal
 *.db-shm

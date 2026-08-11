@@ -4,6 +4,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish, for example v0.2.0-rc.1
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -13,20 +18,46 @@ jobs:
     name: Build and publish release artifacts
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          go-version: '1.22'
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: source/go.mod
           cache-dependency-path: source/go.sum
 
       - name: Test before releasing
         working-directory: source
         run: go test ./internal/...
 
+      - name: Vulnerability scan before releasing
+        working-directory: source
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./cmd/... ./internal/...
+
       - name: Determine version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$REQUESTED_TAG"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) echo "release tag must begin with v" >&2; exit 1 ;;
+          esac
+          version="${tag#v}"
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
 
       # mattn/go-sqlite3 is a cgo package. Building with CGO_ENABLED=0 would
       # publish binaries that fail at the first database access, so cgo stays
@@ -73,8 +104,10 @@ jobs:
         run: sha256sum bonghos-linux-* Bonghos-*-source.tar.gz > SHA256SUMS.txt
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          prerelease: ${{ steps.version.outputs.prerelease }}
           files: |
             bonghos-linux-amd64
             bonghos-linux-arm64

@@ -725,11 +725,28 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	admin := minecraft.ReadAdminFiles(inst.AbsoluteDir(a.Home))
+	normalizeUUID := func(value string) string {
+		return strings.ToLower(strings.ReplaceAll(value, "-", ""))
+	}
 	opNames := make(map[string]bool, len(admin.Ops))
 	opUUIDs := make(map[string]bool, len(admin.Ops))
 	for _, op := range admin.Ops {
-		opNames[strings.ToLower(op.Name)] = true
-		opUUIDs[strings.ToLower(strings.ReplaceAll(op.UUID, "-", ""))] = true
+		if name := strings.ToLower(strings.TrimSpace(op.Name)); name != "" {
+			opNames[name] = true
+		}
+		if uuid := normalizeUUID(op.UUID); uuid != "" {
+			opUUIDs[uuid] = true
+		}
+	}
+	bannedNames := make(map[string]bool, len(admin.Banned))
+	bannedUUIDs := make(map[string]bool, len(admin.Banned))
+	for _, ban := range admin.Banned {
+		if name := strings.ToLower(strings.TrimSpace(ban.Name)); name != "" {
+			bannedNames[name] = true
+		}
+		if uuid := normalizeUUID(ban.UUID); uuid != "" {
+			bannedUUIDs[uuid] = true
+		}
 	}
 	rows, err := a.DB.Query(`SELECT username, uuid, is_online, first_seen_at, last_seen_at,
 		last_joined_at, last_left_at, observed_playtime_seconds, current_session_started_at
@@ -744,6 +761,7 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		UUID             string `json:"uuid,omitempty"`
 		Online           bool   `json:"online"`
 		OP               bool   `json:"op"`
+		Banned           bool   `json:"banned"`
 		FirstSeenAt      string `json:"first_seen_at"`
 		LastSeenAt       string `json:"last_seen_at"`
 		LastJoinedAt     string `json:"last_joined_at,omitempty"`
@@ -764,8 +782,12 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		if uuid != nil {
 			p.UUID = *uuid
 		}
-		p.OP = opNames[strings.ToLower(p.Username)] ||
-			opUUIDs[strings.ToLower(strings.ReplaceAll(p.UUID, "-", ""))]
+		usernameKey := strings.ToLower(strings.TrimSpace(p.Username))
+		uuidKey := normalizeUUID(p.UUID)
+		p.OP = (usernameKey != "" && opNames[usernameKey]) ||
+			(uuidKey != "" && opUUIDs[uuidKey])
+		p.Banned = (usernameKey != "" && bannedNames[usernameKey]) ||
+			(uuidKey != "" && bannedUUIDs[uuidKey])
 		if joined != nil {
 			p.LastJoinedAt = *joined
 		}

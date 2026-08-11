@@ -138,7 +138,7 @@ func Doctor(home string, repair bool) (*Report, error) {
 	keyPath := filepath.Join(home, config.FileSecretKey)
 	if _, err := os.Stat(keyPath); err != nil {
 		r.add("secret.key", StatusError,
-			"secret.key missing — encrypted TOTP secrets are unrecoverable without it; a new key will be generated on next serve, requiring account TOTP re-enrollment")
+			"secret.key missing — encrypted TOTP secrets and notification bot tokens are unrecoverable without it; a new key will be generated on next serve, requiring TOTP re-enrollment and new bot tokens")
 	} else if _, err := security.LoadSecretKey(keyPath); err != nil {
 		r.add("secret.key", StatusError, "secret.key unreadable or invalid: "+err.Error())
 	} else {
@@ -168,12 +168,6 @@ func Doctor(home string, repair bool) (*Report, error) {
 		hint     string
 	}{
 		{"tmux", true, "optional console client; install with: sudo apt install tmux"},
-		{"tar", false, ""},
-		{"unzip", true, "needed for .zip imports via external fallback"},
-		{"xz", true, "needed for .tar.xz archives"},
-		{"zstd", true, "external zstd not required (built-in Go zstd is used)"},
-		{"7z", true, "needed only for .7z archives"},
-		{"unrar", true, "needed only for .rar archives"},
 	} {
 		if _, err := exec.LookPath(tool.name); err != nil {
 			if tool.optional {

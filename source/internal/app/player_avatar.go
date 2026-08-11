@@ -18,8 +18,20 @@ const maxPlayerAvatarBytes = 512 * 1024
 var (
 	playerNameRE        = regexp.MustCompile(`^[A-Za-z0-9_]{1,16}$`)
 	playerAvatarBaseURL = "https://minotar.net/helm"
-	playerAvatarClient  = &http.Client{Timeout: 5 * time.Second}
+	playerAvatarClient  = newPlayerAvatarClient()
 )
+
+func newPlayerAvatarClient() *http.Client {
+	return &http.Client{
+		Timeout: 5 * time.Second,
+		// The avatar endpoint is fixed. Refusing redirects prevents a remote
+		// service from turning this server-side fetch into an internal-network
+		// request while still allowing the original public endpoint.
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
 
 func (a *App) handlePlayerAvatar(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(r.URL.Query().Get("username"))

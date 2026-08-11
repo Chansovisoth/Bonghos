@@ -119,6 +119,28 @@ func TestDetectFormat(t *testing.T) {
 	}
 }
 
+func TestExternallyExtractedFormatsAreRejected(t *testing.T) {
+	formats := []struct {
+		name  string
+		magic []byte
+	}{
+		{"pack.tar.xz", []byte("\xfd7zXZ\x00")},
+		{"pack.7z", []byte("7z\xbc\xaf\x27\x1c")},
+		{"pack.rar", []byte("Rar!\x1a\x07\x00")},
+	}
+	for _, tt := range formats {
+		t.Run(tt.name, func(t *testing.T) {
+			src := filepath.Join(t.TempDir(), tt.name)
+			if err := os.WriteFile(src, tt.magic, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := Extract(src, t.TempDir(), lim(), nil); !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("Extract() returned %v, want ErrUnsupported", err)
+			}
+		})
+	}
+}
+
 func TestFindServerRoot(t *testing.T) {
 	dest := t.TempDir()
 	inner := filepath.Join(dest, "SomePack-1.0")

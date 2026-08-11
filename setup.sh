@@ -20,11 +20,11 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$PROJECT_ROOT/source"
 OFFICIAL_REPO="https://github.com/Chansovisoth/Bonghos"
 
-BONGHOS_VERSION="0.1.1"
+BONGHOS_VERSION="0.2.0-rc.1"
 
 # Some minimal environments (containers, cron) do not export USER.
 USER="${USER:-$(id -un)}"
-MIN_GO_MINOR=22          # require go1.22+
+MIN_GO_VERSION="1.26.5" # patched toolchain selected by source/go.mod
 MIN_DISK_MB=1024
 
 # ---------------------------------------------------------------------------
@@ -193,12 +193,6 @@ detect_system() {
     distro="${ID:-unknown}"; version="${VERSION_ID:-}"
   fi
   arch="$(uname -m)"
-  case "$arch" in
-    x86_64)  GOARCH_EXPECT="amd64" ;;
-    aarch64|arm64) GOARCH_EXPECT="arm64" ;;
-    *)       GOARCH_EXPECT="$arch" ;;
-  esac
-  DISTRO="$distro"; DISTRO_VERSION="$version"; HOST_ARCH="$arch"
   info "System: ${distro} ${version} (${arch})"
   case "$distro" in
     ubuntu|debian|linuxmint|pop|elementary|raspbian) ;;
@@ -244,11 +238,19 @@ check_go() {
     APT_MISSING+=("golang-go")
     return 1
   fi
-  local v minor
-  v="$(go version 2>/dev/null | awk '{print $3}')"   # go1.22.2
-  minor="$(printf '%s' "$v" | sed -n 's/^go1\.\([0-9]\+\).*/\1/p')"
-  if [ -z "$minor" ] || [ "$minor" -lt "$MIN_GO_MINOR" ]; then
-    die "Go 1.$MIN_GO_MINOR or newer is required (found ${v:-unknown}). Install a newer Go and try again."
+  local v version major minor patch
+  # Run inside the module so Go's standard toolchain selection honors the
+  # exact patched version declared by go.mod when GOTOOLCHAIN=auto.
+  v="$(cd "$SOURCE_DIR" && go env GOVERSION 2>/dev/null)" || true
+  version="${v#go}"
+  IFS=. read -r major minor patch <<EOF
+$version
+EOF
+  major="${major:-0}"; minor="${minor:-0}"; patch="${patch:-0}"
+  if [ "$major" -lt 1 ] || \
+     { [ "$major" -eq 1 ] && [ "$minor" -lt 26 ]; } || \
+     { [ "$major" -eq 1 ] && [ "$minor" -eq 26 ] && [ "$patch" -lt 5 ]; }; then
+    die "Go $MIN_GO_VERSION or newer is required (selected ${v:-unknown}). Enable Go's automatic toolchain selection or install a patched Go release."
   fi
   ok "Go $v"
 }
@@ -277,16 +279,9 @@ check_dependencies() {
   # The SQLite driver is a cgo package, so a C compiler is genuinely required.
   need_pkg gcc  build-essential required "compiling the SQLite driver (cgo)" || true
   need_pkg git  git  required "source retrieval and updates" || true
-  need_pkg tar  tar  required "archive handling" || true
-  need_pkg gzip gzip required "archive handling" || true
 
   head1 "Optional runtime tools"
   need_pkg tmux    tmux         optional "optional 'bonghos console' session"
-  need_pkg unzip   unzip        optional "ZIP server packs"
-  need_pkg xz      xz-utils     optional ".tar.xz server packs"
-  need_pkg zstd    zstd         optional "tar.zst backups (recommended)"
-  need_pkg 7z      p7zip-full   optional ".7z server packs"
-  need_pkg unrar   unrar        optional ".rar server packs (not bundled; proprietary)"
 
   head1 "systemd user services"
   if have systemctl && systemctl --user show-environment >/dev/null 2>&1; then
@@ -338,9 +333,14 @@ build_frontend() {
   # source/web/README.md for why this project avoids a JS build pipeline.
   [ -d "$SOURCE_DIR/web/src" ] || die "frontend source missing at $SOURCE_DIR/web/src"
   mkdir -p "$WEBDIST"
-  rm -f "$WEBDIST"/*.html "$WEBDIST"/*.css "$WEBDIST"/*.js 2>/dev/null || true
+  # Remove every previously generated asset so renamed PNGs or other files are
+  # not silently retained in the embedded release.
+  find "$WEBDIST" -mindepth 1 -maxdepth 1 ! -name .gitkeep -delete
   cp "$SOURCE_DIR/web/src"/* "$WEBDIST"/
-  [ -f "$WEBDIST/index.html" ] || die "frontend build produced no index.html"
+  local asset
+  for asset in index.html app.js style.css Telegram.png Discord.png; do
+    [ -f "$WEBDIST/$asset" ] || die "frontend build produced no $asset"
+  done
   ok "Web UI prepared for embedding ($(find "$WEBDIST" -type f | wc -l) files)"
 }
 
@@ -378,11 +378,11 @@ build_binary() { # build_binary <output-path>
 # Atomically install the executable via a same-filesystem temp file + rename.
 install_binary() { # install_binary <built-path>
   local built="$1" tmp
-  mkdir -p "$BIN_DIR"
+  mkdir -p "$BIN_DIR" || return 1
   tmp="$BIN_DIR/.bonghos.new.$$"
-  cp "$built" "$tmp"
-  chmod 0755 "$tmp"
-  mv -f "$tmp" "$BIN_PATH"
+  cp "$built" "$tmp" || { rm -f "$tmp"; return 1; }
+  chmod 0755 "$tmp" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$BIN_PATH" || { rm -f "$tmp"; return 1; }
   ok "Installed $BIN_PATH"
 }
 
@@ -405,7 +405,7 @@ git_pull_ff_only() {
     exit 1
   fi
 
-  local branch upstream remote remote_url
+  local branch upstream remote remote_url remote_url_normalized
   branch="$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD)"
   if [ "$branch" = "HEAD" ]; then
     die "the checkout is in detached HEAD state; check out a branch before using --pull"
@@ -418,13 +418,16 @@ git_pull_ff_only() {
   fi
   remote="${upstream%%/*}"
   remote_url="$(git -C "$PROJECT_ROOT" remote get-url "$remote" 2>/dev/null || echo unknown)"
+  remote_url_normalized="${remote_url%/}"
 
   say "  Branch:   $branch"
   say "  Upstream: $upstream"
   say "  Remote:   $remote_url"
 
-  case "$remote_url" in
-    *Chansovisoth/Bonghos*) ;;
+  case "${remote_url_normalized,,}" in
+    https://github.com/chansovisoth/bonghos|https://github.com/chansovisoth/bonghos.git|\
+    git@github.com:chansovisoth/bonghos|git@github.com:chansovisoth/bonghos.git|\
+    ssh://git@github.com/chansovisoth/bonghos|ssh://git@github.com/chansovisoth/bonghos.git) ;;
     *) warn "Remote does not match the official repository ($OFFICIAL_REPO)."
        confirm "Continue updating from this remote anyway?" N || exit 1 ;;
   esac
@@ -506,7 +509,7 @@ mode_install() {
   build_binary "$TMP_ROOT/bonghos"
 
   head1 "Installing"
-  install_binary "$TMP_ROOT/bonghos"
+  install_binary "$TMP_ROOT/bonghos" || die "could not install the Bonghos executable"
 
   head1 "First-run setup"
   say "You will now create the first Owner account and enrol two-factor"
@@ -526,7 +529,7 @@ mode_dev() {
   check_dependencies
   check_java
   info "Downloading Go module dependencies ..."
-  ( cd "$SOURCE_DIR" && go mod download ) || warn "go mod download failed (dependencies are vendored under source/third_party)"
+  ( cd "$SOURCE_DIR" && go mod download ) || die "could not download required Go modules"
   run_tests
   cat <<EOF
 
@@ -554,6 +557,50 @@ mode_build() {
   mkdir -p "$SOURCE_DIR/bin"
   build_binary "$SOURCE_DIR/bin/bonghos"
   ok "Executable ready at $SOURCE_DIR/bin/bonghos (nothing was installed)"
+}
+
+restore_update_services() { # restore_update_services <control-was-active> <minecraft-was-active>
+  local cp_was_active="$1" mc_was_active="$2"
+  [ "${SYSTEMD_OK:-0}" = "1" ] || return 0
+  if [ "$cp_was_active" = "1" ]; then
+    systemctl --user start bonghos.service || warn "could not restore bonghos.service"
+  fi
+  if [ "$mc_was_active" = "1" ]; then
+    systemctl --user start bonghos-minecraft.service || warn "could not restore bonghos-minecraft.service"
+  fi
+}
+
+restore_update_data() { # restore_update_data <safety-directory>
+  local safety="$1" db="$BONGHOS_HOME/system/data/bonghos.db" tmp
+  if [ -f "$safety/bonghos.db" ]; then
+    tmp="$db.restore.$$"
+    cp -p "$safety/bonghos.db" "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod 0600 "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$db" || { rm -f "$tmp"; return 1; }
+    rm -f "$db-wal" "$db-shm"
+  elif [ -f "$safety/database-was-absent" ]; then
+    rm -f "$db" "$db-wal" "$db-shm"
+  fi
+  if [ -f "$safety/bonghos.toml" ]; then
+    tmp="$BONGHOS_HOME/system/config/.bonghos.toml.restore.$$"
+    cp -p "$safety/bonghos.toml" "$tmp" || { rm -f "$tmp"; return 1; }
+    chmod 0600 "$tmp" || { rm -f "$tmp"; return 1; }
+    mv -f "$tmp" "$BONGHOS_HOME/system/config/bonghos.toml" || { rm -f "$tmp"; return 1; }
+  elif [ -f "$safety/config-was-absent" ]; then
+    rm -f "$BONGHOS_HOME/system/config/bonghos.toml"
+  fi
+}
+
+installed_bonghos_running() {
+  local expected proc exe
+  expected="$(readlink -f "$BIN_PATH" 2>/dev/null || printf '%s' "$BIN_PATH")"
+  for proc in /proc/[0-9]*; do
+    [ -r "$proc/exe" ] || continue
+    exe="$(readlink "$proc/exe" 2>/dev/null || true)"
+    exe="${exe% (deleted)}"
+    [ "$exe" = "$expected" ] && return 0
+  done
+  return 1
 }
 
 mode_update() {
@@ -598,52 +645,126 @@ mode_update() {
     confirm "Continue with the update?" N || { info "Update cancelled; nothing was changed."; exit 0; }
   fi
 
-  # Safety copies of database and configuration.
-  head1 "Creating safety copies"
-  local stamp safety
-  stamp="$(date +%Y-%m-%d_%H-%M-%S)"
-  safety="$BONGHOS_HOME/system/temp/update-$stamp"
-  mkdir -p "$safety"
-  if [ -f "$BONGHOS_HOME/system/data/bonghos.db" ]; then
-    # Checkpoint WAL through the running binary where possible, then copy.
-    "$BIN_PATH" --home "$BONGHOS_HOME" doctor >/dev/null 2>&1 || true
-    cp -p "$BONGHOS_HOME/system/data/bonghos.db" "$safety/bonghos.db"
-    [ -f "$BONGHOS_HOME/system/data/bonghos.db-wal" ] && cp -p "$BONGHOS_HOME/system/data/bonghos.db-wal" "$safety/" || true
-    ok "Database copied to $safety"
-  fi
-  [ -f "$BONGHOS_HOME/system/config/bonghos.toml" ] && cp -p "$BONGHOS_HOME/system/config/bonghos.toml" "$safety/" || true
-  cp -p "$BIN_PATH" "$safety/bonghos.previous" || true
-
-  # secret.key must exist and is never copied into logs or safety archives.
-  if [ -f "$BONGHOS_HOME/system/config/secret.key" ]; then
-    ok "secret.key present and preserved"
-  else
-    warn "secret.key is missing; encrypted data (TOTP secrets) cannot be read without it."
-  fi
-
-  # Stop only what must be replaced.
+  # Stop writers before checkpointing or copying SQLite. Copying a database and
+  # WAL while the control plane is active can produce a snapshot that never
+  # existed at any one instant.
   if [ "$mc_was_active" = "1" ]; then
     info "Stopping Minecraft gracefully ..."
     systemctl --user stop bonghos-minecraft.service || warn "stop returned an error"
+    if systemctl --user is-active --quiet bonghos-minecraft.service; then
+      die "Minecraft is still running; refusing to update"
+    fi
   fi
   if [ "$cp_was_active" = "1" ]; then
     info "Stopping the control plane ..."
     systemctl --user stop bonghos.service || warn "stop returned an error"
+    if systemctl --user is-active --quiet bonghos.service; then
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "the control plane is still running; refusing to update"
+    fi
+  fi
+  if installed_bonghos_running; then
+    restore_update_services "$cp_was_active" "$mc_was_active"
+    die "the installed Bonghos executable is still running (possibly a foreground panel or orphaned supervisor); stop it before updating"
+  fi
+
+  # Safety copies of database, configuration and the executable. The directory
+  # is private even if the user's default umask is permissive.
+  head1 "Creating safety copies"
+  local stamp safety db_path config_path
+  stamp="$(date +%Y-%m-%d_%H-%M-%S)"
+  safety="$BONGHOS_HOME/system/temp/update-$stamp"
+  db_path="$BONGHOS_HOME/system/data/bonghos.db"
+  config_path="$BONGHOS_HOME/system/config/bonghos.toml"
+  if ! mkdir -m 0700 "$safety"; then
+    restore_update_services "$cp_was_active" "$mc_was_active"
+    die "could not create the private update safety directory"
+  fi
+  chmod 0700 "$safety" || {
+    restore_update_services "$cp_was_active" "$mc_was_active"
+    die "could not secure the update safety directory"
+  }
+  if [ -f "$db_path" ]; then
+    if ! "$TMP_ROOT/bonghos" --home "$BONGHOS_HOME" database checkpoint >/dev/null; then
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "database integrity check or WAL checkpoint failed; update cancelled"
+    fi
+    if ! cp -p "$db_path" "$safety/bonghos.db"; then
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not create the database safety copy"
+    fi
+    chmod 0600 "$safety/bonghos.db" || {
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not secure the database safety copy"
+    }
+    ok "Consistent database snapshot copied to $safety"
+  else
+    if ! : > "$safety/database-was-absent"; then
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not record the absent database state"
+    fi
+    chmod 0600 "$safety/database-was-absent" || {
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not secure the database state marker"
+    }
+  fi
+  if [ -f "$config_path" ]; then
+    cp -p "$config_path" "$safety/bonghos.toml" || {
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not copy bonghos.toml"
+    }
+    chmod 0600 "$safety/bonghos.toml" || {
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not secure the configuration safety copy"
+    }
+  else
+    if ! : > "$safety/config-was-absent"; then
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not record the absent configuration state"
+    fi
+    chmod 0600 "$safety/config-was-absent" || {
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "could not secure the configuration state marker"
+    }
+  fi
+  cp -p "$BIN_PATH" "$safety/bonghos.previous" || {
+    restore_update_services "$cp_was_active" "$mc_was_active"
+    die "could not copy the previous executable"
+  }
+
+  # secret.key remains in place and is never copied into logs or temporary
+  # update snapshots, but encrypted account and bot data requires it.
+  if [ -f "$BONGHOS_HOME/system/config/secret.key" ]; then
+    ok "secret.key present and preserved"
+  else
+    restore_update_services "$cp_was_active" "$mc_was_active"
+    die "secret.key is missing; encrypted TOTP secrets and notification bot tokens cannot be recovered"
   fi
 
   head1 "Installing the new version"
-  install_binary "$TMP_ROOT/bonghos"
+  if ! install_binary "$TMP_ROOT/bonghos"; then
+    restore_update_services "$cp_was_active" "$mc_was_active"
+    die "could not install the new executable; the previous version remains installed"
+  fi
 
   # Migrations, service repair and diagnostics.
   info "Applying migrations and checking the installation ..."
   if ! "$BIN_PATH" --home "$BONGHOS_HOME" doctor --repair; then
-    err "Post-update verification failed; rolling back the executable."
+    err "Post-update verification failed; rolling back the executable and data."
     if [ -f "$safety/bonghos.previous" ]; then
-      install_binary "$safety/bonghos.previous"
-      err "Previous executable restored."
+      if install_binary "$safety/bonghos.previous"; then
+        err "Previous executable restored."
+      else
+        err "CRITICAL: could not restore the previous executable."
+      fi
     fi
+    if restore_update_data "$safety"; then
+      err "Pre-update database and configuration restored."
+    else
+      err "CRITICAL: could not completely restore the pre-update data snapshot."
+    fi
+    restore_update_services "$cp_was_active" "$mc_was_active"
     err "Safety copies kept at: $safety"
-    err "Database and configuration were NOT modified by the rollback."
     exit 1
   fi
 
@@ -652,14 +773,7 @@ mode_update() {
   fi
 
   # Restore prior running state.
-  if [ "$cp_was_active" = "1" ]; then
-    info "Starting the control plane ..."
-    systemctl --user start bonghos.service || warn "could not start bonghos.service"
-  fi
-  if [ "$mc_was_active" = "1" ]; then
-    info "Restarting Minecraft ..."
-    systemctl --user start bonghos-minecraft.service || warn "could not start bonghos-minecraft.service"
-  fi
+  restore_update_services "$cp_was_active" "$mc_was_active"
 
   ok "Updated to $("$BIN_PATH" version | awk '{print $2}')"
   say ""
@@ -723,7 +837,7 @@ mode_uninstall() {
   say "To remove everything permanently, delete that directory yourself:"
   say "  ${C_DIM}rm -rf \"$BONGHOS_HOME\"${C_RESET}"
   warn "That also deletes system/config/secret.key. Encrypted data (including"
-  warn "TOTP secrets) becomes permanently unrecoverable without it."
+  warn "TOTP secrets and notification bot tokens) becomes permanently unrecoverable without it."
 }
 
 print_next_steps() {

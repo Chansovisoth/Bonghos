@@ -3,7 +3,7 @@
 ===============================================================================
 
  Official repository: https://github.com/Chansovisoth/Bonghos
- Bonghos version:     0.1.1
+ Bonghos version:     0.2.0-rc.1
  Tutorial format:     1
  Last updated:        2026-08-03
  License:             AGPL-3.0-only
@@ -17,8 +17,8 @@
 
  * NEVER delete or lose this file:
        <BONGHOS_HOME>/system/config/secret.key
-   It encrypts your two-factor (TOTP) secrets. Without it, accounts cannot be
-   recovered and encrypted data is permanently unreadable. It is included when
+   It encrypts your two-factor (TOTP) secrets and notification bot tokens.
+   Without it, that encrypted data is permanently unreadable. It is included when
    you copy the whole Bonghos directory to another machine.
 
  * Bonghos does NOT configure public networking. It never touches your router,
@@ -165,24 +165,20 @@
 
    * Linux, 64-bit (x86_64 or ARM64). Ubuntu 24.04 LTS recommended.
    * A normal user account (not root).
-   * Go 1.22 or newer          — to build Bonghos
+   * Go 1.26.5 or newer        — patched toolchain selected by go.mod
    * Git                       — to clone and update
    * Java 17 or 21             — to run Minecraft (depends on the modpack)
-   * tar, gzip                 — required
    * tmux                      — optional, for the console session
-   * unzip, xz-utils, zstd     — optional, for archive formats
-   * p7zip-full                — optional, for .7z packs
-   * unrar                     — optional, for .rar packs (proprietary)
    * RAM: enough for your modpack plus ~1 GB for Linux and Bonghos
    * Disk: the modpack size, plus room for backups
 
  Install the common ones on Ubuntu or Debian:
 
      sudo apt update
-     sudo apt install golang-go git tar gzip tmux unzip xz-utils zstd \
+     sudo apt install golang-go git tmux \
                       openjdk-21-jre-headless
 
- The installer checks all of these and offers to install missing packages.
+ The installer checks required build tools and reports optional runtime tools.
 
 
 ===============================================================================
@@ -212,8 +208,9 @@
  If you downloaded a source ZIP or tar archive instead of using Git:
 
      cd ~/Downloads
-     unzip Bonghos-0.1.1.zip          # or: tar -xf Bonghos-0.1.1.tar.gz
-     cd Bonghos-0.1.1
+     unzip Bonghos-0.2.0-rc.1.zip          # GitHub source ZIP
+     # or: tar -xzf Bonghos-0.2.0-rc.1-source.tar.gz
+     cd Bonghos-0.2.0-rc.1
      chmod +x setup.sh
      ./setup.sh
 
@@ -463,9 +460,10 @@
 
  Supported formats:
 
-     .zip  .tar  .tar.gz  .tgz  .tar.xz  .7z  .rar
+     .zip  .tar  .tar.gz  .tgz  .tar.zst
 
- .7z and .rar only work if a compatible extractor is installed on the server.
+ Bonghos does not use external archive extractors. This keeps path traversal,
+ link and decompression-limit checks inside the Bonghos process.
 
  During upload you will see the filename, uploaded and total bytes, the
  percentage, current and average speed, estimated time remaining, and a
@@ -1142,7 +1140,7 @@
 
      ~/bonghos/system/bin/bonghos export --include-secrets --output ...
 
-   In v0.1.1 this requires a typed confirmation but is not separately
+   In v0.2.0-rc.1 this requires a typed confirmation but is not separately
    passphrase-encrypted. It produces an archive containing your accounts and
    local secret key — treat it like a password file.
 
@@ -1195,15 +1193,16 @@
     5. Runs the tests — a failure stops everything before anything is touched
     6. Records which services were running
     7. Warns before disconnecting players if Minecraft must restart
-    8. Makes timestamped safety copies of the database and configuration
-    9. Confirms secret.key exists and preserves it (never logged or copied out)
-   10. Stops only the services that must be replaced
-   11. Installs the new executable atomically (temp file + rename)
-   12. Applies configuration and database migrations
-   13. Repairs both systemd services
-   14. Runs `bonghos doctor` against the updated installation
-   15. Restores whatever was running before
-   16. Rolls the executable back if verification fails, keeping failure logs
+    8. Stops the Minecraft supervisor and control panel so SQLite has no writers
+    9. Integrity-checks and checkpoints SQLite, then creates a private snapshot
+   10. Copies configuration and the previous executable into that snapshot
+   11. Confirms secret.key exists and preserves it (never logged or copied out)
+   12. Installs the new executable atomically (temp file + rename)
+   13. Applies configuration and database migrations
+   14. Repairs both systemd services
+   15. Runs `bonghos doctor` against the updated installation
+   16. Restores whatever was running before
+   17. Restores the executable, database and configuration if verification fails
 
  An update ALWAYS preserves:
 
@@ -1387,7 +1386,8 @@
      rm -rf ~/bonghos
 
  WARNING: that deletes secret.key too. Every encrypted value, including all
- two-factor secrets, becomes permanently unrecoverable. Take a backup or an
+ two-factor secrets and notification bot tokens, becomes permanently
+ unrecoverable. Take a backup or an
  export first if there is any chance you want the data later.
 
  Removing the source checkout is separate and always safe:
@@ -1469,8 +1469,8 @@
 
      ls ~/bonghos/system/logs/operations/
 
-   Common causes: not enough disk space, an unsupported archive format, an
-   extractor not installed (7z, unrar), or a URL blocked by the SSRF
+   Common causes: not enough disk space, an unsupported archive format, or a
+   URL blocked by the SSRF
    protections in section 17.
 
  I EDITED SERVER FILES OVER SSH AND BONGHOS LOOKS OUT OF DATE

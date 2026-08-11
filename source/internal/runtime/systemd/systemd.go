@@ -26,6 +26,41 @@ func unitDir() (string, error) {
 	return filepath.Join(home, ".config", "systemd", "user"), nil
 }
 
+// unitQuote returns one systemd.syntax quoted value. Besides the usual string
+// escapes, percent signs must be doubled so paths are not interpreted as unit
+// specifiers. This keeps custom Bonghos homes with spaces or percent signs
+// valid in Environment, WorkingDirectory and ExecStart directives.
+func unitQuote(value string) string {
+	value = strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		`%`, `%%`,
+		"\n", `\n`,
+		"\r", `\r`,
+		"\t", `\t`,
+	).Replace(value)
+	return `"` + value + `"`
+}
+
+// unitPath escapes a path used by a scalar directive such as
+// WorkingDirectory. Unlike ExecStart, systemd retains surrounding quotes for
+// this directive, so whitespace and control bytes use \xNN escapes instead.
+func unitPath(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		switch {
+		case c == '%':
+			b.WriteString("%%")
+		case c <= ' ' || c == '\\' || c == '"':
+			fmt.Fprintf(&b, `\x%02x`, c)
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
 // ControlPlaneUnit renders bonghos.service for the given runtime root.
 func ControlPlaneUnit(bonghosHome, binPath string) string {
 	return fmt.Sprintf(`[Unit]
@@ -34,16 +69,21 @@ After=network.target
 
 [Service]
 Type=exec
-Environment=BONGHOS_HOME=%s
+Environment=%s
 WorkingDirectory=%s
 ExecStart=%s --home %s serve
 Restart=on-failure
 RestartSec=5s
-NoNewPrivileges=true
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
 
 [Install]
 WantedBy=default.target
-`, bonghosHome, bonghosHome, binPath, bonghosHome)
+`, unitQuote("BONGHOS_HOME="+bonghosHome), unitPath(bonghosHome), unitQuote(binPath), unitQuote(bonghosHome))
 }
 
 // MinecraftUnit renders bonghos-minecraft.service. Deliberately no [Install]
@@ -56,18 +96,19 @@ After=network.target
 
 [Service]
 Type=exec
-Environment=BONGHOS_HOME=%s
+Environment=%s
 WorkingDirectory=%s
 ExecStart=%s --home %s supervisor
 Restart=on-failure
 RestartSec=5s
 KillMode=control-group
 TimeoutStopSec=%d
-NoNewPrivileges=true
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
 
 # No [Install] section on purpose: started on demand by the Bonghos control
 # plane, which validates the active project and prevents duplicate starts.
-`, bonghosHome, bonghosHome, binPath, bonghosHome, gracefulStopSeconds+30)
+`, unitQuote("BONGHOS_HOME="+bonghosHome), unitPath(bonghosHome), unitQuote(binPath), unitQuote(bonghosHome), gracefulStopSeconds+30)
 }
 
 // Available reports whether a systemd user manager is reachable.
@@ -137,8 +178,19 @@ func Disable(unit string) error { return run("systemctl", "--user", "disable", u
 
 // IsActive reports whether a unit is currently active.
 func IsActive(unit string) bool {
+	return State(unit) == "active"
+}
+
+// State returns the concise systemd activity state used by the API and Web UI.
+// is-active intentionally exits non-zero for useful states such as inactive
+// and failed, so preserve its output instead of treating that as an error.
+func State(unit string) string {
 	out, _ := exec.Command("systemctl", "--user", "is-active", unit).CombinedOutput()
-	return strings.TrimSpace(string(out)) == "active"
+	state := strings.TrimSpace(string(out))
+	if state == "" {
+		return "unknown"
+	}
+	return state
 }
 
 // Status returns human-readable unit status text.

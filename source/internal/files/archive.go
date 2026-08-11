@@ -1,6 +1,7 @@
 // Package files implements safe archive extraction and constrained file
-// management. Every entry path is validated against traversal, absolute
-// paths, unsafe links and decompression bombs before touching disk.
+// management. Supported formats are extracted in-process so every entry path
+// is validated against traversal, absolute paths, unsafe links and
+// decompression bombs before touching disk.
 package files
 
 import (
@@ -11,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -162,7 +162,7 @@ func Extract(src, dest string, lim Limits, progress func(bytes int64)) error {
 			return gzip.NewReader(r)
 		})
 	case "tar.xz":
-		return extractExternal(src, dest, lim, "tar", "--no-same-owner", "-xJf", src, "-C", dest)
+		return fmt.Errorf("%w: .tar.xz imports are disabled because they cannot be pre-validated safely", ErrUnsupported)
 	case "tar.zst":
 		return extractTarStream(src, dest, lim, progress, func(r io.Reader) (io.Reader, error) {
 			zr, err := zstd.NewReader(r)
@@ -172,25 +172,9 @@ func Extract(src, dest string, lim Limits, progress func(bytes int64)) error {
 			return zr.IOReadCloser(), nil
 		})
 	case "7z":
-		if _, err := exec.LookPath("7z"); err != nil {
-			return fmt.Errorf("%w: install p7zip-full for .7z support", ErrUnsupported)
-		}
-		return extractExternal(src, dest, lim, "7z", "x", "-y", "-o"+dest, src)
+		return fmt.Errorf("%w: .7z imports are disabled because they cannot be pre-validated safely", ErrUnsupported)
 	case "rar":
-		bin := ""
-		for _, c := range []string{"unrar", "unar"} {
-			if _, err := exec.LookPath(c); err == nil {
-				bin = c
-				break
-			}
-		}
-		if bin == "" {
-			return fmt.Errorf("%w: install unrar or unar for .rar support", ErrUnsupported)
-		}
-		if bin == "unrar" {
-			return extractExternal(src, dest, lim, "unrar", "x", "-y", src, dest+string(filepath.Separator))
-		}
-		return extractExternal(src, dest, lim, "unar", "-quiet", "-o", dest, src)
+		return fmt.Errorf("%w: .rar imports are disabled because they cannot be pre-validated safely", ErrUnsupported)
 	}
 	return ErrUnsupported
 }
@@ -323,55 +307,6 @@ func extractTarStream(src, dest string, lim Limits, progress func(int64),
 			// char/block devices, fifos etc. are skipped deliberately
 		}
 	}
-}
-
-// extractExternal shells out (argument arrays only, never shell strings) for
-// formats without a safe pure-Go reader, then post-validates the result.
-func extractExternal(src, dest string, lim Limits, bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s extraction failed: %w", bin, err)
-	}
-	return postValidateTree(dest, lim)
-}
-
-// postValidateTree walks an extracted tree removing links that escape dest
-// and enforcing limits (defense for external extractors).
-func postValidateTree(dest string, lim Limits) error {
-	var total, count int64
-	return filepath.Walk(dest, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		count++
-		if lim.MaxFiles > 0 && count > lim.MaxFiles {
-			return ErrTooMany
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(p)
-			if err != nil {
-				return err
-			}
-			resolved := target
-			if !filepath.IsAbs(resolved) {
-				resolved = filepath.Join(filepath.Dir(p), target)
-			}
-			rel, err := filepath.Rel(dest, filepath.Clean(resolved))
-			if err != nil || rel == ".." || strings.HasPrefix(rel, "..") || filepath.IsAbs(target) {
-				os.Remove(p) // remove the unsafe link
-				return nil
-			}
-		}
-		if info.Mode().IsRegular() {
-			total += info.Size()
-			if lim.MaxBytes > 0 && total > lim.MaxBytes {
-				return ErrTooLarge
-			}
-		}
-		return nil
-	})
 }
 
 func safeSymlink(dest, linkPath, target string) error {

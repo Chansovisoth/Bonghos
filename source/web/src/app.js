@@ -26,6 +26,12 @@ const INLINE_SOLAR_ICONS = {
   "wrap-text": {
     body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M4 7h16M4 17h5m-5-5h13.5a2.5 2.5 0 0 1 2.5 2.5v0a2.5 2.5 0 0 1-2.5 2.5h-5"/><path d="M15 15.5L12.5 17l2.5 1.5z"/></g>',
   },
+  "filter-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-width="1.5" d="M19 3H5c-1.414 0-2.121 0-2.56.412S2 4.488 2 5.815v.69c0 1.037 0 1.556.26 1.986s.733.698 1.682 1.232l2.913 1.64c.636.358.955.537 1.183.735c.474.411.766.895.898 1.49c.064.284.064.618.064 1.285v2.67c0 .909 0 1.364.252 1.718c.252.355.7.53 1.594.88c1.879.734 2.818 1.101 3.486.683S15 19.452 15 17.542v-2.67c0-.666 0-1 .064-1.285a2.68 2.68 0 0 1 .899-1.49c.227-.197.546-.376 1.182-.735l2.913-1.64c.948-.533 1.423-.8 1.682-1.23c.26-.43.26-.95.26-1.988v-.69c0-1.326 0-1.99-.44-2.402C21.122 3 20.415 3 19 3Z"/>',
+  },
+  "plain-2-linear": {
+    body: '<g fill="none" stroke="currentColor" stroke-width="1.5"><path d="m17.498 18.485l3.13-9.391c1.248-3.745 1.873-5.618.884-6.606c-.988-.989-2.86-.364-6.606.884l-9.331 3.11c-2.082.694-3.123 1.041-3.439 1.804q-.112.271-.133.564c-.059.824.717 1.6 2.269 3.151l.283.283c.254.254.382.382.478.523c.19.28.297.607.31.945c.008.171-.019.35-.072.705c-.196 1.304-.294 1.956-.179 2.458c.23 1 1.004 1.785 2 2.028c.5.123 1.154.034 2.46-.143l.072-.01c.368-.05.552-.075.729-.064c.32.019.63.124.898.303c.147.098.279.23.541.492l.252.252c1.51 1.51 2.265 2.265 3.066 2.226c.22-.011.438-.062.64-.152c.734-.323 1.072-1.336 1.747-3.362Z"/><path stroke-linecap="round" d="M6 18L21 3"/></g>',
+  },
 };
 const BUTTON_ICONS = {
   "Activate": "check-circle-linear",
@@ -62,6 +68,7 @@ const BUTTON_ICONS = {
   "Save changes": "diskette-linear",
   "Servers": "server-square-linear",
   "Sign out": "logout-2-linear",
+  "Sign in with a passkey": "key-linear",
   "Start": "play-linear",
   "Stop": "stop-linear",
   "Use crop": "gallery-linear",
@@ -83,7 +90,7 @@ function buttonIconName(label) {
   if (/^Restore\b/.test(label)) return "archive-down-minimlistic-linear";
   if (/^(Protect|Accept)\b/.test(label)) return "shield-check-linear";
   if (/^Unprotect\b/.test(label)) return "shield-keyhole-linear";
-  if (/^Send\b/.test(label)) return "send-square-linear";
+  if (/^Send\b/.test(label)) return "plain-2-linear";
   if (/^Rename\b/.test(label)) return "pen-new-square-linear";
   return "";
 }
@@ -204,6 +211,9 @@ const fmtDur = (s) => {
   return `${m}m ${s % 60}s`;
 };
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleString() : "—";
+const fmtTimeToMinute = (iso) => iso ? new Date(iso).toLocaleString(undefined, {
+  year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit",
+}) : "—";
 
 function recordMatchesSearch(record, query, ...formattedValues) {
   if (!query) return true;
@@ -219,6 +229,34 @@ function pageSearchInput(label, onSearch) {
   });
   input.addEventListener("input", () => onSearch(input.value.trim().toLowerCase()));
   return input;
+}
+
+function pageFilterMenu(label, modes, onChange, initialValue = modes[0]?.[0]) {
+  let selected = initialValue;
+  let control;
+  const items = modes.map(([value, optionLabel]) => el("button", {
+    class: "action-menu-item page-filter-option",
+    type: "button", role: "menuitem",
+    onclick: () => {
+      selected = value;
+      update();
+      onChange(value);
+    },
+  }, solarIcon("check-circle-linear", "page-filter-selected-icon"), optionLabel));
+  control = overflowActionsMenu(label, items, "page-filter-menu", solarIcon("filter-linear"));
+  const update = () => {
+    items.forEach((item, index) => {
+      const active = modes[index][0] === selected;
+      item.classList.toggle("is-active", active);
+      item.setAttribute("aria-current", active ? "true" : "false");
+    });
+    const selectedLabel = modes.find(([value]) => value === selected)?.[1] || modes[0]?.[1] || "Filter";
+    const trigger = control.querySelector(".action-menu-trigger");
+    trigger.title = `${label}: ${selectedLabel}`;
+    trigger.setAttribute("aria-label", `${label}: ${selectedLabel}`);
+  };
+  update();
+  return control;
 }
 
 function toast(msg, kind = "") {
@@ -323,7 +361,9 @@ initializeThemeToggles();
 // ---------------------------------------------------------------------------
 // local demo mode
 // ---------------------------------------------------------------------------
-const DEMO_MODE = new URLSearchParams(location.search).has("demo");
+const DEMO_PARAMS = new URLSearchParams(location.search);
+const DEMO_MODE = DEMO_PARAMS.has("demo");
+const DEMO_VIEW = (DEMO_PARAMS.get("demo") || "app").toLowerCase();
 const DEMO_PERMS = [
   "server.view", "server.start", "server.stop", "server.restart", "server.force_stop",
   "server.console.view", "server.console.use", "server.players.view", "server.players.manage",
@@ -334,12 +374,16 @@ const DEMO_PERMS = [
 ];
 const DEMO_ME = { id: 1, username: "demo-owner", role: "owner", permissions: DEMO_PERMS };
 const DEMO_SERVERS = [
-  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "neoforge", modloader_version: "21.1.228", minecraft_version: "1.21.1", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, demo_icon: "demo-server-bio1.png" },
-  { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", external_directory: false, demo_icon: "demo-server-creative-lab.png" },
+  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "neoforge", modloader_version: "21.1.228", minecraft_version: "1.21.1", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, created_at: new Date(Date.now() - 30 * 86400000).toISOString(), updated_at: new Date(Date.now() - 2 * 3600000).toISOString(), demo_icon: "demo-server-bio1.png" },
+  { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", external_directory: false, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), demo_icon: "demo-server-creative-lab.png" },
 ];
 const DEMO_BOTS = [
   { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
   { id: 2, name: "Staff channel", provider: "discord", destination_id: "123456789012345678", enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
+];
+const DEMO_PASSKEYS = [
+  { id: 1, name: "Laptop passkey", rp_id: location.hostname, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), last_used_at: new Date(Date.now() - 18 * 60000).toISOString(), backup_eligible: true, backed_up: true },
+  { id: 2, name: "YubiKey 5", rp_id: location.hostname, created_at: new Date(Date.now() - 36 * 86400000).toISOString(), backup_eligible: false, backed_up: false },
 ];
 const DEMO_CONSOLE = [
   "[19:27:36] [Server thread/INFO]: Starting minecraft server version 1.20.1",
@@ -348,6 +392,9 @@ const DEMO_CONSOLE = [
   "[19:28:40] [Server thread/INFO]: Steve joined the game",
   "[19:29:04] [Server thread/ERROR]: Example datapack warning for visual review only",
 ];
+const DEMO_INVITE_TOKEN = "demo-invite";
+const DEMO_INVITE_SECRET = "JBSWY3DPEHPK3PXP";
+const DEMO_INVITE_QR = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="Demo authenticator QR code"><rect width="120" height="120" fill="#fff"/><path fill="#000" d="M8 8h32v32H8zm8 8v16h16V16zm64-8h32v32H80zm8 8v16h16V16zM8 80h32v32H8zm8 8v16h16V88zm40-72h8v8h-8zm8 8h8v16h-8zM48 40h16v8H48zm24 0h8v16h-8zM48 56h8v16h-8zm16 0h16v8H64zm24-8h16v8H88zM48 80h8v24h-8zm16-8h8v16h-8zm8 16h16v8H72zm24-24h8v16h-8zm-8 16h8v24h-8zm16 8h8v24h-8z"/></svg>';
 const DEMO_METRICS = Array.from({ length: 60 }, (_, i) => ({
   collected_at: new Date(Date.now() - (59 - i) * 60000).toISOString(),
   cpu_percent: 18 + Math.sin(i / 6) * 11 + (i % 13),
@@ -387,6 +434,15 @@ async function demoApi(path, opts = {}) {
   const clean = path.split("?")[0];
   const query = new URL(path, "http://bonghos.demo").searchParams;
   if (method !== "GET") {
+    if (clean === "/auth/login") return DEMO_ME;
+    if (clean === `/invitations/${DEMO_INVITE_TOKEN}/totp`) return {
+      secret: DEMO_INVITE_SECRET,
+      uri: `otpauth://totp/Bonghos:invited-admin?secret=${DEMO_INVITE_SECRET}&issuer=Bonghos`,
+      qr_svg: DEMO_INVITE_QR,
+    };
+    if (clean === `/invitations/${DEMO_INVITE_TOKEN}/activate`) return {
+      recovery_codes: ["DEMO-4Q7P-9K2M", "DEMO-8N3R-6T5W", "DEMO-2Y9H-7C4X", "DEMO-5F8J-3L6V"],
+    };
     if (clean === "/server/start") { S.status = { state: "running" }; return { ok: true }; }
     if (clean === "/server/stop") { S.status = { state: "stopped" }; return { ok: true }; }
     if (clean === "/server/restart") {
@@ -426,6 +482,22 @@ async function demoApi(path, opts = {}) {
       }
     }
     if (method === "POST" && /^\/bots\/\d+\/test$/.test(clean)) return { ok: true };
+    const passkeyMatch = clean.match(/^\/passkeys\/(\d+)$/);
+    if (passkeyMatch) {
+      const index = DEMO_PASSKEYS.findIndex((passkey) => passkey.id === Number(passkeyMatch[1]));
+      if (index < 0) throw new Error("Passkey not found");
+      if (method === "PATCH") {
+        const name = String(opts.json?.name || "").trim();
+        if (!name) throw new Error("Passkey name is required");
+        if (name.length > 80) throw new Error("Passkey name must be 80 characters or fewer");
+        DEMO_PASSKEYS[index].name = name;
+        return { id: DEMO_PASSKEYS[index].id, name };
+      }
+      if (method === "DELETE") {
+        DEMO_PASSKEYS.splice(index, 1);
+        return { ok: true };
+      }
+    }
     const updateMatch = clean.match(/^\/servers\/(\d+)$/);
     if (method === "PATCH" && updateMatch) {
       const server = DEMO_SERVERS.find((entry) => entry.id === Number(updateMatch[1]));
@@ -435,6 +507,7 @@ async function demoApi(path, opts = {}) {
         if (!displayName) throw new Error("Display name is required");
         if ([...displayName].length > 120) throw new Error("Display name must be 120 characters or fewer");
         server.display_name = displayName;
+        server.updated_at = new Date().toISOString();
       }
       return { ...server };
     }
@@ -443,7 +516,8 @@ async function demoApi(path, opts = {}) {
       const source = DEMO_SERVERS.find((server) => server.id === Number(duplicateMatch[1]));
       const displayName = (opts.json && opts.json.display_name) || ((source && source.display_name) || "Server") + " Copy";
       const slugBase = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server-copy";
-      const clone = { ...source, id: Math.max(...DEMO_SERVERS.map((server) => server.id)) + 1, display_name: displayName, slug: slugBase, autostart_enabled: false };
+      const createdAt = new Date().toISOString();
+      const clone = { ...source, id: Math.max(...DEMO_SERVERS.map((server) => server.id)) + 1, display_name: displayName, slug: slugBase, autostart_enabled: false, created_at: createdAt, updated_at: createdAt };
       DEMO_SERVERS.push(clone);
       return { operation_id: "demo-duplicate", server: clone };
     }
@@ -455,14 +529,15 @@ async function demoApi(path, opts = {}) {
   switch (clean) {
     case "/auth/csrf": return { csrf: "demo-csrf-token" };
     case "/auth/me": return DEMO_ME;
+    case `/invitations/${DEMO_INVITE_TOKEN}`: return { role: "admin" };
     case "/bots": return DEMO_BOTS.map((bot) => ({ ...bot }));
-    case "/version": return { version: "0.1.1-demo" };
+    case "/version": return { version: "0.2.0-rc.1-demo" };
     case "/servers": return { servers: DEMO_SERVERS, active_id: 1 };
     case "/server/status": return S.status;
     case "/server/console/history": return { lines: DEMO_CONSOLE.slice(-CONSOLE_LINE_LIMIT), limit: CONSOLE_LINE_LIMIT, source: "demo" };
     case "/overview": return {
       state: S.status.state,
-      version: "0.1.1-demo",
+      version: "0.2.0-rc.1-demo",
       instance: DEMO_SERVERS[0],
       motd: "A precise Bonghos local demo",
       lan_ip: "192.168.1.42",
@@ -474,11 +549,12 @@ async function demoApi(path, opts = {}) {
     };
     case "/host": return {
       bind_address: "127.0.0.1", port: 8080, home: "/home/demo/bonghos",
+      session_hours: 72,
       metrics_interval_seconds: 10,
       mem_total: 32 * 1024 * 1024 * 1024, mem_available: 18 * 1024 * 1024 * 1024,
       disk_total: 512 * 1024 * 1024 * 1024, disk_free: 186 * 1024 * 1024 * 1024,
       load1: 0.82, systemd: true, service_bonghos: "active", service_minecraft: "running",
-      version: "0.1.1-demo",
+      version: "0.2.0-rc.1-demo",
       note: "Demo data only. Local listening does not prove public accessibility.",
     };
     case "/events": return { events: [
@@ -504,7 +580,7 @@ async function demoApi(path, opts = {}) {
       { username: "iKlaude", online: true, op: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
       { username: "Alex", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 3922 },
       { username: "Long_Name_With_Underscores", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 18422 },
-      { username: "OfflineMiner", online: false, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 7521 },
+      { username: "OfflineMiner", online: false, banned: true, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 7521 },
     ] };
     case "/files": return [
       { name: "world", is_dir: true, size: 0, mod_time: new Date(Date.now() - 3600000).toISOString() },
@@ -524,7 +600,7 @@ async function demoApi(path, opts = {}) {
       jvm: { xms: "2G", xmx: "6G", source_file: "user_jvm_args.txt", source_kind: "jvm_args_file", editable: true },
       scripts: [{ path: "run.sh", modloader: "forge", score: 98 }],
       java: [{ path: "/usr/lib/jvm/java-21-openjdk/bin/java", version: "21" }],
-      properties: { motd: "A precise Bonghos local demo", "server-port": "25565", "max-players": "20", difficulty: "normal", gamemode: "survival", "white-list": "false", pvp: "true", "view-distance": "10", "online-mode": "true" },
+      properties: { motd: "A precise Bonghos local demo", "server-port": "25565", "max-players": "20", difficulty: "normal", gamemode: "survival", "white-list": "false", pvp: "true", "view-distance": "10", "simulation-distance": "10", "online-mode": "true" },
     };
     case "/backups": return [
       { backup_id: "demo-full-20260803-1900", backup_type: "full_server", consistency_mode: "online", trigger_type: "manual", compressed_size: 4620000000, verification_status: "verified", created_at: new Date(Date.now() - 5 * 3600000).toISOString(), protected: true },
@@ -536,6 +612,7 @@ async function demoApi(path, opts = {}) {
     ];
     case "/operations": return [];
     case "/activity": return [
+      { at: new Date(Date.now() - 4 * 60000).toISOString(), username: "demo-owner", action: "login_success", target: "", detail: "", remote_addr: "192.168.1.24" },
       { at: new Date(Date.now() - 12 * 60000).toISOString(), username: "demo-owner", action: "backup_created", target: "bio1", detail: "full_server verified" },
       { at: new Date(Date.now() - 46 * 60000).toISOString(), username: "demo-owner", action: "configuration_saved", target: "user_jvm_args.txt", detail: "-Xmx changed to 6G" },
     ];
@@ -544,6 +621,7 @@ async function demoApi(path, opts = {}) {
       { ID: 2, Username: "admin", Role: "admin", Disabled: false },
       { ID: 3, Username: "viewer", Role: "viewer", Disabled: true },
     ];
+    case "/passkeys": return DEMO_PASSKEYS.map((passkey) => ({ ...passkey }));
     default: return {};
   }
 }
@@ -590,9 +668,13 @@ const S = {
   commandHistoryAt: -1,
   perf: [],
   perfStorage: null,
+  overviewCPUTrend: "machine",
+  overviewMemoryTrend: "java",
   performanceTarget: "",
   serverTargetId: null,
   managedServerId: null,
+  serverManagementReturn: false,
+  pendingFileOpen: null,
   perfIntervalSeconds: 2,
   uptimeBase: null,
 };
@@ -790,6 +872,15 @@ function showLogin() {
   $("#app-view").classList.add("hidden");
   $("#login-view").classList.remove("hidden");
   loginStep(1);
+  updatePasskeyAvailability();
+}
+
+function updatePasskeyAvailability() {
+  const button = $("#login-passkey");
+  if (!button) return;
+  const available = DEMO_MODE || passkeysSupported();
+  button.disabled = !available;
+  button.title = available ? "Use a passkey, another device, or a security key" : "Passkeys require a supported browser over HTTPS or localhost";
 }
 
 // loginStep switches between the credential step and the authenticator step.
@@ -804,7 +895,7 @@ function loginStep(n) {
   $(".otp-wrap")?.classList.remove("error");
   if (n === 2) {
     $("#login-step-2-who").textContent = "Signing in as " + $("#login-user").value.trim();
-    $("#login-code").value = "";
+    $("#login-code").value = DEMO_MODE && DEMO_VIEW === "login" ? "123456" : "";
     syncOTPCells();
     setTimeout(() => $("#login-code").focus(), 30);
   } else {
@@ -812,17 +903,13 @@ function loginStep(n) {
   }
 }
 
-function syncOTPCells() {
-  const input = $("#login-code");
-  const wrap = $(".otp-wrap");
+function syncOTPCells(input = $("#login-code"), wrap = $(".otp-wrap")) {
   if (!input || !wrap) return;
   const code = input.value.replace(/\D/g, "").slice(0, 6);
   [...wrap.children].forEach((cell, i) => { cell.textContent = code[i] || ""; });
 }
 
-function installOTPControl() {
-  const input = $("#login-code");
-  const wrap = $(".otp-wrap");
+function installOTPControl(input = $("#login-code"), wrap = $(".otp-wrap")) {
   if (!input || !wrap) return;
   wrap.addEventListener("click", () => input.focus());
   input.addEventListener("focus", () => wrap.classList.add("focus"));
@@ -831,15 +918,22 @@ function installOTPControl() {
     const raw = input.value.trim();
     const digits = raw.replace(/\D/g, "");
     if (digits.length >= 6 && /^[0-9\s-]+$/.test(raw)) input.value = digits.slice(0, 6);
-    syncOTPCells();
+    syncOTPCells(input, wrap);
   });
-  input.addEventListener("paste", () => setTimeout(syncOTPCells, 0));
-  syncOTPCells();
+  input.addEventListener("paste", () => setTimeout(() => syncOTPCells(input, wrap), 0));
+  syncOTPCells(input, wrap);
 }
 
 async function boot() {
   if (DEMO_MODE) {
     csrfToken = "demo-csrf-token";
+    if (DEMO_VIEW === "login") {
+      showLogin();
+      $("#login-form > .muted").textContent = "Demo sign-in · use any non-empty credentials and authenticator code.";
+      $("#login-user").value = "demo-owner";
+      $("#login-pass").value = "demo-password";
+      return;
+    }
     S.me = DEMO_ME;
     S.status = { state: "running" };
     S.consoleLines = [...DEMO_CONSOLE];
@@ -857,6 +951,38 @@ async function boot() {
 }
 
 $("#login-back").addEventListener("click", () => loginStep(1));
+
+$("#login-passkey").addEventListener("click", async () => {
+  const button = $("#login-passkey");
+  const errorBox = $("#login-error");
+  errorBox.classList.add("hidden");
+  button.disabled = true;
+  try {
+    if (DEMO_MODE) {
+      S.me = DEMO_ME;
+      enterApp();
+      toast("Demo passkey sign-in completed locally.", "ok");
+      return;
+    }
+    if (!passkeysSupported()) throw new Error("Passkeys require a supported browser over HTTPS or localhost.");
+    const started = await api("/auth/passkey/begin", { method: "POST", json: {} });
+    const credential = await navigator.credentials.get({
+      publicKey: passkeyRequestOptions(started.options.publicKey),
+    });
+    S.me = await api(`/auth/passkey/finish?flow=${encodeURIComponent(started.flow)}`, {
+      method: "POST",
+      json: passkeyCredentialJSON(credential),
+    });
+    const nextCSRF = await api("/auth/csrf");
+    csrfToken = nextCSRF.csrf;
+    enterApp();
+  } catch (error) {
+    errorBox.textContent = passkeyError(error, "Passkey sign-in failed.");
+    errorBox.classList.remove("hidden");
+  } finally {
+    button.disabled = false;
+  }
+});
 
 $("#login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -927,7 +1053,7 @@ const PAGES = [
   { section: "Manage", id: "schedules", label: "Schedules", icon: "calendar-linear", perm: "server.schedules.manage" },
   { section: "System", id: "activity", label: "Activity", icon: "history-linear", perm: "server.configuration.manage" },
   { section: "System", id: "users", label: "Users", icon: "users-group-two-rounded-linear", perm: "users.manage" },
-  { section: "System", id: "security", label: "Security", icon: "shield-keyhole-linear", perm: "users.manage" },
+  { section: "System", id: "security", label: "Security", icon: "shield-keyhole-linear", perm: "server.view" },
   { section: "System", id: "settings", label: "Settings", icon: "settings-linear", perm: "server.view" },
 ];
 
@@ -991,7 +1117,8 @@ function navigate(page, opts = {}) {
   S.performanceTarget = next === "performance" ? (opts.performanceTarget || "") : "";
   S.serverTargetId = next === "servers" ? (opts.serverTargetId ?? null) : null;
   S.managedServerId = next === "files" || next === "configuration" ? (opts.serverId ?? null) : null;
-  S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers");
+  S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers" || next === "configuration");
+  S.serverManagementReturn = !!opts.fromServers && (next === "files" || next === "configuration");
   setSidebarOpen(false);
   if (!opts.fromHash) syncHash(next, !!opts.replaceHash);
   syncPageSubscription(next);
@@ -1133,8 +1260,24 @@ function overviewBackButton() {
   }, solarIcon("alt-arrow-left-linear"));
 }
 
+function managedPageBackButton() {
+  if (!S.serverManagementReturn) return overviewBackButton();
+  return el("button", {
+    class: "btn ghost page-back-button", type: "button",
+    "aria-label": "Back to Servers", title: "Back to Servers",
+    onclick: () => navigate("servers", { serverTargetId: S.managedServerId }),
+  }, solarIcon("alt-arrow-left-linear"));
+}
+
 function pageHeader(title, subtitle, actions = [], leading = null) {
   const heading = el("h1", {}, title);
+  const hasSearchFilter = actions.some((action) => action?.classList?.contains("page-search-filter-controls"));
+  const neighboringActionCount = actions.filter((action) => action?.matches?.("button, a")).length;
+  const actionsClass = [
+    "actions",
+    hasSearchFilter ? "has-search-filter" : "",
+    hasSearchFilter && neighboringActionCount > 1 ? "has-many-actions" : "",
+  ].filter(Boolean).join(" ");
   const titleNode = leading
     ? el("div", { class: "title has-leading" },
         el("div", { class: "page-title-heading-row" }, leading, heading),
@@ -1145,7 +1288,7 @@ function pageHeader(title, subtitle, actions = [], leading = null) {
   return el("div", { class: "page-header" },
     titleNode,
     el("div", { class: "spacer" }),
-    actions.length ? el("div", { class: "actions" }, actions) : null);
+    actions.length ? el("div", { class: actionsClass }, actions) : null);
 }
 
 function projectContextSubtitle(prefix, project, isActive, includeArticle = true) {
@@ -1203,28 +1346,26 @@ async function pageOverview(main) {
       serverStatusCard(d.state, inst),
       statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
       playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
-      statCard("CPU", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—", "whole-machine average",
-        "overview-live-cpu", "performance-host-cpu-card")),
+      statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
+        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure",
+        "overview-live-disk-free", "performance-machine-storage-card")),
 
     // Host health, previously a separate tab.
     el("div", { class: "grid cols-4 flow-section overview-stat-grid" },
+      statCard("CPU", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—", "whole-machine average",
+        "overview-live-cpu", "performance-host-cpu-card"),
+      statCard("Load average", Number.isFinite(loadAverage) ? loadAverage.toFixed(2) : "—", "1 minute",
+        "overview-live-load", "performance-load-card"),
       statCard("Process memory", fmtBytes(s.rss_bytes), "resident set (not Java heap)",
         "overview-live-rss", "allocated-memory-card"),
       statCard("Host memory", hostMemTotal > 0 ? fmtBytes(memUsed) : "—",
         hostMemTotal > 0 ? "of " + fmtBytes(hostMemTotal) : "",
-        "overview-live-host-memory", "host-memory-card"),
-      statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
-        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure",
-        "overview-live-disk-free", "performance-machine-storage-card"),
-      statCard("Load average", Number.isFinite(loadAverage) ? loadAverage.toFixed(2) : "—", "1 minute",
-        "overview-live-load", "performance-load-card")),
+        "overview-live-host-memory", "host-memory-card")),
 
     // Trends, previously the Performance tab.
     el("div", { class: "grid cols-2 flow-section" },
-      trendCard("CPU", S.perf, (x) => x.host_cpu_percent, (v) => v.toFixed(0) + "%", "overview-trend-cpu",
-        { min: 0, max: 100, axisFormat: (value) => value.toFixed(0) + "%" }),
-      trendCard("Process memory", S.perf, (x) => x.rss_bytes, fmtBytes, "overview-trend-memory",
-        { min: 0, max: overviewMemoryCeiling(S.perf), axisFormat: fmtBytes })),
+      overviewCPUTrendCard(),
+      overviewMemoryTrendCard()),
 
     el("div", { class: "grid cols-2 flow-section" },
       // The timeline: what the server did, in its own words.
@@ -1279,6 +1420,7 @@ function eventRow(e) {
 
 // trendCard draws a compact interactive sparkline plus the latest value.
 function trendCard(title, samples, pick, fmt, id = "", chartOptions = {}) {
+  const { headerControl = null, ...sparklineOptions } = chartOptions;
   const points = (samples || []).map((sample) => ({
     timestamp: sampleTimestamp(sample),
     value: Number(pick(sample)),
@@ -1286,11 +1428,20 @@ function trendCard(title, samples, pick, fmt, id = "", chartOptions = {}) {
   const latest = points.length ? points[points.length - 1].value : 0;
   const attrs = { class: "card graph-card" };
   if (id) attrs.id = id;
+  const chart = points.length > 1
+    ? overviewSparklineNode(title, points, fmt, {
+      ...sparklineOptions,
+      summary: { value: fmt(latest), note: "last hour" },
+    })
+    : null;
   return el("div", attrs,
-    el("div", { class: "metric-label" }, title),
-    el("div", { class: "metric-value" }, fmt(latest)),
-    el("div", { class: "metric-note" }, "last hour"),
-    points.length > 1 ? overviewSparklineNode(title, points, fmt, chartOptions) : el("p", { class: "muted" }, "Collecting samples…"));
+    el("div", { class: "overview-trend-card-head" },
+      el("div", { class: "metric-label" }, title),
+      headerControl),
+    chart || el("div", {},
+      el("div", { class: "metric-value" }, fmt(latest)),
+      el("div", { class: "metric-note" }, "last hour"),
+      el("p", { class: "muted" }, "Collecting samples…")));
 }
 
 function overviewMemoryCeiling(samples) {
@@ -1298,16 +1449,66 @@ function overviewMemoryCeiling(samples) {
     [Number(sample.rss_bytes), Number(sample.jvm_xmx_bytes)].filter(Number.isFinite)));
 }
 
-function updateOverviewTrendCharts() {
+function overviewMachineMemoryCeiling(samples) {
+  return Math.max(1, ...(samples || []).map((sample) => Number(sample.host_mem_total)).filter(Number.isFinite));
+}
+
+function overviewTrendSelect(label, value, options, onChange, cardId) {
+  const select = el("select", { class: "overview-trend-select", "aria-label": label },
+    ...options.map(([optionValue, optionLabel]) =>
+      el("option", { value: optionValue, selected: optionValue === value ? "" : null }, optionLabel)));
+  select.addEventListener("change", () => {
+    onChange(select.value);
+    updateOverviewTrendCharts(cardId);
+    requestAnimationFrame(() => document.querySelector(`#${cardId} .overview-trend-select`)?.focus());
+  });
+  return select;
+}
+
+function overviewCPUTrendCard() {
+  const javaProcess = S.overviewCPUTrend === "java";
+  return trendCard("CPU", S.perf,
+    javaProcess ? (sample) => sample.cpu_percent : (sample) => sample.host_cpu_percent,
+    (value) => value.toFixed(0) + "%", "overview-trend-cpu", {
+      min: 0,
+      ...(javaProcess ? {} : { max: 100 }),
+      axisFormat: (value) => value.toFixed(0) + "%",
+      headerControl: overviewTrendSelect("CPU graph source", S.overviewCPUTrend, [
+        ["machine", "Machine Usage"],
+        ["java", "Java Process"],
+      ], (value) => { S.overviewCPUTrend = value; }, "overview-trend-cpu"),
+    });
+}
+
+function overviewMemoryTrendCard() {
+  const machine = S.overviewMemoryTrend === "machine";
+  const machineUsed = (sample) => {
+    const total = Number(sample.host_mem_total);
+    const available = Number(sample.host_mem_avail);
+    return total > 0 && Number.isFinite(available) ? total - available : NaN;
+  };
+  return trendCard("Memory", S.perf,
+    machine ? machineUsed : (sample) => sample.rss_bytes,
+    fmtBytes, "overview-trend-memory", {
+      min: 0,
+      max: machine ? overviewMachineMemoryCeiling(S.perf) : overviewMemoryCeiling(S.perf),
+      axisFormat: fmtBytes,
+      headerControl: overviewTrendSelect("Memory graph source", S.overviewMemoryTrend, [
+        ["machine", "Machine"],
+        ["java", "Java memory"],
+      ], (value) => { S.overviewMemoryTrend = value; }, "overview-trend-memory"),
+    });
+}
+
+function updateOverviewTrendCharts(forceCardId = "") {
   if (S.page !== "overview") return;
   const cpu = $("#overview-trend-cpu");
   const memory = $("#overview-trend-memory");
-  cpu?.replaceWith(trendCard("CPU", S.perf, (sample) => sample.host_cpu_percent,
-    (value) => value.toFixed(0) + "%", "overview-trend-cpu",
-    { min: 0, max: 100, axisFormat: (value) => value.toFixed(0) + "%" }));
-  memory?.replaceWith(trendCard("Process memory", S.perf, (sample) => sample.rss_bytes,
-    fmtBytes, "overview-trend-memory",
-    { min: 0, max: overviewMemoryCeiling(S.perf), axisFormat: fmtBytes }));
+  const focusedCardId = document.activeElement?.closest?.(".graph-card")?.id || "";
+  if (forceCardId === "overview-trend-cpu" || focusedCardId !== "overview-trend-cpu")
+    cpu?.replaceWith(overviewCPUTrendCard());
+  if (forceCardId === "overview-trend-memory" || focusedCardId !== "overview-trend-memory")
+    memory?.replaceWith(overviewMemoryTrendCard());
 }
 
 function statCard(title, value, sub, valueId = "", performanceTarget = "") {
@@ -1440,36 +1641,58 @@ function lifecycleButtons(includeServers = false) {
     if (pending?.action === action) showLoading(button);
     return button;
   };
-  const serversButton = () => el("button", { class: "btn", onclick: () => navigate("servers", { fromOverview: true }) },
-    solarIcon("server-square-linear"),
-    "Servers",
-    solarIcon("alt-arrow-right-linear", "redirect-icon"));
+  const forceStop = () => confirmModal(
+    "Force stop",
+    "Force stop kills the Java process immediately. Unsaved world data may be lost. Continue?",
+    "Force stop",
+    async () => {
+      try { await api("/server/force-stop", { method: "POST", json: { confirm: true } }); toast("Force stop sent", "ok"); }
+      catch (e) { toast(e.message, "err"); }
+    },
+  );
+  const appendOverviewManagementActions = () => {
+    if (!includeServers) return;
+    if (can("server.configuration.manage")) {
+      wrap.append(el("button", {
+        class: "btn ghost mobile-icon-only overview-configuration-button",
+        type: "button",
+        title: "Configuration",
+        "aria-label": "Configuration",
+        onclick: () => navigate("configuration", { fromOverview: true }),
+      }, solarIcon("tuning-2-linear")));
+    }
+    const menuItems = [
+      el("button", {
+        class: "action-menu-item", type: "button", role: "menuitem",
+        onclick: () => navigate("servers", { fromOverview: true }),
+      }, solarIcon("server-square-linear"), "Servers"),
+    ];
+    if (can("server.force_stop") && st !== "stopped") {
+      menuItems.push(el("button", {
+        class: "action-menu-item danger", type: "button", role: "menuitem", onclick: forceStop,
+      }, solarIcon("danger-triangle-linear"), "Force stop"));
+    }
+    wrap.append(overflowActionsMenu("More server actions", menuItems, "overview-lifecycle-menu"));
+  };
   if (pending) {
-    if (includeServers && pending.action === "start") wrap.append(serversButton());
     if (pending.action === "start" && can("server.start"))
       wrap.append(lifecycleButton("start", "/server/start", "Start", "running", "btn primary"));
     if (pending.action === "stop" && can("server.stop"))
       wrap.append(lifecycleButton("stop", "/server/stop", "Stop", "stopped", "btn"));
     if (pending.action === "restart" && can("server.restart"))
       wrap.append(lifecycleButton("restart", "/server/restart", "Restart", "running", "btn"));
-    if (includeServers && pending.action === "stop") wrap.append(serversButton());
+    appendOverviewManagementActions();
     return wrap;
   }
-  if (includeServers && !running) wrap.append(serversButton());
   if (can("server.start") && !running)
     wrap.append(lifecycleButton("start", "/server/start", "Start", "running", "btn primary"));
   if (can("server.stop") && running)
     wrap.append(lifecycleButton("stop", "/server/stop", "Stop", "stopped", "btn"));
   if (can("server.restart") && running)
     wrap.append(lifecycleButton("restart", "/server/restart", "Restart", "running", "btn"));
-  if (can("server.force_stop") && st !== "stopped")
-    wrap.append(el("button", { class: "btn danger", onclick: () =>
-      confirmModal("Force stop", "Force stop kills the Java process immediately. Unsaved world data may be lost. Continue?",
-        "Force stop", async () => {
-          try { await api("/server/force-stop", { method: "POST", json: { confirm: true } }); toast("Force stop sent", "ok"); }
-          catch (e) { toast(e.message, "err"); }
-        }) }, "Force stop"));
-  if (includeServers && running) wrap.append(serversButton());
+  if (!includeServers && can("server.force_stop") && st !== "stopped")
+    wrap.append(el("button", { class: "btn danger", onclick: forceStop }, "Force stop"));
+  appendOverviewManagementActions();
   return wrap;
 }
 
@@ -1631,18 +1854,42 @@ async function pagePlayers(main) {
   const d = await api("/players");
   const players = d.players || [];
   setOnlinePlayerCount(players);
-  const search = el("input", { placeholder: "Search players", "aria-label": "Search players" });
+  const search = el("input", { class: "page-search", type: "search", placeholder: "Search players", "aria-label": "Search players" });
   const tbody = el("tbody");
+  let filterMode = "alphabetical";
+  const byName = (a, b) => String(a.username || "").localeCompare(String(b.username || ""), undefined, { sensitivity: "base" });
   const draw = () => {
     const q = search.value.trim().toLowerCase();
-    const visible = players.filter((p) => !q || String(p.username).toLowerCase().includes(q));
+    let visible = players.filter((p) => !q || String(p.username).toLowerCase().includes(q));
+    if (filterMode === "op") visible = visible.filter((p) => p.op);
+    if (filterMode === "banned") visible = visible.filter((p) => p.banned);
+    visible.sort((a, b) => {
+      if (filterMode === "status") return Number(b.online) - Number(a.online) || byName(a, b);
+      if (filterMode === "last-seen") return (Date.parse(b.last_seen_at) || 0) - (Date.parse(a.last_seen_at) || 0) || byName(a, b);
+      if (filterMode === "playtime") return Number(b.observed_playtime_seconds || 0) - Number(a.observed_playtime_seconds || 0) || byName(a, b);
+      return byName(a, b);
+    });
     tbody.innerHTML = "";
     tbody.append(...(visible.length ? visible.map(playerRow) : [el("tr", {}, el("td", { colspan: "5", class: "muted" }, players.length ? "No matching players." : "No players seen yet."))]));
   };
+  const filterModes = [
+    ["alphabetical", "Alphabetically"],
+    ["status", "Status"],
+    ["last-seen", "Last Seen"],
+    ["playtime", "Observed playtime"],
+    ["op", "Show only OP"],
+    ["banned", "Show only BANNED"],
+  ];
+  const filterControl = pageFilterMenu("Filter players", filterModes, (value) => {
+    filterMode = value;
+    draw();
+  }, filterMode);
   search.addEventListener("input", draw);
   main.innerHTML = "";
   main.append(
-    pageHeader("Players", "Observed online and recent players. Whitelist, operator, ban, and IP-ban lists are not exposed as separate read APIs yet.", [search], overviewBackButton()),
+    pageHeader("Players", "Observed online and recent players. Whitelist, operator, ban, and IP-ban lists are not exposed as separate read APIs yet.", [
+      el("div", { class: "page-search-filter-controls players-search-controls" }, search, filterControl),
+    ], overviewBackButton()),
     el("div", { class: "toolbar" },
       el("span", { class: "status-label running" }, el("span", { class: "status-square" }), players.filter((p) => p.online).length + " online"),
       el("span", { class: "status-label" }, el("span", { class: "status-square" }), players.length + " observed")),
@@ -1650,7 +1897,7 @@ async function pagePlayers(main) {
       el("table", {},
         el("thead", {}, el("tr", {},
           el("th", {}, "Player"), el("th", {}, "Status"), el("th", { class: "mobile-hide" }, "Last seen"),
-          el("th", { class: "mobile-hide" }, "Observed playtime"), el("th", {}, ""))),
+          el("th", { class: "mobile-hide player-observed-playtime" }, "Observed playtime"), el("th", {}, ""))),
         tbody)));
   draw();
 }
@@ -1674,11 +1921,12 @@ function playerRow(p) {
       el("span", { class: "player-name-block" },
         el("span", { class: "player-name-line" },
           el("strong", {}, p.username),
-          p.op ? el("span", { class: "player-op" }, "OP") : null),
-        el("span", { class: "mobile-only mobile-row-detail" }, p.online ? "Online" : "Offline")))),
-    el("td", {}, p.online ? "Online" : "Offline"),
+          p.op ? el("span", { class: "player-tag" }, "OP") : null,
+          p.banned ? el("span", { class: "player-tag" }, "BANNED") : null),
+        el("span", { class: "mobile-only mobile-row-detail player-status" + (p.online ? "" : " is-offline") }, p.online ? "Online" : "Offline")))),
+    el("td", {}, el("span", { class: "player-status" + (p.online ? "" : " is-offline") }, p.online ? "Online" : "Offline")),
     el("td", { class: "mobile-hide" }, fmtTime(p.last_seen_at)),
-    el("td", { class: "mobile-hide" }, fmtDur(p.observed_playtime_seconds)),
+    el("td", { class: "mobile-hide player-observed-playtime" }, fmtDur(p.observed_playtime_seconds)),
     el("td", { class: "table-actions" }, can("server.players.manage") ? playerActions(p) : ""));
 }
 
@@ -1771,9 +2019,9 @@ async function pageFiles(main, path = filePath) {
   // A deep link from elsewhere (for example the Configuration page naming the
   // file that owns the JVM settings) opens that file straight away.
   if (S.pendingFileOpen) {
-    const target = S.pendingFileOpen;
+    const pending = S.pendingFileOpen;
     S.pendingFileOpen = null;
-    return openFileEditor(main, target);
+    return openFileEditor(main, pending.path, pending.returnTo);
   }
   filePath = path;
   fileEscapeAction = path
@@ -1808,23 +2056,43 @@ async function pageFiles(main, path = filePath) {
     el("td", { class: "mobile-hide" }, fmtTime(e2.mod_time)),
     el("td", { class: "table-actions file-actions-cell" }, fileActions(main, path, e2)));
   const tbody = el("tbody");
+  let filterMode = "folders-first";
+  const byName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base", numeric: true });
   const draw = (query = "") => {
-    const visible = (entries || []).filter((entry) => recordMatchesSearch(entry, query, fmtBytes(entry.size), fmtTime(entry.mod_time)));
+    let visible = (entries || []).filter((entry) => recordMatchesSearch(entry, query, fmtBytes(entry.size), fmtTime(entry.mod_time)));
+    if (filterMode === "folders-only") visible = visible.filter((entry) => entry.is_dir);
+    if (filterMode === "files-only") visible = visible.filter((entry) => !entry.is_dir);
+    visible.sort((a, b) => {
+      if (filterMode === "folders-first") return Number(b.is_dir) - Number(a.is_dir) || byName(a, b);
+      if (filterMode === "name-desc") return -byName(a, b);
+      if (filterMode === "modified") return (Date.parse(b.mod_time) || 0) - (Date.parse(a.mod_time) || 0) || byName(a, b);
+      if (filterMode === "size") return Number(b.size || 0) - Number(a.size || 0) || byName(a, b);
+      return byName(a, b);
+    });
     tbody.replaceChildren(...(visible.length
       ? visible.map(fileRow)
       : [el("tr", {}, el("td", { colspan: "4", class: "muted" }, (entries || []).length ? "No matching files." : "Empty directory"))]));
   };
   const search = pageSearchInput("files", draw);
+  const filter = pageFilterMenu("Filter files", [
+    ["folders-first", "Folders first"],
+    ["name", "Name A-Z"],
+    ["name-desc", "Name Z-A"],
+    ["modified", "Newest modified"],
+    ["size", "Largest first"],
+    ["folders-only", "Show folders only"],
+    ["files-only", "Show files only"],
+  ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   const project = S.servers.find((server) => server.id === S.managedServerId)
     || S.servers.find((server) => server.id === S.activeId);
   const subtitle = projectContextSubtitle("Currently in", project, project?.id === S.activeId);
   main.append(
     pageHeader("Files", subtitle, [
-      search,
+      el("div", { class: "page-search-filter-controls" }, search, filter),
       el("button", { class: "btn", title: "Upload", onclick: () => upInput.click() }, solarIcon("upload-linear"), "Upload"),
       el("button", { class: "btn", title: "New folder", onclick: () => mkdirPrompt(main, path) }, solarIcon("folder-linear"), "New folder"),
       upInput,
-    ]),
+    ], managedPageBackButton()),
     crumbs,
     el("div", { class: "file-list" },
       el("table", {},
@@ -1849,7 +2117,7 @@ function fileActions(main, path, entry) {
     overflowActionsMenu(`Actions for ${entry.name}`, items, "mobile-row-actions"));
 }
 
-async function openFileEditor(main, rel) {
+async function openFileEditor(main, rel, returnTo = null) {
   let data;
   try { data = await api(serverScopedPath("/files/content?path=" + encodeURIComponent(rel))); }
   catch (e) { toast(e.message, "err"); return; }
@@ -1857,19 +2125,27 @@ async function openFileEditor(main, rel) {
   const ta = el("textarea", { class: "editor", spellcheck: "false" });
   ta.value = data.content;
   let baseline = data.content;
-  const leaveEditor = () => {
-    if (ta.value === baseline) {
-      pageFiles(main);
+  const finishLeaving = () => {
+    if (returnTo?.page === "configuration") {
+      fileEscapeAction = null;
+      navigate("configuration", { serverId: returnTo.serverId, fromOverview: returnTo.fromOverview, fromServers: returnTo.fromServers });
       return;
     }
-    confirmModal("Discard changes", `Discard unsaved changes to "${rel}"?`, "Discard", async () => pageFiles(main));
+    pageFiles(main);
+  };
+  const leaveEditor = () => {
+    if (ta.value === baseline) {
+      finishLeaving();
+      return;
+    }
+    confirmModal("Discard changes", `Discard unsaved changes to "${rel}"?`, "Discard", async () => finishLeaving());
   };
   fileEscapeAction = leaveEditor;
   main.append(
     el("div", { class: "toolbar" },
       el("h1", { class: "mono", style: "font-size:1rem" }, rel),
       el("div", { class: "spacer" }),
-      el("button", { class: "btn ghost", title: "Back to files", onclick: leaveEditor }, solarIcon("folder-open-linear"), "Back"),
+      el("button", { class: "btn ghost", title: returnTo ? "Back to Configuration" : "Back to files", onclick: leaveEditor }, solarIcon("folder-open-linear"), "Back"),
       el("button", { class: "btn primary", title: "Save file", onclick: async () => {
         try {
           await api(serverScopedPath("/files/content"), { method: "POST", json: { path: rel, content: ta.value } });
@@ -1945,7 +2221,15 @@ function openFileInEditor(path) {
   if (!can("server.files.manage")) {
     return toast("You do not have permission to edit files", "err");
   }
-  S.pendingFileOpen = path;
+  S.pendingFileOpen = {
+    path,
+    returnTo: {
+      page: "configuration",
+      serverId: S.managedServerId,
+      fromOverview: S.overviewReturn,
+      fromServers: S.serverManagementReturn,
+    },
+  };
   navigate("files", { serverId: S.managedServerId });
 }
 
@@ -2114,7 +2398,7 @@ function serverIconConfigurationCard(server, onChange) {
     preview,
     el("div", { class: "configuration-server-icon-copy" },
       el("strong", {}, "Minecraft server icon"),
-      el("p", { class: "muted" }, "Upload a PNG, JPEG, or WebP image. Crop it here, then click Save changes to store the 64×64 PNG."),
+      el("p", { class: "muted" }, "Upload a PNG, JPEG, or WebP image. This will be converted to a 64×64 PNG."),
       can("server.icon.manage") ? el("div", { class: "actions" }, changeButton, input) :
         el("p", { class: "hint" }, "You do not have permission to change this icon.")));
   card.resetPreview = () => preview.replaceChildren(serverCardIcon(server));
@@ -2137,10 +2421,37 @@ async function pageConfiguration(main) {
       `${j.version} — ${j.path}`)));
 
   const props = d.properties || {};
-  const commonProps = ["motd", "server-port", "max-players", "difficulty", "gamemode", "white-list", "pvp", "view-distance", "online-mode"];
+  const commonProps = ["motd", "server-port", "max-players", "difficulty", "gamemode", "white-list", "pvp", "view-distance", "simulation-distance", "online-mode"];
+  const numericPropertyRules = {
+    "server-port": { min: "1", max: "65535" },
+    "max-players": { min: "0" },
+    "view-distance": { min: "0" },
+    "simulation-distance": { min: "0" },
+  };
+  const propertyOptions = {
+    difficulty: [["peaceful", "Peaceful"], ["easy", "Easy"], ["normal", "Normal"], ["hard", "Hard"]],
+    gamemode: [["survival", "Survival"], ["creative", "Creative"], ["adventure", "Adventure"], ["spectator", "Spectator"]],
+    "white-list": [["true", "True"], ["false", "False"]],
+    pvp: [["true", "True"], ["false", "False"]],
+    "online-mode": [["true", "True"], ["false", "False"]],
+  };
   const propInputs = {};
   const propRows = commonProps.filter((k) => k in props).map((k) => {
-    const v = el("input", { value: props[k] });
+    const current = String(props[k]);
+    let v;
+    if (propertyOptions[k]) {
+      const options = [...propertyOptions[k]];
+      if (!options.some(([value]) => value === current)) options.unshift([current, current]);
+      v = el("select", {}, ...options.map(([value, label]) =>
+        el("option", { value, selected: value === current ? "" : null }, label)));
+    } else if (numericPropertyRules[k]) {
+      v = el("input", {
+        type: "number", value: current, required: "", step: "1", inputmode: "numeric",
+        ...numericPropertyRules[k],
+      });
+    } else {
+      v = el("input", { value: current });
+    }
     propInputs[k] = v;
     return el("div", { class: "field-row" }, el("label", {}, k, v));
   });
@@ -2151,12 +2462,30 @@ async function pageConfiguration(main) {
   const policy = el("select", {},
     ...["never", "on-failure", "always"].map((p) => el("option", { value: p, selected: p === (inst.restart_policy || "never") ? "" : null }, p)));
 
-  const automationCard = el("div", { class: "card" },
-    el("div", { class: "field-row" }, el("label", { class: "check-row" }, auto, " Start this server when the machine boots")),
-    el("div", { class: "field-row" }, el("label", { class: "check-row" }, recover, " Recover after unclean shutdown (power loss)")),
-    el("div", { class: "field-row" }, el("label", {}, "Boot delay (seconds)", delay)),
-    el("div", { class: "field-row" }, el("label", {}, "Crash restart policy", policy),
-      el("span", { class: "hint" }, "Crash-loop protection pauses automatic restarts after repeated rapid crashes.")));
+  const automationCard = el("div", { class: "card configuration-automation-card" },
+    el("div", { class: "configuration-automation-controls" },
+      el("div", { class: "field-row" }, el("label", { class: "check-row" }, auto, " Start this server when the machine boots")),
+      el("div", { class: "field-row" }, el("label", { class: "check-row" }, recover, " Recover after unclean shutdown (power loss)")),
+      el("div", { class: "field-row" }, el("label", {}, "Boot delay (seconds)", delay)),
+      el("div", { class: "field-row" }, el("label", {}, "Crash restart policy", policy))),
+    el("div", { class: "configuration-automation-help-column" },
+      el("div", { class: "configuration-automation-help" },
+        el("div", { class: "configuration-automation-help-group" },
+          el("h3", {}, "Start this server when the machine boots"),
+          el("p", { class: "muted" }, "Automatically launches this project after Bonghos starts and the boot delay finishes.")),
+        el("div", { class: "configuration-automation-help-group" },
+          el("h3", {}, "Recover after unclean shutdown"),
+          el("p", { class: "muted" }, "Allows autostart after a power loss or another unclean shutdown. When disabled, Bonghos leaves the server stopped for review.")),
+        el("div", { class: "configuration-automation-help-group" },
+          el("h3", {}, "Boot delay"),
+          el("p", { class: "muted" }, "Waits this many seconds after Bonghos starts before automatically launching this server.")),
+        el("div", { class: "configuration-automation-help-group" },
+          el("h3", {}, "Crash restart policy"),
+          el("ul", { class: "configuration-automation-policy-list" },
+            el("li", {}, el("strong", {}, "Never:"), " Leave the server stopped after a crash."),
+            el("li", {}, el("strong", {}, "On failure:"), " Restart after an unexpected non-zero exit."),
+            el("li", {}, el("strong", {}, "Always:"), " Keep automatic crash recovery enabled; requested and clean stops remain stopped.")),
+          el("p", { class: "hint" }, "Crash-loop protection pauses automatic restarts after repeated rapid crashes.")))));
 
   let pendingIcon = null;
   let iconChangeVersion = 0;
@@ -2217,6 +2546,12 @@ async function pageConfiguration(main) {
 
   async function saveChanges() {
     if (saving || !isDirty()) return;
+    const invalidProperty = Object.values(propInputs).find((input) => !input.checkValidity());
+    if (invalidProperty) {
+      invalidProperty.reportValidity();
+      invalidProperty.focus();
+      return;
+    }
     const next = currentState();
     saving = true;
     updateActions();
@@ -2307,8 +2642,17 @@ async function pageConfiguration(main) {
     );
   };
 
+  const serverPropertiesCard = el("div", { class: "card server-properties-card" },
+    can("server.files.manage")
+      ? el("div", { class: "server-properties-card-actions" },
+        el("button", { class: "btn ghost small", onclick: openServerProperties }, "Open server.properties"))
+      : null,
+    propRows.length
+      ? el("div", { class: "server-properties-fields" }, ...propRows)
+      : el("p", { class: "muted" }, "No server.properties found yet (it is created on first start)."));
+
   main.append(
-    pageHeader("Configuration", projectContextSubtitle("Editing", inst, inst.id === S.activeId, false), [headerDiscard, headerSave]),
+    pageHeader("Configuration", projectContextSubtitle("Editing", inst, inst.id === S.activeId, false), [headerDiscard, headerSave], managedPageBackButton()),
     d.eula ? document.createDocumentFragment() : el("div", { class: "notice" },
       "The Minecraft EULA has not been accepted for this project. The server will not start until it is. ",
       el("button", { class: "btn inline-offset", onclick: () =>
@@ -2322,18 +2666,17 @@ async function pageConfiguration(main) {
       el("div", { class: "card" },
         el("h3", {}, "JVM memory"),
         jvmSourceNote(d.jvm),
-        el("div", { class: "field-row" }, el("label", {}, "Minimum (-Xms)", xms)),
-        el("div", { class: "field-row" }, el("label", {}, "Maximum (-Xmx)", xmx))),
+        el("div", { class: "configuration-memory-fields" },
+          el("div", { class: "field-row" }, el("label", {}, "Minimum (-Xms)", xms)),
+          el("div", { class: "field-row" }, el("label", {}, "Maximum (-Xmx)", xmx)))),
       el("div", { class: "card" },
         el("h3", {}, "Startup"),
         el("div", { class: "field-row" }, el("label", {}, "Startup script", scriptSel)),
         el("div", { class: "field-row flow-section" }, el("label", {}, "Java installation", javaSel)))),
     el("h2", {}, "Server icon"),
     iconCard,
-    el("div", { class: "configuration-section-heading" },
-      el("h2", {}, "server.properties"),
-      can("server.files.manage") ? el("button", { class: "btn ghost", onclick: openServerProperties }, "Open server.properties") : null),
-    el("div", { class: "card" }, propRows.length ? propRows : el("p", { class: "muted" }, "No server.properties found yet (it is created on first start).")),
+    el("h2", {}, "server.properties"),
+    serverPropertiesCard,
     el("h2", {}, "Automation"),
     automationCard,
     bottomActions);
@@ -2375,16 +2718,38 @@ async function pageBackups(main) {
     el("td", { class: "mobile-hide" }, fmtTime(b.created_at)),
     el("td", { class: "table-actions" }, backupActions(b)));
   const tbody = el("tbody");
+  let filterMode = "newest";
+  const byNewest = (a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0);
   const draw = (query = "") => {
-    const visible = (list || []).filter((backup) => recordMatchesSearch(backup, query, fmtBytes(backup.compressed_size), fmtTime(backup.created_at)));
+    let visible = (list || []).filter((backup) => recordMatchesSearch(backup, query, fmtBytes(backup.compressed_size), fmtTime(backup.created_at)));
+    if (filterMode === "full") visible = visible.filter((backup) => backup.backup_type === "full_server");
+    if (filterMode === "world") visible = visible.filter((backup) => String(backup.backup_type).includes("world"));
+    if (filterMode === "configuration") visible = visible.filter((backup) => String(backup.backup_type).includes("configuration"));
+    if (filterMode === "protected") visible = visible.filter((backup) => backup.protected);
+    if (filterMode === "verified") visible = visible.filter((backup) => backup.verification_status === "verified");
+    visible.sort((a, b) => {
+      if (filterMode === "oldest") return -byNewest(a, b);
+      if (filterMode === "size") return Number(b.compressed_size || 0) - Number(a.compressed_size || 0) || byNewest(a, b);
+      return byNewest(a, b);
+    });
     tbody.replaceChildren(...(visible.length
       ? visible.map(backupRow)
       : [el("tr", {}, el("td", { colspan: "7", class: "muted" }, (list || []).length ? "No matching backups." : "No backups yet."))]));
   };
   const search = pageSearchInput("backups", draw);
+  const filter = pageFilterMenu("Filter backups", [
+    ["newest", "Newest first"],
+    ["oldest", "Oldest first"],
+    ["size", "Largest first"],
+    ["full", "Full server only"],
+    ["world", "World only"],
+    ["configuration", "Configuration only"],
+    ["protected", "Protected only"],
+    ["verified", "Verified only"],
+  ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Backups", "Verified archives, retention decisions, and restore controls. Online backups briefly pause world saving.", [
-      search,
+      el("div", { class: "page-search-filter-controls" }, search, filter),
       can("server.backups.create") ? mkBtn("world", "World backup") : null,
       can("server.backups.create") ? mkBtn("full", "Full backup") : null,
       can("server.backups.create") ? mkBtn("configuration", "Config backup") : null,
@@ -2480,36 +2845,72 @@ async function pageSchedules(main) {
     el("td", {}, s.action.replace(/_/g, " ")),
     el("td", { class: "mono" }, s.schedule_type + ": " + s.schedule_expression + " (" + (s.timezone || "UTC") + ")"),
     el("td", {}, fmtTime(s.next_run_at)),
-    el("td", {}, s.last_result || "—"),
-    el("td", { class: "row-actions" },
-      can("server.schedules.manage") ? [
-        el("button", { class: "btn ghost", onclick: async () => {
-          try { await api(`/schedules/${s.id}/run`, { method: "POST", json: {} }); toast("Running now", "ok"); }
-          catch (e) { toast(e.message, "err"); }
-        } }, "Run now"),
-        el("button", { class: "btn ghost", onclick: () => scheduleForm(s) }, "Edit"),
-        el("button", { class: "btn danger", onclick: () =>
-          confirmModal("Delete schedule", `Delete schedule "${s.name}"?`, "Delete", async () => {
-            try { await api(`/schedules/${s.id}`, { method: "DELETE" }); renderPage(); } catch (e) { toast(e.message, "err"); }
-          }) }, "Delete")] : ""));
+    el("td", { class: "schedule-last-result" }, s.last_result || "—"),
+    el("td", { class: "table-actions schedule-actions-cell" },
+      can("server.schedules.manage") ? scheduleActions(s) : ""));
   const tbody = el("tbody");
+  let filterMode = "next-run";
+  const byName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base" });
   const draw = (query = "") => {
-    const visible = (list || []).filter((schedule) => recordMatchesSearch(schedule, query, fmtTime(schedule.next_run_at)));
+    let visible = (list || []).filter((schedule) => recordMatchesSearch(schedule, query, fmtTime(schedule.next_run_at)));
+    if (filterMode === "enabled") visible = visible.filter((schedule) => schedule.enabled);
+    if (filterMode === "disabled") visible = visible.filter((schedule) => !schedule.enabled);
+    visible.sort((a, b) => {
+      if (filterMode === "next-run") {
+        const aTime = Date.parse(a.next_run_at);
+        const bTime = Date.parse(b.next_run_at);
+        return (Number.isFinite(aTime) ? aTime : Infinity) - (Number.isFinite(bTime) ? bTime : Infinity) || byName(a, b);
+      }
+      if (filterMode === "action") return String(a.action || "").localeCompare(String(b.action || ""), undefined, { sensitivity: "base" }) || byName(a, b);
+      return byName(a, b);
+    });
     tbody.replaceChildren(...(visible.length
       ? visible.map(scheduleRow)
       : [el("tr", {}, el("td", { colspan: "6", class: "muted" }, (list || []).length ? "No matching schedules." : "No schedules yet."))]));
   };
   const search = pageSearchInput("schedules", draw);
+  const filter = pageFilterMenu("Filter schedules", [
+    ["next-run", "Next run"],
+    ["name", "Alphabetically"],
+    ["action", "Action"],
+    ["enabled", "Show enabled only"],
+    ["disabled", "Show disabled only"],
+  ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Schedules", "Persistent Linux-host schedules with next run, last result, and manual run controls.", [
-      search,
+      el("div", { class: "page-search-filter-controls" }, search, filter),
       can("server.schedules.manage") ? el("button", { class: "btn primary", onclick: () => scheduleForm(null) }, "New schedule") : null,
     ]),
-    el("div", { class: "table-wrap" },
+    el("div", { class: "table-wrap schedules-table" },
       el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", {}, "Action"), el("th", {}, "When"), el("th", {}, "Next run"), el("th", {}, "Last result"), el("th", {}, ""))),
+        el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", {}, "Action"), el("th", {}, "When"), el("th", {}, "Next run"), el("th", { class: "schedule-last-result" }, "Last result"), el("th", {}, ""))),
         tbody)));
   draw();
+}
+
+function scheduleActions(schedule) {
+  const actions = [
+    { label: "Run now", icon: "play-linear", run: async () => {
+      try { await api(`/schedules/${schedule.id}/run`, { method: "POST", json: {} }); toast("Running now", "ok"); }
+      catch (error) { toast(error.message, "err"); }
+    } },
+    { label: "Edit", icon: "pen-new-square-linear", run: () => scheduleForm(schedule) },
+    { label: "Delete", icon: "trash-bin-trash-linear", danger: true, run: () =>
+      confirmModal("Delete schedule", `Delete schedule "${schedule.name}"?`, "Delete", async () => {
+        try { await api(`/schedules/${schedule.id}`, { method: "DELETE" }); renderPage(); }
+        catch (error) { toast(error.message, "err"); }
+      }) },
+  ];
+  const desktop = el("div", { class: "row-actions desktop-row-actions schedule-row-actions" },
+    ...actions.map((action) => el("button", {
+      class: "btn " + (action.danger ? "danger" : "ghost"), onclick: action.run,
+    }, action.label)));
+  const mobile = overflowActionsMenu(`Actions for ${schedule.name}`,
+    actions.map((action) => el("button", {
+      class: "action-menu-item" + (action.danger ? " danger" : ""),
+      type: "button", role: "menuitem", onclick: action.run,
+    }, solarIcon(action.icon), action.label)), "mobile-row-actions");
+  return el("div", { class: "responsive-row-actions" }, desktop, mobile);
 }
 
 function timezoneOffsetMinutes(timeZone, date) {
@@ -3452,10 +3853,15 @@ function overviewSparklineNode(title, points, fmt, options = {}) {
     el("span", {}, new Date(firstAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })),
     el("span", {}, `${axisFormat(min)} – ${axisFormat(max)}`),
     el("span", {}, new Date(lastAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })));
-  const plot = el("div", { class: "overview-sparkline-plot" }, svg, marker, tooltip);
+  const summary = options.summary
+    ? el("div", { class: "overview-sparkline-summary", "aria-hidden": "true" },
+      el("div", { class: "metric-value" }, options.summary.value),
+      el("div", { class: "metric-note" }, options.summary.note))
+    : null;
+  const plot = el("div", { class: "overview-sparkline-plot" }, svg, marker, tooltip, ...(summary ? [summary] : []));
   const wrapper = el("div", {
     class: "overview-sparkline", tabindex: "0",
-    "aria-label": `${title} history from ${fmtTime(firstAt)} to ${fmtTime(lastAt)}, range ${axisFormat(min)} to ${axisFormat(max)}. Focus and use left or right arrow keys to inspect samples.`,
+    "aria-label": `${title} current ${fmt(points[points.length - 1].value)}. History from ${fmtTime(firstAt)} to ${fmtTime(lastAt)}, range ${axisFormat(min)} to ${axisFormat(max)}. Focus and use left or right arrow keys to inspect samples.`,
   }, plot, range);
   svg.append(line, crosshair, overlay);
   let activeIndex = points.length - 1;
@@ -3610,7 +4016,9 @@ function serverVersionSummary(server) {
   const items = [serverProviderLabel(server)];
   const gameVersion = String(server.minecraft_version || "").trim();
   if (gameVersion) items.push(el("span", { class: "server-game-version" }, gameVersionIcon(), gameVersion));
-  items.push(document.createTextNode("imported via " + server.source_type));
+  const modifiedAt = server.updated_at || server.created_at;
+  if (modifiedAt) items.push(el("span", { class: "server-game-version" },
+    solarIcon("history-linear"), "Modified " + fmtTimeToMinute(modifiedAt)));
   const children = [];
   items.forEach((item, index) => {
     if (index) children.push(el("span", { "aria-hidden": "true" }, "·"));
@@ -3651,9 +4059,12 @@ function positionActionMenu(menu, trigger) {
   Object.assign(menu.style, { position: "fixed", left: left + "px", right: "auto", top: top + "px" });
 }
 
-function overflowActionsMenu(label, items, className = "") {
+function overflowActionsMenu(label, items, className = "", triggerChildren = null) {
   if (!items.length) return null;
   const menu = el("div", { class: "action-menu", role: "menu", hidden: "" }, ...items);
+  const triggerContent = triggerChildren === null
+    ? [solarIcon("menu-dots-bold")]
+    : (Array.isArray(triggerChildren) ? triggerChildren : [triggerChildren]);
   const trigger = el("button", {
     class: "btn ghost small icon-button action-menu-trigger",
     type: "button",
@@ -3675,7 +4086,7 @@ function overflowActionsMenu(label, items, className = "") {
       positionActionMenu(menu, trigger);
       menu.querySelector('[role="menuitem"]')?.focus();
     },
-  }, solarIcon("menu-dots-bold"));
+  }, ...triggerContent);
 
   menu.addEventListener("click", () => closeActionMenus());
   menu.addEventListener("keydown", (event) => {
@@ -3736,7 +4147,7 @@ function serverManagementButton(server, page, label, icon) {
         fileEscapeAction = null;
         S.pendingFileOpen = null;
       }
-      navigate(page, { serverId: server.id });
+      navigate(page, { serverId: server.id, fromServers: true });
     },
   }, solarIcon(icon));
 }
@@ -3824,16 +4235,34 @@ async function pageServers(main) {
           ? serverManagementButton(s2, "configuration", "Configuration", "tuning-2-linear") : "",
         serverActionsMenu(s2))));
   const cardsHost = el("div", { class: "grid cols-2" });
+  let filterMode = "alphabetical";
+  const byName = (a, b) => String(a.display_name || "").localeCompare(String(b.display_name || ""), undefined, { sensitivity: "base", numeric: true });
   const draw = (query = "") => {
-    const visible = S.servers.filter((server) => recordMatchesSearch(server, query));
+    let visible = S.servers.filter((server) => recordMatchesSearch(server, query));
+    if (filterMode === "active-only") visible = visible.filter((server) => server.id === S.activeId);
+    if (filterMode === "non-active-only") visible = visible.filter((server) => server.id !== S.activeId);
+    visible.sort((a, b) => {
+      if (filterMode === "active-first") return Number(b.id === S.activeId) - Number(a.id === S.activeId) || byName(a, b);
+      if (filterMode === "game-version") return String(a.minecraft_version || "").localeCompare(String(b.minecraft_version || ""), undefined, { sensitivity: "base", numeric: true }) || byName(a, b);
+      if (filterMode === "modloader") return String(a.modloader || "").localeCompare(String(b.modloader || ""), undefined, { sensitivity: "base" }) || String(a.modloader_version || "").localeCompare(String(b.modloader_version || ""), undefined, { numeric: true }) || byName(a, b);
+      return byName(a, b);
+    });
     cardsHost.replaceChildren(...(visible.length
       ? visible.map(serverCard)
       : [el("p", { class: "muted" }, S.servers.length ? "No matching servers." : "No servers imported yet — use “Import server”.")]));
   };
   const search = pageSearchInput("servers", draw);
+  const filter = pageFilterMenu("Filter servers", [
+    ["alphabetical", "Alphabetically"],
+    ["active-first", "Active project first"],
+    ["game-version", "Game version"],
+    ["modloader", "Modloader"],
+    ["active-only", "Show active project"],
+    ["non-active-only", "Show non-active projects"],
+  ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Servers", "Project inventory, active-project selection, and persistent import progress.", [
-      search,
+      el("div", { class: "page-search-filter-controls" }, search, filter),
       can("server.import.manage") ? el("button", { class: "btn primary", onclick: importWizard }, "Import server") : null,
     ], overviewBackButton()),
     el("div", { id: "ops-host" }, ...(ops || []).map(opCard)),
@@ -4028,7 +4457,7 @@ function importWizard() {
     el("option", { value: "copy" }, "Copy into Bonghos (source untouched)"),
     el("option", { value: "move" }, "Move into Bonghos"),
     el("option", { value: "link" }, "Link in place (advanced — excluded from Bonghos migration)"));
-  const fileInput = el("input", { type: "file", accept: ".zip,.tar,.gz,.tgz,.xz,.zst,.7z,.rar", style: "display:none" });
+  const fileInput = el("input", { type: "file", accept: ".zip,.tar,.gz,.tgz,.zst", style: "display:none" });
   const chosen = el("div", { class: "hint mono" }, "");
   const dropzone = el("div", { class: "dropzone", tabindex: "0", role: "button",
     "aria-label": "Drag a server-pack archive here, or choose one" },
@@ -4042,7 +4471,7 @@ function importWizard() {
     chosen.textContent = `${f.name} — ${fmtBytes(f.size)}`;
     if (!name.value.trim()) {
       // Offer the archive name as a starting display name.
-      name.value = f.name.replace(/\.(zip|tar|tgz|gz|xz|zst|7z|rar)$/i, "").replace(/[._]+/g, " ").trim();
+      name.value = f.name.replace(/\.(zip|tar|tgz|gz|zst)$/i, "").replace(/[._]+/g, " ").trim();
       name.dispatchEvent(new Event("input"));
     }
   }
@@ -4065,7 +4494,7 @@ function importWizard() {
     setChosen(f);
   });
   const rowUpload = el("div", { class: "field-row" },
-    el("label", {}, "Archive (.zip, .tar.gz, .tar.xz, .tar.zst, .7z, .rar)", dropzone), fileInput);
+    el("label", {}, "Archive (.zip, .tar, .tar.gz, .tar.zst)", dropzone), fileInput);
   const rowURL = el("div", { class: "field-row hidden" }, el("label", {}, "URL", url), el("span", { class: "hint" }, "HTTPS only by default. The download runs on the Linux host and continues if you close this page."));
   const rowLocal = el("div", { class: "field-row hidden" }, el("label", {}, "Absolute path to archive", localPath));
   const rowDir = el("div", { class: "field-row hidden" }, el("label", {}, "Absolute path to directory", dirPath), el("label", {}, "Mode", dirMode));
@@ -4127,15 +4556,32 @@ async function pageActivity(main) {
     el("td", {}, fmtTime(event.at)), el("td", {}, event.username), el("td", {}, event.action.replace(/_/g, " ")),
     el("td", { class: "mono" }, event.target || ""), el("td", { class: "muted" }, event.detail || ""));
   const tbody = el("tbody");
+  let filterMode = "newest";
+  const byNewest = (a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0);
+  const byText = (field, a, b) => String(a[field] || "").localeCompare(String(b[field] || ""), undefined, { sensitivity: "base", numeric: true });
   const draw = (query = "") => {
     const visible = (list || []).filter((event) => recordMatchesSearch(event, query, fmtTime(event.at), event.action.replace(/_/g, " ")));
+    visible.sort((a, b) => {
+      if (filterMode === "oldest") return -byNewest(a, b);
+      if (filterMode === "user") return byText("username", a, b) || byNewest(a, b);
+      if (filterMode === "action") return byText("action", a, b) || byNewest(a, b);
+      return byNewest(a, b);
+    });
     tbody.replaceChildren(...(visible.length
       ? visible.map(activityRow)
       : [el("tr", {}, el("td", { colspan: "5", class: "muted" }, (list || []).length ? "No matching activity." : "No audit events recorded yet."))]));
   };
   const search = pageSearchInput("activity", draw);
+  const filter = pageFilterMenu("Filter activity", [
+    ["newest", "Newest first"],
+    ["oldest", "Oldest first"],
+    ["user", "User"],
+    ["action", "Action"],
+  ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
-    pageHeader("Activity", "Audit trail of account and server-management actions.", [search]),
+    pageHeader("Activity", "Audit trail of account and server-management actions.", [
+      el("div", { class: "page-search-filter-controls" }, search, filter),
+    ]),
     el("div", { class: "table-wrap" },
       el("table", {},
         el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "User"), el("th", {}, "Action"), el("th", {}, "Target"), el("th", {}, "Detail"))),
@@ -4155,16 +4601,35 @@ async function pageUsers(main) {
     el("td", {}, u.Disabled ? "Disabled" : "Active"),
     el("td", { class: "table-actions" }, userActions(u)));
   const tbody = el("tbody");
+  let filterMode = "alphabetical";
+  const byName = (a, b) => String(a.Username || "").localeCompare(String(b.Username || ""), undefined, { sensitivity: "base" });
   const draw = (query = "") => {
-    const visible = (users || []).filter((user) => recordMatchesSearch(user, query, user.Disabled ? "disabled" : "active"));
+    let visible = (users || []).filter((user) => recordMatchesSearch(user, query, user.Disabled ? "disabled" : "active"));
+    if (filterMode === "active-only") visible = visible.filter((user) => !user.Disabled);
+    if (filterMode === "disabled-only") visible = visible.filter((user) => user.Disabled);
+    visible.sort((a, b) => {
+      if (filterMode === "role") {
+        const ownerOrder = Number(String(b.Role || "").toLowerCase() === "owner") - Number(String(a.Role || "").toLowerCase() === "owner");
+        return ownerOrder || String(a.Role || "").localeCompare(String(b.Role || ""), undefined, { sensitivity: "base" }) || byName(a, b);
+      }
+      if (filterMode === "status") return Number(a.Disabled) - Number(b.Disabled) || byName(a, b);
+      return byName(a, b);
+    });
     tbody.replaceChildren(...(visible.length
       ? visible.map(userRow)
       : [el("tr", {}, el("td", { colspan: "4", class: "muted" }, (users || []).length ? "No matching users." : "No users returned by the API."))]));
   };
   const search = pageSearchInput("users", draw);
+  const filter = pageFilterMenu("Filter users", [
+    ["alphabetical", "Alphabetically"],
+    ["role", "Role"],
+    ["status", "Status"],
+    ["active-only", "Show active only"],
+    ["disabled-only", "Show disabled only"],
+  ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Users", "Accounts, roles, invitations, sessions, and final-Owner protection.", [
-      search,
+      el("div", { class: "page-search-filter-controls" }, search, filter),
       el("button", { class: "btn primary", onclick: inviteUser }, "Invite user"),
     ]),
     el("div", { class: "table-wrap users-table" },
@@ -4238,37 +4703,228 @@ function changeRole(u) {
     }]]);
 }
 
+function openPasskeyEnrollment() {
+  if (DEMO_MODE) {
+    toast("Passkey enrollment requires a real Bonghos session over HTTPS or localhost.");
+    return;
+  }
+  if (!passkeysSupported()) {
+    toast("Passkeys require a supported browser over HTTPS or localhost.", "err");
+    return;
+  }
+  const name = el("input", { maxlength: "80", placeholder: "Laptop, phone, or security key", autocomplete: "off" });
+  const password = el("input", { type: "password", autocomplete: "current-password", required: "" });
+  const code = el("input", {
+    inputmode: "numeric", maxlength: "32", autocomplete: "one-time-code",
+    placeholder: "6-digit code or recovery code", required: "",
+  });
+  modal("Add passkey", [
+    el("div", { class: "passkey-enrollment-note" }, solarIcon("key-linear"),
+      el("p", {}, "Your browser will let you choose this device, another device, or a USB/NFC security key.")),
+    el("div", { class: "field-row" }, el("label", {}, "Passkey name (optional)", name)),
+    el("div", { class: "field-row" }, el("label", {}, "Current password", password)),
+    el("div", { class: "field-row" }, el("label", {}, "Authenticator or recovery code", code),
+      el("span", { class: "hint" }, "Confirm your identity before adding a new sign-in method.")),
+  ], [
+    ["Cancel", "ghost", (close) => close()],
+    ["Add passkey", "primary", async (close) => {
+      if (!password.value || !code.value.trim()) {
+        toast("Enter your current password and authentication code.", "err");
+        return;
+      }
+      const button = document.activeElement;
+      if (button instanceof HTMLButtonElement) button.disabled = true;
+      try {
+        const started = await api("/passkeys/register/begin", { method: "POST", json: {
+          name: name.value.trim(), password: password.value, code: code.value.trim(),
+        }});
+        password.value = "";
+        code.value = "";
+        const credential = await navigator.credentials.create({
+          publicKey: passkeyCreationOptions(started.options.publicKey),
+        });
+        await api(`/passkeys/register/finish?flow=${encodeURIComponent(started.flow)}`, {
+          method: "POST",
+          json: passkeyCredentialJSON(credential),
+        });
+        close();
+        toast("Passkey added.", "ok");
+        renderPage();
+      } catch (error) {
+        toast(passkeyError(error, "Passkey enrollment failed."), "err");
+      } finally {
+        if (button instanceof HTMLButtonElement && button.isConnected) button.disabled = false;
+      }
+    }],
+  ]);
+}
+
+function renamePasskey(passkey) {
+  const currentName = passkey.name || "Passkey";
+  const name = el("input", {
+    value: currentName, maxlength: "80", required: "", autocomplete: "off",
+    placeholder: "Passkey name",
+  });
+  modal("Rename passkey", [
+    el("div", { class: "field-row" }, el("label", {}, "Passkey name", name),
+      el("span", { class: "hint" }, "This changes only the label shown in Bonghos.")),
+  ], [
+    ["Cancel", "ghost", (close) => close()],
+    ["Rename", "primary", async (close) => {
+      const nextName = name.value.trim();
+      if (!nextName) {
+        toast("Passkey name is required.", "err");
+        name.focus();
+        return;
+      }
+      if (nextName === currentName) {
+        close();
+        return;
+      }
+      const button = document.activeElement;
+      if (button instanceof HTMLButtonElement) button.disabled = true;
+      try {
+        await api(`/passkeys/${passkey.id}`, { method: "PATCH", json: { name: nextName } });
+        close();
+        toast("Passkey renamed.", "ok");
+        renderPage();
+      } catch (error) {
+        toast(error.message, "err");
+      } finally {
+        if (button instanceof HTMLButtonElement && button.isConnected) button.disabled = false;
+      }
+    }],
+  ]);
+}
+
+function removePasskey(passkey) {
+  const name = passkey.name || "Passkey";
+  confirmModal("Remove passkey", `Remove “${name}”? Devices using it will no longer be able to sign in.`, "Remove", async () => {
+    try {
+      await api(`/passkeys/${passkey.id}`, { method: "DELETE", json: {} });
+      toast("Passkey removed.", "ok");
+      renderPage();
+    } catch (error) { toast(error.message, "err"); }
+  });
+}
+
+function securitySectionHead(title, description, action = null) {
+  return el("div", { class: "security-section-head" },
+    el("div", {}, el("h2", {}, title), description ? el("p", { class: "muted" }, description) : null),
+    action);
+}
+
+function passkeyCard(passkeys) {
+  const supported = DEMO_MODE || passkeysSupported();
+  const currentRP = location.hostname.toLowerCase();
+  const addButton = el("button", {
+    class: "btn primary",
+    disabled: supported ? null : "",
+    title: supported ? "Add a passkey" : "Passkeys require HTTPS or localhost",
+    onclick: openPasskeyEnrollment,
+  }, "Add passkey");
+  const content = passkeys.length
+    ? el("div", { class: "card passkey-list" }, passkeys.map((passkey) => {
+      const passkeyRP = String(passkey.rp_id || "").toLowerCase();
+      const isCurrentRP = passkeyRP === currentRP;
+      const kind = passkey.backed_up
+        ? "Synced passkey"
+        : passkey.backup_eligible ? "Sync available" : "Device or security key";
+      return el("div", { class: "passkey-row" },
+        el("span", { class: "passkey-row-icon", "aria-hidden": "true" }, solarIcon("key-linear")),
+        el("div", { class: "passkey-row-copy" },
+          el("div", { class: "passkey-row-title" },
+            el("strong", {}, passkey.name || "Passkey"),
+            el("span", { class: "tag passkey-kind" }, kind)),
+          el("span", { class: "passkey-row-origin" },
+            isCurrentRP ? "Works on this panel address" : `Added on ${passkey.rp_id || "another address"}`,
+            !isCurrentRP ? el("span", { class: "tag passkey-other-origin" }, "Different address") : null),
+          el("span", { class: "passkey-row-meta muted" },
+            el("span", {}, `Added ${fmtTime(passkey.created_at)}`),
+            el("span", {}, passkey.last_used_at ? `Last used ${fmtTime(passkey.last_used_at)}` : "Not used yet"))),
+        overflowActionsMenu(`Actions for ${passkey.name || "passkey"}`, [
+          el("button", {
+            class: "action-menu-item", type: "button", role: "menuitem",
+            onclick: () => renamePasskey(passkey),
+          }, solarIcon("pen-new-square-linear"), "Rename"),
+          el("button", {
+            class: "action-menu-item danger", type: "button", role: "menuitem",
+            onclick: () => removePasskey(passkey),
+          }, solarIcon("trash-bin-trash-linear"), "Remove"),
+        ], "passkey-row-actions"));
+    }))
+    : el("div", { class: "card passkey-empty" },
+      el("strong", {}, "No passkeys added"),
+      el("p", { class: "muted" }, "Add one to sign in without entering your username, password, or TOTP code."));
+  const availability = supported
+    ? el("p", { class: "passkey-origin-note muted" }, solarIcon("lock-keyhole-linear"),
+      el("span", {}, "Passkeys are tied to ", el("strong", {}, location.hostname), ". If you use Bonghos at another address, add a passkey there too."))
+    : el("div", { class: "alert danger passkey-support-warning" },
+      "Passkeys are unavailable here. Open Bonghos over HTTPS or localhost in a WebAuthn-compatible browser.");
+  return [
+    securitySectionHead("Passkeys", "Use this device, another device, or a FIDO2 security key.", addButton),
+    availability,
+    content,
+  ];
+}
+
 async function pageSecurity(main) {
-  const users = await api("/users").catch(() => []);
-  const activity = await api("/activity").catch(() => []);
-  const activeUsers = (users || []).filter((u) => !u.Disabled).length;
-  const disabledUsers = (users || []).filter((u) => u.Disabled).length;
+  const canViewSystemSecurity = can("server.configuration.manage");
+  const [activity, host, passkeys] = await Promise.all([
+    canViewSystemSecurity ? api("/activity").catch(() => []) : Promise.resolve([]),
+    canViewSystemSecurity ? api("/host").catch(() => null) : Promise.resolve(null),
+    api("/passkeys").catch(() => []),
+  ]);
+  const securityActions = /^(login_|passkey_|invitation_|role_|account_|sessions_|user_)/;
+  const securityActivity = (activity || []).filter((entry) => securityActions.test(String(entry.action || ""))).slice(0, 8);
+  const secureConnection = location.protocol === "https:";
+  const bindAddress = String(host?.bind_address || "").trim();
+  const localListener = /^(localhost|127(?:\.|$)|::1$)/i.test(bindAddress);
+  const listenerAddress = host ? `${bindAddress || "0.0.0.0"}:${host.port}` : "";
+  const sessionHours = Number(host?.session_hours);
+  const postureItem = (icon, title, status, note, warning = false) => el("div", { class: "security-posture-item" },
+    el("span", { class: "security-posture-icon", "aria-hidden": "true" }, solarIcon(icon)),
+    el("div", { class: "security-posture-copy" }, el("strong", {}, title), el("span", { class: "muted" }, note)),
+    el("span", { class: "tag security-posture-state" + (warning ? " is-warning" : "") }, status));
+  const protectionItems = [
+    postureItem("shield-check-linear", "Password and TOTP", "Required", "Remain available as a fallback sign-in method after you add a passkey."),
+    postureItem("lock-keyhole-linear", "Password storage", "Argon2id", "Passwords are hashed and never stored as plaintext."),
+    postureItem("shield-keyhole-linear", "Sign-in throttling", "Enabled", "Repeated failed sign-ins are temporarily rate limited."),
+    postureItem("shield-keyhole-linear", "Session protection",
+      Number.isFinite(sessionHours) ? `${sessionHours} hours` : "Protected",
+      Number.isFinite(sessionHours)
+        ? `Sessions expire after ${sessionHours} hours. HttpOnly, SameSite cookies and CSRF verification protect panel actions.`
+        : "HttpOnly, SameSite cookies and CSRF verification protect panel actions."),
+    postureItem(secureConnection ? "lock-keyhole-linear" : "danger-triangle-linear", "Current connection",
+      secureConnection ? "HTTPS" : "HTTP",
+      secureConnection ? "Traffic between this browser and the panel is encrypted." : "Traffic is not encrypted. Use HTTPS before exposing the panel.",
+      !secureConnection),
+  ];
+  if (host) {
+    protectionItems.push(postureItem("server-square-linear", "Panel listener", localListener ? "Local only" : "Network",
+      `${listenerAddress}. ${localListener ? "A tunnel or reverse proxy may still provide external access." : "Restrict access with a firewall or trusted reverse proxy."}`,
+      !localListener));
+  }
   main.innerHTML = "";
   main.append(
-    pageHeader("Security", "Authentication posture, account exposure, and sensitive-account operations."),
-    el("div", { class: "grid cols-3" },
-      statCard("Signed in as", S.me.username, S.me.role),
-      statCard("Active accounts", activeUsers, disabledUsers + " disabled"),
-      statCard("TOTP policy", "Mandatory", "enforced at setup and invitation activation")),
-    el("div", { class: "grid cols-2 flow-section" },
-      el("div", { class: "card" },
-        el("h3", {}, "Current session"),
-        el("dl", { class: "kv" },
-          el("dt", {}, "Username"), el("dd", {}, S.me.username),
-          el("dt", {}, "Role"), el("dd", {}, S.me.role),
-          el("dt", {}, "Permissions"), el("dd", { class: "mono" }, (S.me.permissions || []).join(", ")))),
-      el("div", { class: "card" },
-        el("h3", {}, "Recovery and sessions"),
-        el("p", { class: "muted" }, "The current API supports revoking another user's sessions from Users. It does not expose recovery-code inventory, session lists, or TOTP reset flows in the Web UI yet."))),
-    el("h2", {}, "Recent security activity"),
-    el("div", { class: "table-wrap" },
-      el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "Actor"), el("th", {}, "Action"), el("th", {}, "Target"))),
-        el("tbody", {}, (activity || []).slice(0, 12).map((a2) => el("tr", {},
-          el("td", {}, fmtTime(a2.at)),
-          el("td", {}, a2.username),
-          el("td", {}, a2.action.replace(/_/g, " ")),
-          el("td", { class: "mono" }, a2.target || "")))))));
+    pageHeader("Security", "Manage your sign-in methods and review the protections around your account."),
+    ...passkeyCard(passkeys || []),
+    securitySectionHead("Account protection", "Security controls currently protecting your account and this panel."),
+    el("div", { class: "card security-posture-card" },
+      el("div", { class: "security-posture-list" }, protectionItems)),
+    ...(canViewSystemSecurity ? [securitySectionHead("Recent security activity", "Latest sign-in and account-management events.",
+      el("button", { class: "btn ghost small", onclick: () => navigate("activity") }, solarIcon("history-linear"), "View all")),
+    securityActivity.length
+      ? el("div", { class: "table-wrap security-activity-table" },
+        el("table", {},
+          el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "Actor"), el("th", {}, "Event"), el("th", {}, "Target"), el("th", {}, "Address"))),
+          el("tbody", {}, securityActivity.map((entry) => el("tr", {},
+            el("td", {}, fmtTime(entry.at)),
+            el("td", {}, entry.username || "System"),
+            el("td", {}, String(entry.action || "").replace(/_/g, " ")),
+            el("td", {}, entry.target || "Not available"),
+            el("td", { class: "mono" }, entry.remote_addr || "Not available"))))))
+      : el("div", { class: "card" }, el("p", { class: "muted" }, "No recent sign-in or account-management activity."))] : []));
 }
 
 const BOT_EVENT_FIELDS = [
@@ -4374,7 +5030,7 @@ function botCard(bot) {
 }
 
 function botEditor(existing = null) {
-  const name = el("input", { value: existing?.name || "", maxlength: "80", autocomplete: "off", placeholder: "Server alerts" });
+  const name = el("input", { value: existing?.name || "", maxlength: "80", autocomplete: "off", placeholder: "Bot name" });
   const provider = el("select", {},
     el("option", { value: "telegram" }, "Telegram"),
     el("option", { value: "discord" }, "Discord"));
@@ -4466,6 +5122,33 @@ function settingsSectionHeading(id, title, subtitle, action = null) {
     action);
 }
 
+function systemdServiceState(rawState, systemdAvailable) {
+  if (!systemdAvailable) return { label: "Not managed", tone: "" };
+  const state = String(rawState || "").trim().toLowerCase();
+  if (/\bactivating\b|\bstarting\b/.test(state)) return { label: "Starting", tone: "starting" };
+  if (/\bdeactivating\b|\bstopping\b/.test(state)) return { label: "Stopping", tone: "stopping" };
+  if (/\bfailed\b|\bcrashed\b/.test(state)) return { label: "Failed", tone: "crashed" };
+  if (/\binactive\b|\bdead\b|\bstopped\b/.test(state)) return { label: "Stopped", tone: "" };
+  if (/\bactive\b|\brunning\b/.test(state)) return { label: "Active", tone: "running" };
+  return { label: "Unknown", tone: "" };
+}
+
+function settingsStatusPill(label, tone = "") {
+  return el("span", { class: `status-label ${tone}`.trim() },
+    el("span", { class: "status-square", "aria-hidden": "true" }), label);
+}
+
+function settingsServiceCard(title, unit, description, rawState, systemdAvailable) {
+  const state = systemdServiceState(rawState, systemdAvailable);
+  return el("div", { class: "settings-service-card" },
+    el("div", { class: "settings-service-card-head" },
+      el("div", { class: "settings-service-name" },
+        el("strong", {}, title),
+        el("span", { class: "mono muted" }, unit)),
+      settingsStatusPill(state.label, state.tone)),
+    el("p", { class: "muted" }, description));
+}
+
 function botsSettingsSection(bots) {
   return el("section", { class: "settings-page-section", "aria-labelledby": "bots-settings-title" },
     settingsSectionHeading("bots-settings-title", "Bots", "Send server and player activity to Telegram or Discord.",
@@ -4491,7 +5174,7 @@ async function pageSettings(main) {
   }, label);
   main.innerHTML = "";
   main.append(
-    pageHeader("Settings", "Local preferences, notification bots, and application metadata."),
+    pageHeader("Settings", "Appearance, notification bots, and installation details."),
     el("section", { class: "settings-page-section", "aria-labelledby": "general-settings-title" },
       settingsSectionHeading("general-settings-title", "General", "Appearance and local preferences."),
       el("div", { class: "card" },
@@ -4503,105 +5186,330 @@ async function pageSettings(main) {
           makeThemeButton("light", "Light"))))),
     can("security.manage") ? botsSettingsSection(bots) : null,
     el("section", { class: "settings-page-section", "aria-labelledby": "about-settings-title" },
-      settingsSectionHeading("about-settings-title", "About", "Application details and monitoring behavior."),
+      settingsSectionHeading("about-settings-title", "About", "Installation details and service status."),
       el("div", { class: "card" },
       el("div", { class: "settings-row" },
-        el("div", {}, el("h3", {}, "Monitoring"), el("p", { class: "muted" }, "Live metrics are subscribed only on Overview and Performance.")),
-        el("dl", { class: "kv" },
-          el("dt", {}, "WebSocket topics"), el("dd", { class: "mono" }, BASE_TOPICS.join(", ") + " + active page"),
-          el("dt", {}, "Console buffer"), el("dd", {}, "Latest 1000 lines from server history plus live events"))),
-      host ? el("div", { class: "settings-row" },
-        el("div", {}, el("h3", {}, "Services & panel"), el("p", { class: "muted" }, host.note || "Linux services and local runtime paths.")),
-        el("dl", { class: "kv" },
-          el("dt", {}, "Panel address"), el("dd", { class: "mono" }, `${host.bind_address}:${host.port}`),
-          el("dt", {}, "Bonghos"), el("dd", { class: "mono" }, host.home),
-          el("dt", {}, "systemd"), el("dd", {}, host.systemd ? "available" : "unavailable"),
-          el("dt", {}, "bonghos.service"), el("dd", {}, host.service_bonghos || "—"),
-          el("dt", {}, "bonghos-minecraft.service"), el("dd", {}, host.service_minecraft || "—"))) : null,
-      el("div", { class: "settings-row" },
-        el("div", {}, el("h3", {}, "Application"), el("p", { class: "muted" }, "Runtime settings not exposed by the API are shown honestly rather than mocked.")),
+        el("div", {},
+          el("h3", {}, "Installation"),
+          el("p", { class: "muted" }, "Version and local paths for this Bonghos installation.")),
         el("dl", { class: "kv" },
           el("dt", {}, "Version"), el("dd", { class: "mono" }, version.version),
-          el("dt", {}, "Frontend"), el("dd", {}, "Dependency-free vanilla HTML, CSS, and JavaScript embedded in the Go binary"))))));
+          host ? el("dt", {}, "Listen address") : null,
+          host ? el("dd", { class: "mono" }, `${host.bind_address}:${host.port}`) : null,
+          host ? el("dt", {}, "Data directory") : null,
+          host ? el("dd", { class: "mono" }, host.home) : null)),
+      host ? el("div", { class: "settings-row" },
+        el("div", {},
+          el("h3", {}, "Services"),
+          el("p", { class: "muted" }, host.systemd
+            ? "The panel and Minecraft run as separate services."
+            : "Bonghos is running without systemd user services.")),
+        el("div", { class: "settings-services" },
+          settingsServiceCard("Bonghos panel", "bonghos.service",
+            "Web UI, API, notification bots, schedules, backups, and monitoring.",
+            host.service_bonghos, host.systemd),
+          settingsServiceCard("Minecraft server", "bonghos-minecraft.service",
+            "Active server pack and Java process.",
+            host.service_minecraft, host.systemd))) : null)));
 }
 
 // ---------------------------------------------------------------------------
 // activation page (invited users land on /activate/<token>)
 // ---------------------------------------------------------------------------
+function authBrandLogo() {
+  const symbol = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  symbol.setAttribute("class", "brand-symbol");
+  symbol.setAttribute("viewBox", "0 0 24 24");
+  symbol.setAttribute("aria-hidden", "true");
+  const empty = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  empty.setAttribute("d", "M0 0h24v24H0z");
+  empty.setAttribute("fill", "none");
+  const mark = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  mark.setAttribute("fill", "currentColor");
+  mark.setAttribute("d", "M23 11v2h-1v1h-7v1h-1v2h-1v1h-1v2h-1v1h-1v1H7v-3h1v-3h1v-2H5v1H4v1H3v1H1v-3h1v-4H1V7h2v1h1v1h1v1h4V8H8V5H7V2h3v1h1v1h1v2h1v1h1v2h1v1h7v1z");
+  symbol.append(empty, mark);
+  return el("div", { class: "brand brand-logo", "aria-label": "Bonghos" },
+    el("span", { class: "brand-name" }, ">BONGHOS"), symbol);
+}
+
+async function invitationApi(path, opts = {}) {
+  if (DEMO_MODE) return demoApi(path, opts);
+  const method = opts.method || "GET";
+  const headers = { ...(opts.headers || {}) };
+  if (method !== "GET") {
+    const csrfResponse = await fetch("/api/auth/csrf", { credentials: "same-origin" });
+    const csrf = await csrfResponse.json();
+    if (!csrfResponse.ok) throw new Error(csrf.error || "Could not start the invitation request.");
+    headers["X-Bonghos-CSRF"] = csrf.csrf;
+  }
+  const request = { ...opts, method, headers, credentials: "same-origin" };
+  if (opts.json !== undefined) {
+    headers["Content-Type"] = "application/json";
+    request.body = JSON.stringify(opts.json);
+    delete request.json;
+  }
+  const response = await fetch("/api" + path, request);
+  let data = null;
+  try { data = await response.json(); } catch { /* empty response */ }
+  if (!response.ok) throw new Error(data?.error || response.statusText || "Invitation request failed.");
+  return data;
+}
+
+function base64URLToBytes(value) {
+  const base64 = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function bytesToBase64URL(value) {
+  if (value === null || value === undefined) return null;
+  const bytes = new Uint8Array(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function passkeyCreationOptions(json) {
+  if (typeof PublicKeyCredential?.parseCreationOptionsFromJSON === "function") {
+    return PublicKeyCredential.parseCreationOptionsFromJSON(json);
+  }
+  const options = { ...json, user: { ...json.user } };
+  options.challenge = base64URLToBytes(json.challenge);
+  options.user.id = base64URLToBytes(json.user.id);
+  options.excludeCredentials = (json.excludeCredentials || []).map((item) => ({ ...item, id: base64URLToBytes(item.id) }));
+  return options;
+}
+
+function passkeyRequestOptions(json) {
+  if (typeof PublicKeyCredential?.parseRequestOptionsFromJSON === "function") {
+    return PublicKeyCredential.parseRequestOptionsFromJSON(json);
+  }
+  const options = { ...json };
+  options.challenge = base64URLToBytes(json.challenge);
+  options.allowCredentials = (json.allowCredentials || []).map((item) => ({ ...item, id: base64URLToBytes(item.id) }));
+  return options;
+}
+
+function passkeyCredentialJSON(credential) {
+  if (typeof credential?.toJSON === "function") return credential.toJSON();
+  const response = credential.response;
+  const jsonResponse = {
+    clientDataJSON: bytesToBase64URL(response.clientDataJSON),
+  };
+  if (response.attestationObject) {
+    jsonResponse.attestationObject = bytesToBase64URL(response.attestationObject);
+    jsonResponse.transports = typeof response.getTransports === "function" ? response.getTransports() : [];
+  } else {
+    jsonResponse.authenticatorData = bytesToBase64URL(response.authenticatorData);
+    jsonResponse.signature = bytesToBase64URL(response.signature);
+    jsonResponse.userHandle = bytesToBase64URL(response.userHandle);
+  }
+  return {
+    id: credential.id,
+    rawId: bytesToBase64URL(credential.rawId),
+    type: credential.type,
+    authenticatorAttachment: credential.authenticatorAttachment || undefined,
+    response: jsonResponse,
+    clientExtensionResults: credential.getClientExtensionResults(),
+  };
+}
+
+function passkeysSupported() {
+  return !!(window.isSecureContext && window.PublicKeyCredential && navigator.credentials);
+}
+
+function passkeyError(error, fallback) {
+  if (error?.name === "NotAllowedError") return "The passkey request was cancelled or timed out.";
+  if (error?.name === "InvalidStateError") return "That passkey is already registered here.";
+  if (error?.name === "SecurityError") return "Passkeys require this panel to use HTTPS on the same hostname.";
+  return error?.message || fallback;
+}
+
 async function activationFlow(token) {
   document.body.innerHTML = "";
   const wrap = el("div", { class: "login-wrap" });
   document.body.append(wrap, el("div", { id: "toast-host" }), el("div", { id: "modal-host" }));
   try {
-    const info = await fetch(`/api/invitations/${token}`).then((r) => r.json());
-    if (info.error) throw new Error(info.error);
-    const user = el("input", { autocomplete: "username" });
-    const p1 = el("input", { type: "password", autocomplete: "new-password" });
-    const p2 = el("input", { type: "password", autocomplete: "new-password" });
-    const code = el("input", { inputmode: "numeric", maxlength: "6" });
+    const info = await invitationApi(`/invitations/${token}`);
+    const user = el("input", { autocomplete: "username", required: "", value: DEMO_MODE ? "invited-admin" : "" });
+    const p1 = el("input", { type: "password", autocomplete: "new-password", minlength: "10", required: "", value: DEMO_MODE ? "demo-password" : "" });
+    const p2 = el("input", { type: "password", autocomplete: "new-password", minlength: "10", required: "", value: DEMO_MODE ? "demo-password" : "" });
+    const code = el("input", {
+      id: "activation-code", class: "otp-input", inputmode: "numeric", pattern: "[0-9]{6}",
+      maxlength: "6", autocomplete: "one-time-code", "aria-label": "Six-digit authenticator code", disabled: "",
+    });
+    const otpWrap = el("div", { class: "otp-wrap", "aria-hidden": "true" },
+      ...Array.from({ length: 6 }, () => el("span")));
     const qrBox = el("div", { class: "qr-box hidden" });
-    const secretBox = el("div", { class: "muted mono", style: "word-break:break-all" });
+    const secretBox = el("pre", { class: "activation-secret muted mono" });
+    const manualSetup = el("details", { class: "activation-manual" },
+      el("summary", {}, "Can't scan the QR code?"),
+      el("div", { class: "activation-secret-row" },
+        secretBox,
+        el("button", {
+          class: "btn ghost small icon-button", type: "button", title: "Copy authenticator secret",
+          "aria-label": "Copy authenticator secret",
+          onclick: () => secret && copyText(secret, "Authenticator secret copied"),
+        }, solarIcon("copy-linear"))));
+    const accountStep = el("div", { class: "activation-step" });
+    const qrStep = el("div", { class: "activation-step hidden" });
+    const verificationStep = el("div", { class: "activation-step hidden" });
+    const verificationIntro = el("p", { class: "muted" });
     let secret = "";
-    const genBtn = el("button", { class: "btn", type: "button", onclick: async () => {
-      const csrf = await fetch("/api/auth/csrf").then((r) => r.json());
-      const d = await fetch(`/api/invitations/${token}/totp`, { method: "POST",
-        headers: { "Content-Type": "application/json", "X-Bonghos-CSRF": csrf.csrf },
-        body: JSON.stringify({ username: user.value }) }).then((r) => r.json());
-      if (d.error) return toast(d.error, "err");
-      secret = d.secret;
+    let currentStep = 1;
+    const nextButton = el("button", { class: "btn primary", type: "submit" }, "Next");
+    const showAccountStep = () => {
+      currentStep = 1;
+      secret = "";
+      code.value = "";
+      code.disabled = true;
+      code.required = false;
+      syncOTPCells(code, otpWrap);
+      otpWrap.classList.remove("error", "focus");
+      qrBox.replaceChildren();
+      qrBox.classList.add("hidden");
+      secretBox.textContent = "";
+      manualSetup.open = false;
+      accountStep.classList.remove("hidden");
+      qrStep.classList.add("hidden");
+      verificationStep.classList.add("hidden");
+      setTimeout(() => user.focus(), 30);
+    };
+    const showOTPSetup = async () => {
+      if (p1.value !== p2.value) {
+        p2.setCustomValidity("Passwords do not match");
+        p2.reportValidity();
+        return;
+      }
+      p2.setCustomValidity("");
+      nextButton.disabled = true;
+      nextButton.textContent = "Preparing…";
+      try {
+        const d = await invitationApi(`/invitations/${token}/totp`, {
+          method: "POST", json: { username: user.value },
+        });
+        secret = d.secret;
       // The QR is generated server-side, so the browser needs no QR library
       // and this page keeps working offline. Without it the secret below is
       // still everything an authenticator app needs.
       // The SVG is built by Bonghos from integer coordinates and contains no
       // user input, but it arrives as markup, so refuse anything that does not
       // look like the plain shape we generate.
-      const svgOK = typeof d.qr_svg === "string" &&
-        d.qr_svg.startsWith("<svg ") && !/<script|onload=|xlink:href/i.test(d.qr_svg);
-      if (svgOK) {
-        qrBox.innerHTML = d.qr_svg;
-        qrBox.prepend(el("p", { class: "muted" }, "Scan this with your authenticator app:"));
-        qrBox.classList.remove("hidden");
+        const svgOK = typeof d.qr_svg === "string" &&
+          d.qr_svg.startsWith("<svg ") && !/<script|onload=|xlink:href/i.test(d.qr_svg);
+        if (svgOK) {
+          qrBox.innerHTML = d.qr_svg;
+          qrBox.classList.remove("hidden");
+        }
+        secretBox.textContent = d.secret;
+        manualSetup.open = !svgOK;
+        currentStep = 2;
+        accountStep.classList.add("hidden");
+        qrStep.classList.remove("hidden");
+      } catch (error) {
+        secret = "";
+        toast(error.message, "err");
+      } finally {
+        nextButton.disabled = false;
+        nextButton.textContent = "Next";
       }
-      secretBox.textContent =
-        (svgOK ? "If scanning does not work, enter this secret manually:\n\n" : "") +
-        "Secret: " + d.secret + "\nURI: " + d.uri;
-    } }, "Generate authenticator secret");
+    };
+    const showQRStep = () => {
+      currentStep = 2;
+      code.disabled = true;
+      code.required = false;
+      otpWrap.classList.remove("error", "focus");
+      verificationStep.classList.add("hidden");
+      qrStep.classList.remove("hidden");
+    };
+    const showVerificationStep = () => {
+      currentStep = 3;
+      code.disabled = false;
+      code.required = true;
+      code.value = DEMO_MODE ? "123456" : "";
+      verificationIntro.textContent = `Enter the code for ${user.value.trim() || "your account"}.`;
+      qrStep.classList.add("hidden");
+      verificationStep.classList.remove("hidden");
+      syncOTPCells(code, otpWrap);
+      setTimeout(() => code.focus(), 30);
+    };
     const form = el("form", { class: "login-card", onsubmit: async (e) => {
       e.preventDefault();
-      if (p1.value !== p2.value) return toast("Passwords do not match", "err");
+      if (currentStep === 1) return showOTPSetup();
+      if (currentStep === 2) return showVerificationStep();
       if (!secret) return toast("Generate the authenticator secret first", "err");
-      const csrf = await fetch("/api/auth/csrf").then((r) => r.json());
-      const res = await fetch(`/api/invitations/${token}/activate`, { method: "POST",
-        headers: { "Content-Type": "application/json", "X-Bonghos-CSRF": csrf.csrf },
-        body: JSON.stringify({ username: user.value, password: p1.value, totp_secret: secret, totp_code: code.value }) });
-      const d = await res.json();
-      if (!res.ok) return toast(d.error, "err");
-      form.innerHTML = "";
-      form.append(
-        el("div", { class: "brand activation-title" }, "Account created"),
-        el("p", {}, "Store these one-time recovery codes safely:"),
-        el("pre", { class: "mono" }, (d.recovery_codes || []).join("\n")),
-        el("a", { class: "btn primary", href: "/", style: "text-align:center" }, "Go to sign-in"));
+      try {
+        const d = await invitationApi(`/invitations/${token}/activate`, { method: "POST", json: {
+          username: user.value, password: p1.value, totp_secret: secret, totp_code: code.value,
+        } });
+        const recoveryCodes = (d.recovery_codes || []).join("\n");
+        form.innerHTML = "";
+        form.append(
+          authBrandLogo(),
+          el("h1", { class: "activation-title" }, "Account created"),
+          el("p", {}, "Store these one-time recovery codes safely:"),
+          el("div", { class: "activation-recovery-codes" },
+            el("pre", { class: "mono" }, recoveryCodes),
+            el("button", {
+              class: "btn ghost small icon-button", type: "button", title: "Copy recovery codes",
+              "aria-label": "Copy recovery codes",
+              onclick: () => recoveryCodes && copyText(recoveryCodes, "Recovery codes copied"),
+            }, solarIcon("copy-linear"))),
+          el("a", { class: "btn primary", href: DEMO_MODE ? "/?demo=login" : "/", style: "text-align:center" }, "Go to Login"));
+      } catch (error) {
+        otpWrap.classList.add("error");
+        toast(error.message, "err");
+      }
     } },
-      el("div", { class: "brand activation-title" }, "Activate your Bonghos account"),
-      el("p", { class: "muted" }, `You are joining as ${info.role}.`),
+      authBrandLogo(),
+      el("p", { class: "muted activation-intro" }, `${DEMO_MODE ? "Demo invitation · " : ""}You are joining as ${info.role}.`),
+      accountStep,
+      qrStep,
+      verificationStep);
+    accountStep.append(
+      el("span", { class: "activation-step-kicker" }, "Step 1 of 3"),
+      el("h1", { class: "activation-title" }, "Create your account"),
       el("label", {}, "Username", user),
       el("label", {}, "Password (min 10 chars)", p1),
       el("label", {}, "Confirm password", p2),
-      genBtn, qrBox, secretBox,
-      el("label", {}, "6-digit code from your authenticator", code),
-      el("button", { class: "btn primary" }, "Activate"));
+      nextButton);
+    p1.addEventListener("input", () => p2.setCustomValidity(""));
+    p2.addEventListener("input", () => p2.setCustomValidity(""));
+    code.addEventListener("input", () => otpWrap.classList.remove("error"));
+    qrStep.append(
+      el("span", { class: "activation-step-kicker" }, "Step 2 of 3"),
+      el("h1", { class: "activation-title" }, "Scan QR code"),
+      el("p", { class: "muted" }, "Scan this code with your authenticator app."),
+      qrBox,
+      manualSetup,
+      el("div", { class: "auth-actions" },
+        el("button", { class: "btn ghost", type: "button", onclick: showAccountStep }, "Back"),
+        el("button", { class: "btn primary", type: "submit" }, "Next")));
+    verificationStep.append(
+      el("span", { class: "activation-step-kicker" }, "Step 3 of 3"),
+      el("h1", { class: "activation-title" }, "Enter authenticator code"),
+      verificationIntro,
+      otpWrap,
+      code,
+      el("p", { class: "hint" }, "Enter the six-digit code shown in your authenticator app."),
+      el("div", { class: "auth-actions" },
+        el("button", { class: "btn ghost", type: "button", onclick: showQRStep }, "Back"),
+        el("button", { class: "btn primary", type: "submit" }, "Activate")));
+    installOTPControl(code, otpWrap);
     wrap.append(form);
   } catch (e) {
     wrap.append(el("div", { class: "login-card" },
-      el("div", { class: "brand" }, "Invitation"),
+      authBrandLogo(),
+      el("h1", { class: "activation-title" }, "Invitation unavailable"),
       el("p", { class: "error" }, e.message || "This invitation is invalid or expired.")));
   }
 }
 
 // ---------------------------------------------------------------------------
 const activateMatch = location.pathname.match(/^\/activate\/([A-Za-z0-9_-]+)/);
-if (activateMatch) activationFlow(activateMatch[1]);
+if (DEMO_MODE && (DEMO_VIEW === "invite" || activateMatch)) activationFlow(DEMO_INVITE_TOKEN);
+else if (activateMatch) activationFlow(activateMatch[1]);
 else {
   installOTPControl();
   boot();

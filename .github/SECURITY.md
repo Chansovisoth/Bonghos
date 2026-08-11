@@ -6,6 +6,7 @@ Bonghos is early software. Security fixes land on the latest release.
 
 | Version | Supported |
 |---|---|
+| 0.2.x prereleases | ✅ |
 | 0.1.x | ✅ |
 | < 0.1 | ❌ |
 

@@ -32,7 +32,7 @@ import (
 )
 
 // Version is stamped at build time via -ldflags.
-var Version = "0.1.0-dev"
+var Version = "0.2.0-rc.1-dev"
 
 // App is the control plane.
 type App struct {
@@ -65,6 +65,8 @@ type App struct {
 	botSawOnline    bool
 	botReadySent    bool
 	botStoppedSent  bool
+	passkeyMu       sync.Mutex
+	passkeyFlows    map[string]passkeyFlow
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
@@ -104,11 +106,12 @@ func New(home string, webFS fs.FS) (*App, error) {
 	logger := log.New(logFile, "", log.LstdFlags|log.LUTC)
 
 	a := &App{
-		Home:      home,
-		Cfg:       cfg,
-		DB:        db,
-		SecretKey: key,
-		WebFS:     webFS,
+		Home:         home,
+		Cfg:          cfg,
+		DB:           db,
+		SecretKey:    key,
+		WebFS:        webFS,
+		passkeyFlows: make(map[string]passkeyFlow),
 		Logf: func(format string, args ...any) {
 			logger.Printf(format, args...)
 		},

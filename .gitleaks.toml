@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Vendored upstream fixtures and documented public TOTP examples"
+paths = [
+  '''^source/bin/''',
+  '''^source/third_party/''',
+]
+regexTarget = "match"
+regexes = [
+  '''FN7UXCXJSFSNIA6QQAOBH2TSPPNASYVL''',
+  '''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''',
+]
