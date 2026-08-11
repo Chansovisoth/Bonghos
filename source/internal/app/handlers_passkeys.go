@@ -23,6 +23,8 @@ const passkeyFlowLifetime = 5 * time.Minute
 type passkeyFlow struct {
 	Kind      string
 	UserID    int64
+	Purpose   string
+	SessionID string
 	RPID      string
 	Origin    string
 	Name      string
@@ -263,6 +265,22 @@ func (a *App) handlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
 		writeErr(w, 400, errors.New("invalid passkey id"))
+		return
+	}
+	var req struct {
+		ActionToken string `json:"action_token"`
+	}
+	if err := readJSON(r, &req, 1<<14); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid request"))
+		return
+	}
+	sessionToken, err := currentSessionToken(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	if err := a.takeAccountAction(req.ActionToken, u.ID, "remove_passkey", sessionToken); err != nil {
+		writeErr(w, http.StatusForbidden, err)
 		return
 	}
 	if err := a.Auth.DeletePasskey(u.ID, id); err != nil {

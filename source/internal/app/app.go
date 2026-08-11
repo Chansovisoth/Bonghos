@@ -67,6 +67,9 @@ type App struct {
 	botStoppedSent  bool
 	passkeyMu       sync.Mutex
 	passkeyFlows    map[string]passkeyFlow
+	accountMu       sync.Mutex
+	accountActions  map[string]accountAction
+	totpEnrollments map[string]totpEnrollment
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
@@ -106,12 +109,14 @@ func New(home string, webFS fs.FS) (*App, error) {
 	logger := log.New(logFile, "", log.LstdFlags|log.LUTC)
 
 	a := &App{
-		Home:         home,
-		Cfg:          cfg,
-		DB:           db,
-		SecretKey:    key,
-		WebFS:        webFS,
-		passkeyFlows: make(map[string]passkeyFlow),
+		Home:            home,
+		Cfg:             cfg,
+		DB:              db,
+		SecretKey:       key,
+		WebFS:           webFS,
+		passkeyFlows:    make(map[string]passkeyFlow),
+		accountActions:  make(map[string]accountAction),
+		totpEnrollments: make(map[string]totpEnrollment),
 		Logf: func(format string, args ...any) {
 			logger.Printf(format, args...)
 		},

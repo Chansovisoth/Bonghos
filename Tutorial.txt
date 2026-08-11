@@ -354,12 +354,25 @@
        ...
 
  Each code works exactly once, in place of your authenticator code, if you
- lose your phone. Save them now:
+ lose your phone. On the login verification step, choose "Use a recovery code"
+ below the six authenticator boxes and enter one code in the xxxxx-xxxxx field.
+ Save them now:
 
      * Write them on paper and store it somewhere safe, or
      * Put them in a password manager
 
  They are stored hashed. Bonghos cannot show them to you again.
+
+ In Settings > Security, you can see when the current recovery-code set was
+ created and how many codes remain, or generate a replacement set. Generating a
+ new set revokes every old code and shows the new plaintext codes once. This
+ change requires your current password plus TOTP or a recovery code, or a
+ user-verified passkey.
+
+ The same Security page can change your password or replace your authenticator.
+ Replacing TOTP requires the same fresh verification. The old authenticator
+ remains valid until Bonghos confirms a code from the new one; after confirmation
+ Bonghos rotates the recovery codes and signs out every other device.
 
 
 ===============================================================================
@@ -372,7 +385,18 @@
 
  or without systemd:
 
-     ~/bonghos/system/bin/bonghos serve
+     bonghos serve
+
+ The installer creates the per-user command at ~/.local/bin/bonghos. It
+ remembers the correct runtime directory even when --home selected a custom
+ location. If this terminal says "bonghos: command not found", open a new SSH
+ login or run once in the current shell:
+
+     export PATH="$HOME/.local/bin:$PATH"
+
+ ./setup.sh --repair recreates the managed command. Uninstall removes it only
+ if it still belongs to Bonghos, so an unrelated command is never overwritten
+ or deleted.
 
  Then open:
 

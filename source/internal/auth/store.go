@@ -98,9 +98,10 @@ func (s *Store) CreateUser(username, password, totpSecret string, role authoriza
 		return nil, nil, err
 	}
 	id, _ := res.LastInsertId()
+	created := now()
 	for _, c := range codes {
-		if _, err := tx.Exec(`INSERT INTO recovery_codes (user_id, code_hash) VALUES (?,?)`,
-			id, HashToken(c)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO recovery_codes (user_id, code_hash, created_at) VALUES (?,?,?)`,
+			id, HashToken(c), created); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -282,20 +283,42 @@ func (s *Store) Login(username, password, code, remoteAddr string) (*User, error
 
 	secret, decErr := security.Decrypt(s.SecretKey, enc)
 	codeOK := false
+	recoveryOK := false
 	if decErr == nil {
 		codeOK = VerifyTOTP(string(secret), code, time.Now())
 	} else {
 		DummyTOTPWork(code)
 	}
 	if !codeOK {
-		// try recovery code (single use)
-		codeOK = s.consumeRecoveryCode(u.ID, code)
+		// Verify a recovery code without spending it. It is consumed atomically
+		// only after the password and account state also pass, so a password typo
+		// cannot destroy a valid one-time code.
+		recoveryOK = s.recoveryCodeAvailable(u.ID, code)
+		codeOK = recoveryOK
 	}
 	if !passOK || !codeOK || u.Disabled {
 		return fail()
 	}
+	if recoveryOK && !s.consumeRecoveryCode(u.ID, code) {
+		// Another concurrent login may have consumed the same code after our
+		// availability check. Only the request that updates the row succeeds.
+		return fail()
+	}
 	s.recordAttempt("u:"+norm, true)
 	return u, nil
+}
+
+func (s *Store) recoveryCodeAvailable(userID int64, code string) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if len(code) < 8 {
+		return false
+	}
+	var available int
+	err := s.DB.QueryRow(`SELECT EXISTS(
+		SELECT 1 FROM recovery_codes
+		WHERE user_id=? AND code_hash=? AND used_at IS NULL
+	)`, userID, HashToken(code)).Scan(&available)
+	return err == nil && available == 1
 }
 
 func (s *Store) consumeRecoveryCode(userID int64, code string) bool {

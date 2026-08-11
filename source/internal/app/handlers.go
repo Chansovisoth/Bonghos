@@ -42,6 +42,14 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/passkeys/register/finish", a.requireAuth(a.handlePasskeyRegisterFinish))
 	mux.HandleFunc("PATCH /api/passkeys/{id}", a.requireAuth(a.handlePasskeyUpdate))
 	mux.HandleFunc("DELETE /api/passkeys/{id}", a.requireAuth(a.handlePasskeyDelete))
+	mux.HandleFunc("POST /api/account/reauth/password", a.requireAuth(a.handleAccountPasswordReauth))
+	mux.HandleFunc("POST /api/account/reauth/passkey/begin", a.requireAuth(a.handleAccountPasskeyReauthBegin))
+	mux.HandleFunc("POST /api/account/reauth/passkey/finish", a.requireAuth(a.handleAccountPasskeyReauthFinish))
+	mux.HandleFunc("POST /api/account/password", a.requireAuth(a.handleAccountPasswordChange))
+	mux.HandleFunc("POST /api/account/totp/begin", a.requireAuth(a.handleAccountTOTPBegin))
+	mux.HandleFunc("POST /api/account/totp/finish", a.requireAuth(a.handleAccountTOTPFinish))
+	mux.HandleFunc("GET /api/account/recovery-codes", a.requireAuth(a.handleRecoveryCodeList))
+	mux.HandleFunc("POST /api/account/recovery-codes/regenerate", a.requireAuth(a.handleRecoveryCodeRegenerate))
 
 	// --- users --------------------------------------------------------------
 	mux.HandleFunc("GET /api/users", a.requirePerm(authorization.PermUsersManage, a.handleUserList))
@@ -113,6 +121,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/files/rename", a.requirePerm(authorization.PermFilesManage, a.handleFileRename))
 	mux.HandleFunc("POST /api/files/delete", a.requirePerm(authorization.PermFilesManage, a.handleFileDelete))
 	mux.HandleFunc("POST /api/files/upload", a.requirePerm(authorization.PermFilesManage, a.handleFileUpload))
+	mux.HandleFunc("GET /api/files/preview", a.requirePerm(authorization.PermFilesManage, a.handleFilePreview))
 	mux.HandleFunc("GET /api/files/download", a.requirePerm(authorization.PermFilesManage, a.handleFileDownload))
 
 	// --- configuration ------------------------------------------------------

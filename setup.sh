@@ -162,6 +162,8 @@ case "$BONGHOS_HOME" in /*) ;; *) BONGHOS_HOME="$PWD/$BONGHOS_HOME" ;; esac
 
 BIN_DIR="$BONGHOS_HOME/system/bin"
 BIN_PATH="$BIN_DIR/bonghos"
+USER_BIN_DIR="$HOME/.local/bin"
+COMMAND_PATH="$USER_BIN_DIR/bonghos"
 
 # ---------------------------------------------------------------------------
 # Environment checks
@@ -386,6 +388,56 @@ install_binary() { # install_binary <built-path>
   ok "Installed $BIN_PATH"
 }
 
+# Install a normal per-user command without requiring sudo. A small managed
+# launcher is used instead of a symlink so custom --home installations retain
+# the correct runtime location when invoked simply as `bonghos doctor`.
+command_launcher_owned() {
+  if [ -L "$COMMAND_PATH" ]; then
+    [ "$(readlink "$COMMAND_PATH" 2>/dev/null || true)" = "$BIN_PATH" ]
+    return
+  fi
+  [ -f "$COMMAND_PATH" ] && grep -Fqx '# Managed by Bonghos setup.sh' "$COMMAND_PATH"
+}
+
+install_command_launcher() {
+  local tmp quoted_bin quoted_home
+  mkdir -p "$USER_BIN_DIR" || return 1
+  if { [ -e "$COMMAND_PATH" ] || [ -L "$COMMAND_PATH" ]; } && ! command_launcher_owned; then
+    warn "$COMMAND_PATH already exists and is not managed by Bonghos; leaving it unchanged"
+    return 1
+  fi
+
+  printf -v quoted_bin '%q' "$BIN_PATH"
+  printf -v quoted_home '%q' "$BONGHOS_HOME"
+  tmp="$USER_BIN_DIR/.bonghos.new.$$"
+  if ! {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' '# Managed by Bonghos setup.sh'
+    printf 'exec %s --home %s "$@"\n' "$quoted_bin" "$quoted_home"
+  } > "$tmp"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  chmod 0755 "$tmp" || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$COMMAND_PATH" || { rm -f "$tmp"; return 1; }
+  ok "Command installed: $COMMAND_PATH"
+
+  case ":${PATH:-}:" in
+    *":$USER_BIN_DIR:"*) ;;
+    *) warn "$USER_BIN_DIR is not in this shell's PATH yet"
+       warn "Open a new login shell, or run: export PATH=\"$USER_BIN_DIR:\$PATH\"" ;;
+  esac
+}
+
+remove_command_launcher() {
+  if command_launcher_owned; then
+    rm -f "$COMMAND_PATH"
+    ok "Command removed: $COMMAND_PATH"
+  elif [ -e "$COMMAND_PATH" ] || [ -L "$COMMAND_PATH" ]; then
+    warn "$COMMAND_PATH is not managed by Bonghos; leaving it unchanged"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Git --pull safety
 # ---------------------------------------------------------------------------
@@ -510,6 +562,7 @@ mode_install() {
 
   head1 "Installing"
   install_binary "$TMP_ROOT/bonghos" || die "could not install the Bonghos executable"
+  install_command_launcher || warn "could not install the short 'bonghos' command"
 
   head1 "First-run setup"
   say "You will now create the first Owner account and enrol two-factor"
@@ -768,6 +821,8 @@ mode_update() {
     exit 1
   fi
 
+  install_command_launcher || warn "could not install the short 'bonghos' command"
+
   if [ "${SYSTEMD_OK:-0}" = "1" ]; then
     "$BIN_PATH" --home "$BONGHOS_HOME" service repair || warn "service repair reported a problem"
   fi
@@ -780,8 +835,13 @@ mode_update() {
   say "Safety copies (remove when you are satisfied): $safety"
   say ""
   say "Verify with:"
-  say "  $BIN_PATH version"
-  say "  $BIN_PATH doctor"
+  if command_launcher_owned; then
+    say "  bonghos version"
+    say "  bonghos doctor"
+  else
+    say "  \"$BIN_PATH\" --home \"$BONGHOS_HOME\" version"
+    say "  \"$BIN_PATH\" --home \"$BONGHOS_HOME\" doctor"
+  fi
   [ "${SYSTEMD_OK:-0}" = "1" ] && say "  systemctl --user status bonghos.service"
   return 0
 }
@@ -791,6 +851,7 @@ mode_repair() {
   refuse_root
   [ -x "$BIN_PATH" ] || die "no Bonghos executable at $BIN_PATH"
   "$BIN_PATH" --home "$BONGHOS_HOME" doctor --repair || warn "doctor reported problems"
+  install_command_launcher || warn "could not install the short 'bonghos' command"
   if have systemctl && systemctl --user show-environment >/dev/null 2>&1; then
     if confirm "Regenerate systemd user services for $BONGHOS_HOME?" Y; then
       "$BIN_PATH" --home "$BONGHOS_HOME" service repair || warn "service repair failed"
@@ -804,7 +865,7 @@ mode_repair() {
 mode_uninstall() {
   head1 "Uninstall Bonghos"
   refuse_root
-  say "This removes the systemd user services and the Bonghos executable."
+  say "This removes the systemd user services, managed command and Bonghos executable."
   say ""
   say "${C_BOLD}Your data is preserved by default:${C_RESET}"
   say "  $BONGHOS_HOME/servers/   Minecraft server files"
@@ -827,6 +888,7 @@ mode_uninstall() {
     ok "systemd user services removed"
   fi
 
+  remove_command_launcher
   rm -f "$BIN_PATH"
   ok "Executable removed"
 
@@ -841,11 +903,24 @@ mode_uninstall() {
 }
 
 print_next_steps() {
+  local cli command_status
+  if command_launcher_owned; then
+    cli="bonghos"
+    command_status="$COMMAND_PATH (run as: bonghos)"
+  else
+    cli="\"$BIN_PATH\" --home \"$BONGHOS_HOME\""
+    if [ -e "$COMMAND_PATH" ] || [ -L "$COMMAND_PATH" ]; then
+      command_status="not installed (an existing command was preserved)"
+    else
+      command_status="not installed (see the warning above)"
+    fi
+  fi
   cat <<EOF
 
 ${C_BOLD}Bonghos is installed.${C_RESET}
 
   Executable:  $BIN_PATH
+  Command:     $command_status
   Runtime:     $BONGHOS_HOME
   Web UI:      http://127.0.0.1:8080
 
@@ -862,7 +937,7 @@ EOF
 EOF
   else
     cat <<EOF
-  $BIN_PATH --home "$BONGHOS_HOME" serve
+  $cli serve
 EOF
   fi
   cat <<EOF
@@ -883,8 +958,8 @@ ${C_BOLD}Next steps${C_RESET}
   3. Choose the startup script and Java, set RAM, accept the Minecraft EULA.
   4. Start the server.
 
-  Optional console session:  $BIN_PATH console
-  Diagnostics:               $BIN_PATH doctor
+  Optional console session:  $cli console
+  Diagnostics:               $cli doctor
 
 Full instructions: $PROJECT_ROOT/Tutorial.txt
 EOF

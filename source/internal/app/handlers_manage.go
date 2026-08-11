@@ -22,6 +22,17 @@ import (
 // listed and downloadable, they just cannot be opened in the editor.
 const maxTextEditBytes = 2 << 20 // 2 MiB
 
+var previewImageContentTypes = map[string]string{
+	".avif": "image/avif",
+	".bmp":  "image/bmp",
+	".gif":  "image/gif",
+	".ico":  "image/x-icon",
+	".jpeg": "image/jpeg",
+	".jpg":  "image/jpeg",
+	".png":  "image/png",
+	".webp": "image/webp",
+}
+
 // requestInstance resolves an explicitly scoped server project when supplied,
 // while preserving active-project behavior for existing clients.
 func (a *App) requestInstance(r *http.Request) (*instance.Instance, error) {
@@ -233,6 +244,31 @@ func (a *App) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf("attachment; filename=%q", filepath.Base(st.Name())))
+	http.ServeContent(w, r, st.Name(), st.ModTime(), f)
+}
+
+func (a *App) handleFilePreview(w http.ResponseWriter, r *http.Request) {
+	fm, _, err := a.requestFiles(r)
+	if err != nil {
+		writeErr(w, 409, err)
+		return
+	}
+	f, st, err := fm.Open(r.URL.Query().Get("path"))
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	defer f.Close()
+	contentType, ok := previewImageContentTypes[strings.ToLower(filepath.Ext(st.Name()))]
+	if !ok {
+		writeErr(w, 400, errors.New("file type cannot be previewed as an image"))
+		return
+	}
+	// Use an explicit inert image media type and nosniff rather than serving
+	// arbitrary project files inline under the panel's authenticated origin.
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=%q", filepath.Base(st.Name())))
+	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeContent(w, r, st.Name(), st.ModTime(), f)
 }
 

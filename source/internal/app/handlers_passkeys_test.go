@@ -125,3 +125,32 @@ func TestPasskeyRenameAPIIsUserScopedAndAudited(t *testing.T) {
 		t.Fatalf("blank passkey rename = %d, want 400", status)
 	}
 }
+
+func TestPasskeyDeleteRequiresFreshVerification(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner, err := env.app.Auth.UserByName("owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := env.app.Auth.AddPasskey(owner.ID, "panel.example.test", "Laptop", &webauthn.Credential{
+		ID: []byte("delete-api-credential"), PublicKey: []byte("public-key"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := env.newClient()
+	c.mustLogin("owner", "correct horse battery", secret)
+	path := "/api/passkeys/" + strconv.FormatInt(created.ID, 10)
+	if status, _ := c.do(http.MethodDelete, path, map[string]string{}, nil); status != http.StatusForbidden {
+		t.Fatalf("delete without fresh verification = %d, want 403", status)
+	}
+	grant := accountReauth(t, c, "remove_passkey", "correct horse battery", secret)
+	if status, body := c.do(http.MethodDelete, path, map[string]string{"action_token": grant}, nil); status != http.StatusOK {
+		t.Fatalf("verified passkey delete = %d %s", status, body)
+	}
+	items, err := env.app.Auth.ListPasskeys(owner.ID)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("passkeys after delete = %+v, %v", items, err)
+	}
+}

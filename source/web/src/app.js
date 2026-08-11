@@ -122,9 +122,7 @@ function gameVersionIcon() {
 }
 
 const LIFECYCLE_LOADING_CYCLE_MS = 2400;
-let lifecycleLoadingIconId = 0;
 function lifecycleLoadingIcon(onCycleEnd = null) {
-  const id = `lifecycle-loading-${++lifecycleLoadingIconId}`;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "icon lifecycle-loading-icon");
   svg.setAttribute("viewBox", "0 0 24 24");
@@ -132,25 +130,10 @@ function lifecycleLoadingIcon(onCycleEnd = null) {
   svg.setAttribute("focusable", "false");
   svg.innerHTML = `
     <path d="M0 0h24v24H0z" fill="none"/>
-    <rect width="10" height="10" x="1" y="1" fill="currentColor" rx="1">
-      <animate id="${id}-a" fill="freeze" attributeName="x" begin="0;${id}-l.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-d" fill="freeze" attributeName="y" begin="${id}-c.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-g" fill="freeze" attributeName="x" begin="${id}-f.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-j" fill="freeze" attributeName="y" begin="${id}-i.end" dur="0.2s" values="13;1"/>
-    </rect>
-    <rect width="10" height="10" x="1" y="13" fill="currentColor" rx="1">
-      <animate id="${id}-b" fill="freeze" attributeName="y" begin="${id}-a.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-e" fill="freeze" attributeName="x" begin="${id}-d.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-h" fill="freeze" attributeName="y" begin="${id}-g.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-k" fill="freeze" attributeName="x" begin="${id}-j.end" dur="0.2s" values="13;1"/>
-    </rect>
-    <rect width="10" height="10" x="13" y="13" fill="currentColor" rx="1">
-      <animate id="${id}-c" fill="freeze" attributeName="x" begin="${id}-b.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-f" fill="freeze" attributeName="y" begin="${id}-e.end" dur="0.2s" values="13;1"/>
-      <animate id="${id}-i" fill="freeze" attributeName="x" begin="${id}-h.end" dur="0.2s" values="1;13"/>
-      <animate id="${id}-l" fill="freeze" attributeName="y" begin="${id}-k.end" dur="0.2s" values="1;13"/>
-    </rect>`;
-  if (onCycleEnd) svg.querySelector(`#${id}-l`)?.addEventListener("endEvent", onCycleEnd);
+    <rect class="lifecycle-loading-block lifecycle-loading-block-a" width="10" height="10" x="1" y="1" fill="currentColor" rx="1"/>
+    <rect class="lifecycle-loading-block lifecycle-loading-block-b" width="10" height="10" x="1" y="13" fill="currentColor" rx="1"/>
+    <rect class="lifecycle-loading-block lifecycle-loading-block-c" width="10" height="10" x="13" y="13" fill="currentColor" rx="1"/>`;
+  if (onCycleEnd) svg.querySelector(".lifecycle-loading-block-a")?.addEventListener("animationiteration", onCycleEnd);
   return svg;
 }
 
@@ -263,6 +246,46 @@ function toast(msg, kind = "") {
   const t = el("div", { class: "toast " + kind, role: "status" }, msg);
   $("#toast-host").append(t);
   setTimeout(() => t.remove(), 6000);
+}
+
+function offlineWifiIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "offline-wifi-icon");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.innerHTML = `
+    <path d="M0 0h24v24H0z" fill="none"/>
+    <path class="offline-wifi-band offline-wifi-band-inner" fill="currentColor" d="M12,21L15.6,16.2C14.6,15.45 13.35,15 12,15C10.65,15 9.4,15.45 8.4,16.2L12,21"/>
+    <path class="offline-wifi-band offline-wifi-band-middle" fill="currentColor" d="M12,9C9.3,9 6.81,9.89 4.8,11.4L6.6,13.8C8.1,12.67 9.97,12 12,12C14.03,12 15.9,12.67 17.4,13.8L19.2,11.4C17.19,9.89 14.7,9 12,9Z"/>
+    <path class="offline-wifi-band offline-wifi-band-outer" fill="currentColor" d="M12,3C7.95,3 4.21,4.34 1.2,6.6L3,9C5.5,7.12 8.62,6 12,6C15.38,6 18.5,7.12 21,9L22.8,6.6C19.79,4.34 16.05,3 12,3"/>`;
+  return svg;
+}
+
+let offlineWarningToast = null;
+
+function syncConnectivityWarning() {
+  if (offlineWarningToast && !offlineWarningToast.isConnected) offlineWarningToast = null;
+  if (navigator.onLine !== false) {
+    offlineWarningToast?.remove();
+    offlineWarningToast = null;
+    return;
+  }
+  if (offlineWarningToast) return;
+  const host = $("#toast-host");
+  if (!host) return;
+  offlineWarningToast = el("div", { class: "toast warn offline-warning-toast", role: "alert" },
+    offlineWifiIcon(),
+    el("div", { class: "offline-warning-copy" },
+      el("strong", {}, "No internet connection"),
+      el("span", { class: "muted" }, "Bonghos will reconnect automatically when your connection returns.")));
+  host.append(offlineWarningToast);
+}
+
+function startConnectivityMonitor() {
+  window.addEventListener("offline", syncConnectivityWarning);
+  window.addEventListener("online", syncConnectivityWarning);
+  syncConnectivityWarning();
 }
 
 let modalRestoreFocus = null;
@@ -385,6 +408,11 @@ const DEMO_PASSKEYS = [
   { id: 1, name: "Laptop passkey", rp_id: location.hostname, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), last_used_at: new Date(Date.now() - 18 * 60000).toISOString(), backup_eligible: true, backed_up: true },
   { id: 2, name: "YubiKey 5", rp_id: location.hostname, created_at: new Date(Date.now() - 36 * 86400000).toISOString(), backup_eligible: false, backed_up: false },
 ];
+let DEMO_RECOVERY_CODES = Array.from({ length: 8 }, (_, index) => ({
+  id: index + 1,
+  created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+  used_at: index === 1 ? new Date(Date.now() - 8 * 86400000).toISOString() : null,
+}));
 const DEMO_CONSOLE = [
   "[19:27:36] [Server thread/INFO]: Starting minecraft server version 1.20.1",
   "[19:27:43] [Server thread/INFO]: Loading Forge mods from /home/klaude/bonghos/servers/minecraft-java/modded/bio1/mods",
@@ -435,6 +463,25 @@ async function demoApi(path, opts = {}) {
   const query = new URL(path, "http://bonghos.demo").searchParams;
   if (method !== "GET") {
     if (clean === "/auth/login") return DEMO_ME;
+    if (clean === "/account/reauth/password") return { action_token: "demo-account-action" };
+    if (clean === "/account/password") return { ok: true };
+    if (clean === "/account/totp/begin") return {
+      setup_token: "demo-totp-setup", secret: DEMO_INVITE_SECRET,
+      uri: `otpauth://totp/Bonghos:demo-owner?secret=${DEMO_INVITE_SECRET}&issuer=Bonghos`,
+      qr_svg: DEMO_INVITE_QR,
+    };
+    if (clean === "/account/totp/finish") {
+      DEMO_RECOVERY_CODES = Array.from({ length: 8 }, (_, index) => ({
+        id: index + 20, created_at: new Date().toISOString(), used_at: null,
+      }));
+      return { recovery_codes: Array.from({ length: 8 }, (_, index) => `demo${index + 1}-code${index + 1}`) };
+    }
+    if (clean === "/account/recovery-codes/regenerate") {
+      DEMO_RECOVERY_CODES = Array.from({ length: 8 }, (_, index) => ({
+        id: index + 40, created_at: new Date().toISOString(), used_at: null,
+      }));
+      return { recovery_codes: Array.from({ length: 8 }, (_, index) => `fresh${index + 1}-code${index + 1}`) };
+    }
     if (clean === `/invitations/${DEMO_INVITE_TOKEN}/totp`) return {
       secret: DEMO_INVITE_SECRET,
       uri: `otpauth://totp/Bonghos:invited-admin?secret=${DEMO_INVITE_SECRET}&issuer=Bonghos`,
@@ -622,6 +669,7 @@ async function demoApi(path, opts = {}) {
       { ID: 3, Username: "viewer", Role: "viewer", Disabled: true },
     ];
     case "/passkeys": return DEMO_PASSKEYS.map((passkey) => ({ ...passkey }));
+    case "/account/recovery-codes": return DEMO_RECOVERY_CODES.map((item) => ({ ...item }));
     default: return {};
   }
 }
@@ -663,6 +711,7 @@ const S = {
   consolePaused: false,
   consoleWrap: false,
   consoleSearch: "",
+  consoleFilterMode: "all",
   consoleHistoryRequest: 0,
   commandHistory: [],
   commandHistoryAt: -1,
@@ -674,6 +723,7 @@ const S = {
   serverTargetId: null,
   managedServerId: null,
   serverManagementReturn: false,
+  consoleReturn: false,
   pendingFileOpen: null,
   perfIntervalSeconds: 2,
   uptimeBase: null,
@@ -886,6 +936,33 @@ function updatePasskeyAvailability() {
 // loginStep switches between the credential step and the authenticator step.
 // Step two is always reached, whatever was typed in step one: the interface
 // must not reveal whether an account exists any more than the API does.
+let loginCodeMode = "totp";
+
+function setLoginCodeMode(mode, focus = true) {
+  loginCodeMode = mode === "recovery" ? "recovery" : "totp";
+  const recovery = loginCodeMode === "recovery";
+  $("#login-totp-mode")?.classList.toggle("hidden", recovery);
+  $("#login-recovery-mode")?.classList.toggle("hidden", !recovery);
+  const totpInput = $("#login-code"), recoveryInput = $("#login-recovery");
+  if (totpInput) totpInput.disabled = recovery;
+  if (recoveryInput) recoveryInput.disabled = !recovery;
+  const switcher = $("#login-code-mode");
+  if (switcher) switcher.textContent = recovery ? "Use an authenticator code" : "Use a recovery code";
+  $("#login-step-2 .otp-wrap")?.classList.remove("error");
+  $("#login-recovery")?.classList.remove("error");
+  if (focus) setTimeout(() => (recovery ? $("#login-recovery") : $("#login-code"))?.focus(), 30);
+}
+
+function normalizeRecoveryCode(value) {
+  const compact = String(value || "").toLowerCase().replace(/[^0-9a-f]/g, "").slice(0, 10);
+  return compact.length > 5 ? `${compact.slice(0, 5)}-${compact.slice(5)}` : compact;
+}
+
+function currentLoginCode() {
+  const input = loginCodeMode === "recovery" ? $("#login-recovery") : $("#login-code");
+  return (input?.value || "").trim();
+}
+
 function loginStep(n) {
   const s1 = $("#login-step-1"), s2 = $("#login-step-2");
   if (!s1 || !s2) return;
@@ -896,6 +973,8 @@ function loginStep(n) {
   if (n === 2) {
     $("#login-step-2-who").textContent = "Signing in as " + $("#login-user").value.trim();
     $("#login-code").value = DEMO_MODE && DEMO_VIEW === "login" ? "123456" : "";
+    $("#login-recovery").value = "";
+    setLoginCodeMode("totp", false);
     syncOTPCells();
     setTimeout(() => $("#login-code").focus(), 30);
   } else {
@@ -915,9 +994,7 @@ function installOTPControl(input = $("#login-code"), wrap = $(".otp-wrap")) {
   input.addEventListener("focus", () => wrap.classList.add("focus"));
   input.addEventListener("blur", () => wrap.classList.remove("focus"));
   input.addEventListener("input", () => {
-    const raw = input.value.trim();
-    const digits = raw.replace(/\D/g, "");
-    if (digits.length >= 6 && /^[0-9\s-]+$/.test(raw)) input.value = digits.slice(0, 6);
+    input.value = input.value.replace(/\D/g, "").slice(0, 6);
     syncOTPCells(input, wrap);
   });
   input.addEventListener("paste", () => setTimeout(() => syncOTPCells(input, wrap), 0));
@@ -951,6 +1028,15 @@ async function boot() {
 }
 
 $("#login-back").addEventListener("click", () => loginStep(1));
+
+$("#login-code-mode").addEventListener("click", () => {
+  setLoginCodeMode(loginCodeMode === "totp" ? "recovery" : "totp");
+});
+
+$("#login-recovery").addEventListener("input", (event) => {
+  event.currentTarget.value = normalizeRecoveryCode(event.currentTarget.value);
+  event.currentTarget.classList.remove("error");
+});
 
 $("#login-passkey").addEventListener("click", async () => {
   const button = $("#login-passkey");
@@ -1009,17 +1095,23 @@ $("#login-form").addEventListener("submit", async (e) => {
     S.me = await api("/auth/login", { method: "POST", json: {
       username: $("#login-user").value.trim(),
       password: $("#login-pass").value,
-      code: $("#login-code").value.trim(),
+      code: currentLoginCode(),
     }});
     const c = await api("/auth/csrf"); csrfToken = c.csrf;
-    $("#login-pass").value = ""; $("#login-code").value = "";
+    $("#login-pass").value = ""; $("#login-code").value = ""; $("#login-recovery").value = "";
     enterApp();
   } catch (err) {
     const eb = $("#login-error"); eb.textContent = err.message; eb.classList.remove("hidden");
-    $(".otp-wrap")?.classList.add("error");
-    $("#login-code").value = "";
-    syncOTPCells();
-    $("#login-code").focus();
+    if (loginCodeMode === "recovery") {
+      $("#login-recovery").value = "";
+      $("#login-recovery").classList.add("error");
+      $("#login-recovery").focus();
+    } else {
+      $("#login-step-2 .otp-wrap")?.classList.add("error");
+      $("#login-code").value = "";
+      syncOTPCells();
+      $("#login-code").focus();
+    }
   } finally { btn.disabled = false; }
 });
 
@@ -1119,6 +1211,7 @@ function navigate(page, opts = {}) {
   S.managedServerId = next === "files" || next === "configuration" ? (opts.serverId ?? null) : null;
   S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers" || next === "configuration");
   S.serverManagementReturn = !!opts.fromServers && (next === "files" || next === "configuration");
+  S.consoleReturn = !!opts.fromConsole && (next === "servers" || next === "files" || next === "configuration");
   setSidebarOpen(false);
   if (!opts.fromHash) syncHash(next, !!opts.replaceHash);
   syncPageSubscription(next);
@@ -1201,15 +1294,58 @@ function markLifecyclePendingSettled(state = S.status.state) {
   return true;
 }
 
+function updateServerNameTicker(ticker) {
+  if (!ticker?.isConnected) return;
+  const text = ticker.querySelector(".server-name-text:not(.server-name-clone)");
+  if (!text) return;
+  const link = ticker.querySelector(".server-name-link");
+  const overflowing = text.getBoundingClientRect().width > ticker.clientWidth + 1;
+  ticker.classList.toggle("is-overflowing", overflowing);
+  if (overflowing) {
+    const seconds = Math.max(10, (text.getBoundingClientRect().width + 32) / 28);
+    ticker.style.setProperty("--ticker-duration", `${seconds.toFixed(2)}s`);
+    if (!link) ticker.tabIndex = 0;
+  } else {
+    ticker.style.removeProperty("--ticker-duration");
+  }
+  if (link || !overflowing) ticker.removeAttribute("tabindex");
+}
+
+let serverNameTickerResizeFrame = 0;
+window.addEventListener("resize", () => {
+  cancelAnimationFrame(serverNameTickerResizeFrame);
+  serverNameTickerResizeFrame = requestAnimationFrame(() => updateServerNameTicker($(".server-name")));
+});
+
 function renderServerPicker() {
   const host = $("#server-picker"); host.innerHTML = "";
+  const header = $("#sidebar-project-header");
+  header?.querySelector(":scope > .server-picker-icon")?.remove();
   const active = S.servers.find((s) => s.id === S.activeId);
+  const name = active ? active.display_name : "None selected";
+  const icon = active
+    ? el("span", { class: "server-status-icon server-picker-icon", "aria-hidden": "true" }, serverCardIcon(active))
+    : null;
+  const track = el("div", { class: "server-name-track" },
+    el("span", { class: "server-name-text" }, name),
+    el("span", { class: "server-name-text server-name-clone", "aria-hidden": "true" }, name));
+  const ticker = el("div", { class: "server-name", title: name, "aria-label": name },
+    active ? el("a", {
+      class: "server-name-link",
+      href: "#servers",
+      "aria-label": `Open ${name} in Servers`,
+      onclick: (event) => {
+        event.preventDefault();
+        navigate("servers", { serverTargetId: active.id });
+      },
+    }, track) : track);
+  if (icon && header) header.prepend(icon);
   host.append(
     el("div", { class: "server-picker-head" },
       el("span", { class: "server-kicker" }, "Active project"),
       renderStatusPillNode({ id: "status-pill" })),
-    el("div", { class: "server-name", title: active ? active.display_name : "None selected" },
-      active ? active.display_name : "None selected"));
+    ticker);
+  requestAnimationFrame(() => updateServerNameTicker(ticker));
 }
 
 function renderStatusPillNode(opts = {}) {
@@ -1217,7 +1353,12 @@ function renderStatusPillNode(opts = {}) {
   const attrs = { class: "status-label " + st + (opts.compact ? " compact" : "") };
   if (opts.id) attrs.id = opts.id;
   return el("div", attrs,
-    el("span", { class: "status-square", "aria-hidden": "true" }), st.charAt(0).toUpperCase() + st.slice(1));
+    el("span", { class: "status-square", "aria-hidden": "true" }), capitalizeFirst(st));
+}
+
+function capitalizeFirst(value) {
+  const text = String(value || "");
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 function renderStatusPill() {
   const p = $("#status-pill");
@@ -1252,6 +1393,11 @@ async function renderPage() {
 }
 
 function overviewBackButton() {
+  if (S.consoleReturn) return el("button", {
+    class: "btn ghost page-back-button", type: "button",
+    "aria-label": "Back to Console", title: "Back to Console",
+    onclick: () => navigate("console"),
+  }, solarIcon("alt-arrow-left-linear"));
   if (!S.overviewReturn) return null;
   return el("button", {
     class: "btn ghost page-back-button", type: "button",
@@ -1578,9 +1724,10 @@ function playerSummaryCard(players, onlineCount, maxPlayers) {
 function serverStatusCard(state, server) {
   const normalized = String(state || "stopped").toLowerCase();
   const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
-  const icon = server
-    ? el("span", { class: "server-status-icon" }, serverCardIcon(server))
-    : null;
+  const icons = server ? [
+    el("span", { class: "server-status-icon server-status-icon-ambient", "aria-hidden": "true" }, serverCardIcon(server)),
+    el("span", { class: "server-status-icon server-status-icon-main", "aria-hidden": "true" }, serverCardIcon(server)),
+  ] : [];
   const targetId = server?.id ?? S.activeId;
   return el("a", {
     class: "card metric server-status-card " + normalized,
@@ -1591,7 +1738,7 @@ function serverStatusCard(state, server) {
       navigate("servers", { fromOverview: true, serverTargetId: targetId });
     },
   },
-    icon,
+    ...icons,
     el("div", { class: "metric-label server-status-label-row" },
       "Server status", solarIcon("alt-arrow-right-linear", "player-summary-arrow")),
     el("div", { class: "metric-value server-status-value" },
@@ -1600,7 +1747,7 @@ function serverStatusCard(state, server) {
     el("div", { class: "metric-note" }, ""));
 }
 
-function lifecycleButtons(includeServers = false) {
+function lifecycleButtons(includeServers = false, managementSource = "overview") {
   const st = S.status.state || "stopped";
   const running = st === "running" || st === "starting";
   markLifecyclePendingSettled(st);
@@ -1658,13 +1805,13 @@ function lifecycleButtons(includeServers = false) {
         type: "button",
         title: "Configuration",
         "aria-label": "Configuration",
-        onclick: () => navigate("configuration", { fromOverview: true }),
+        onclick: () => navigate("configuration", managementSource === "console" ? { fromConsole: true } : { fromOverview: true }),
       }, solarIcon("tuning-2-linear")));
     }
     const menuItems = [
       el("button", {
         class: "action-menu-item", type: "button", role: "menuitem",
-        onclick: () => navigate("servers", { fromOverview: true }),
+        onclick: () => navigate("servers", managementSource === "console" ? { fromConsole: true } : { fromOverview: true }),
       }, solarIcon("server-square-linear"), "Servers"),
     ];
     if (can("server.force_stop") && st !== "stopped") {
@@ -1701,10 +1848,21 @@ async function pageConsole(main) {
   main.innerHTML = "";
   const stopped = (S.status.state || "stopped") === "stopped";
   const box = el("div", { class: "console" + (S.consolePaused ? " paused" : "") + (S.consoleWrap ? " is-wrapped" : ""), id: "console-box", role: "log", "aria-live": S.consolePaused ? "off" : "polite" });
-  const search = el("input", { value: S.consoleSearch, placeholder: "Search buffer", "aria-label": "Search console buffer" });
+  const search = el("input", { class: "page-search", type: "search", value: S.consoleSearch, placeholder: "Search buffer", "aria-label": "Search console buffer" });
   const input = el("input", { placeholder: can("server.console.use") ? (stopped ? "Start the server to send commands" : "Command, for example: say hello") : "Read-only console", spellcheck: "false", autocomplete: "off" });
   if (!can("server.console.use") || stopped) input.disabled = true;
   search.addEventListener("input", () => { S.consoleSearch = search.value; renderConsoleLines(box); });
+  const filter = pageFilterMenu("Filter console", [
+    ["all", "All lines"],
+    ["errors", "Errors only"],
+    ["warnings", "Warnings only"],
+    ["info", "Info only"],
+    ["players", "Player events only"],
+    ["chat", "Chat only"],
+  ], (value) => {
+    S.consoleFilterMode = value;
+    renderConsoleLines(box);
+  }, S.consoleFilterMode);
   renderConsoleLines(box);
   if (!S.consoleLines.length) renderConsolePlaceholder(box, "Loading console history...");
   input.addEventListener("keydown", async (e) => {
@@ -1762,10 +1920,10 @@ async function pageConsole(main) {
   el("span", { class: "bot-power-track", "aria-hidden": "true" }, el("span", {})),
   el("span", { class: "bot-power-label" }, S.consoleWrap ? "On" : "Off"));
   main.append(
-    pageHeader("Console", "Live Minecraft output and command entry for the active server.", [renderStatusPillNode(), lifecycleButtons()]),
+    pageHeader("Console", "Live Minecraft output and command entry for the active server.", [renderStatusPillNode(), lifecycleButtons(true, "console")]),
     el("div", { class: "console-shell" },
       el("div", { class: "console-toolbar" },
-        search,
+        el("div", { class: "page-search-filter-controls console-search-controls" }, search, filter),
         el("button", {
           class: "btn ghost console-icon-control",
           "aria-label": S.consolePaused ? "Resume console" : "Pause console",
@@ -1827,10 +1985,21 @@ function renderConsoleLines(box) {
   const q = (S.consoleSearch || "").toLowerCase();
   box.innerHTML = "";
   for (const line of S.consoleLines) {
-    if (q && !String(line).toLowerCase().includes(q)) continue;
+    if (!consoleLineMatchesFilter(line, q)) continue;
     box.append(consoleLineNode(line));
   }
-  if (q && !box.childNodes.length) renderConsolePlaceholder(box, "No matching console lines.");
+  if ((q || S.consoleFilterMode !== "all") && !box.childNodes.length) renderConsolePlaceholder(box, "No matching console lines.");
+}
+
+function consoleLineMatchesFilter(line, query = (S.consoleSearch || "").toLowerCase()) {
+  const text = String(line || "");
+  if (query && !text.toLowerCase().includes(query)) return false;
+  if (S.consoleFilterMode === "errors") return /ERROR|SEVERE|FATAL/i.test(text);
+  if (S.consoleFilterMode === "warnings") return /WARN(?:ING)?/i.test(text);
+  if (S.consoleFilterMode === "info") return /(?:\[|\/)INFO(?:\]|:)/i.test(text);
+  if (S.consoleFilterMode === "players") return /joined the game|left the game|logged in with entity id|lost connection:/i.test(text);
+  if (S.consoleFilterMode === "chat") return /(?:\]:|\[CHAT\])\s*(?:\[Not Secure\]\s*)?<[^>]+>\s+/i.test(text);
+  return true;
 }
 
 function renderConsolePlaceholder(box, message) {
@@ -1841,7 +2010,7 @@ function renderConsolePlaceholder(box, message) {
 function appendConsoleLine(line) {
   const box = $("#console-box");
   if (!box) return;
-  if (S.consoleSearch && !String(line).toLowerCase().includes(S.consoleSearch.toLowerCase())) return;
+  if (!consoleLineMatchesFilter(line)) return;
   if (box.querySelector(".console-placeholder")) box.innerHTML = "";
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   box.append(consoleLineNode(line));
@@ -1856,29 +2025,41 @@ async function pagePlayers(main) {
   setOnlinePlayerCount(players);
   const search = el("input", { class: "page-search", type: "search", placeholder: "Search players", "aria-label": "Search players" });
   const tbody = el("tbody");
-  let filterMode = "alphabetical";
+  let filterMode = "name-asc";
   const byName = (a, b) => String(a.username || "").localeCompare(String(b.username || ""), undefined, { sensitivity: "base" });
   const draw = () => {
     const q = search.value.trim().toLowerCase();
     let visible = players.filter((p) => !q || String(p.username).toLowerCase().includes(q));
-    if (filterMode === "op") visible = visible.filter((p) => p.op);
-    if (filterMode === "banned") visible = visible.filter((p) => p.banned);
+    if (filterMode === "online-only") visible = visible.filter((p) => p.online);
+    if (filterMode === "offline-only") visible = visible.filter((p) => !p.online);
+    if (filterMode === "op-only") visible = visible.filter((p) => p.op);
+    if (filterMode === "banned-only") visible = visible.filter((p) => p.banned);
     visible.sort((a, b) => {
-      if (filterMode === "status") return Number(b.online) - Number(a.online) || byName(a, b);
-      if (filterMode === "last-seen") return (Date.parse(b.last_seen_at) || 0) - (Date.parse(a.last_seen_at) || 0) || byName(a, b);
-      if (filterMode === "playtime") return Number(b.observed_playtime_seconds || 0) - Number(a.observed_playtime_seconds || 0) || byName(a, b);
+      if (filterMode === "name-desc") return -byName(a, b);
+      if (filterMode === "online-first") return Number(b.online) - Number(a.online) || byName(a, b);
+      if (filterMode === "offline-first") return Number(a.online) - Number(b.online) || byName(a, b);
+      if (filterMode === "last-seen-newest") return (Date.parse(b.last_seen_at) || 0) - (Date.parse(a.last_seen_at) || 0) || byName(a, b);
+      if (filterMode === "last-seen-oldest") return (Date.parse(a.last_seen_at) || 0) - (Date.parse(b.last_seen_at) || 0) || byName(a, b);
+      if (filterMode === "playtime-most") return Number(b.observed_playtime_seconds || 0) - Number(a.observed_playtime_seconds || 0) || byName(a, b);
+      if (filterMode === "playtime-least") return Number(a.observed_playtime_seconds || 0) - Number(b.observed_playtime_seconds || 0) || byName(a, b);
       return byName(a, b);
     });
     tbody.innerHTML = "";
     tbody.append(...(visible.length ? visible.map(playerRow) : [el("tr", {}, el("td", { colspan: "5", class: "muted" }, players.length ? "No matching players." : "No players seen yet."))]));
   };
   const filterModes = [
-    ["alphabetical", "Alphabetically"],
-    ["status", "Status"],
-    ["last-seen", "Last Seen"],
-    ["playtime", "Observed playtime"],
-    ["op", "Show only OP"],
-    ["banned", "Show only BANNED"],
+    ["name-asc", "Name: A-Z"],
+    ["name-desc", "Name: Z-A"],
+    ["online-first", "Status: Online first"],
+    ["offline-first", "Status: Offline first"],
+    ["last-seen-newest", "Last seen: Newest"],
+    ["last-seen-oldest", "Last seen: Oldest"],
+    ["playtime-most", "Playtime: Most"],
+    ["playtime-least", "Playtime: Least"],
+    ["online-only", "Online only"],
+    ["offline-only", "Offline only"],
+    ["op-only", "OP only"],
+    ["banned-only", "BANNED only"],
   ];
   const filterControl = pageFilterMenu("Filter players", filterModes, (value) => {
     filterMode = value;
@@ -1891,8 +2072,8 @@ async function pagePlayers(main) {
       el("div", { class: "page-search-filter-controls players-search-controls" }, search, filterControl),
     ], overviewBackButton()),
     el("div", { class: "toolbar" },
-      el("span", { class: "status-label running" }, el("span", { class: "status-square" }), players.filter((p) => p.online).length + " online"),
-      el("span", { class: "status-label" }, el("span", { class: "status-square" }), players.length + " observed")),
+      el("span", { class: "status-label running" }, el("span", { class: "status-square" }), players.filter((p) => p.online).length + " Online"),
+      el("span", { class: "status-label" }, el("span", { class: "status-square" }), players.length + " Observed")),
     el("div", { class: "table-wrap players-table" },
       el("table", {},
         el("thead", {}, el("tr", {},
@@ -1994,6 +2175,17 @@ const FILE_ICON_GROUPS = [
   ["code-file-linear", new Set(["c", "cc", "cpp", "cs", "css", "go", "h", "hpp", "htm", "html", "java", "js", "jsx", "kt", "kts", "less", "lua", "php", "py", "rb", "rs", "sass", "scss", "sql", "ts", "tsx", "xml"])],
 ];
 
+const FILE_IMAGE_PREVIEW_EXTENSIONS = new Set(["avif", "bmp", "gif", "ico", "jpeg", "jpg", "png", "webp"]);
+
+function fileExtension(path) {
+  const name = String(path || "").toLowerCase().split("/").pop() || "";
+  return name.includes(".") ? name.split(".").pop() : "";
+}
+
+function isPreviewableImage(path) {
+  return FILE_IMAGE_PREVIEW_EXTENSIONS.has(fileExtension(path));
+}
+
 function fileIconName(entry) {
   if (entry.is_dir) return "folder-linear";
   const name = String(entry.name || "").toLowerCase();
@@ -2021,7 +2213,7 @@ async function pageFiles(main, path = filePath) {
   if (S.pendingFileOpen) {
     const pending = S.pendingFileOpen;
     S.pendingFileOpen = null;
-    return openFileEditor(main, pending.path, pending.returnTo);
+    return openFile(main, pending.path, pending.returnTo);
   }
   filePath = path;
   fileEscapeAction = path
@@ -2050,7 +2242,7 @@ async function pageFiles(main, path = filePath) {
   const fileRow = (e2) => el("tr", {},
     el("td", { class: "mono", style: "cursor:pointer", onclick: () => {
       if (e2.is_dir) pageFiles(main, (path ? path + "/" : "") + e2.name);
-      else openFileEditor(main, (path ? path + "/" : "") + e2.name);
+      else openFile(main, (path ? path + "/" : "") + e2.name);
     } }, fileIdentity(e2)),
     el("td", { class: "file-size-column" }, e2.is_dir ? "—" : fmtBytes(e2.size)),
     el("td", { class: "mobile-hide" }, fmtTime(e2.mod_time)),
@@ -2065,8 +2257,10 @@ async function pageFiles(main, path = filePath) {
     visible.sort((a, b) => {
       if (filterMode === "folders-first") return Number(b.is_dir) - Number(a.is_dir) || byName(a, b);
       if (filterMode === "name-desc") return -byName(a, b);
-      if (filterMode === "modified") return (Date.parse(b.mod_time) || 0) - (Date.parse(a.mod_time) || 0) || byName(a, b);
-      if (filterMode === "size") return Number(b.size || 0) - Number(a.size || 0) || byName(a, b);
+      if (filterMode === "modified-newest") return (Date.parse(b.mod_time) || 0) - (Date.parse(a.mod_time) || 0) || byName(a, b);
+      if (filterMode === "modified-oldest") return (Date.parse(a.mod_time) || 0) - (Date.parse(b.mod_time) || 0) || byName(a, b);
+      if (filterMode === "size-largest") return Number(b.size || 0) - Number(a.size || 0) || byName(a, b);
+      if (filterMode === "size-smallest") return Number(a.size || 0) - Number(b.size || 0) || byName(a, b);
       return byName(a, b);
     });
     tbody.replaceChildren(...(visible.length
@@ -2076,12 +2270,14 @@ async function pageFiles(main, path = filePath) {
   const search = pageSearchInput("files", draw);
   const filter = pageFilterMenu("Filter files", [
     ["folders-first", "Folders first"],
-    ["name", "Name A-Z"],
-    ["name-desc", "Name Z-A"],
-    ["modified", "Newest modified"],
-    ["size", "Largest first"],
-    ["folders-only", "Show folders only"],
-    ["files-only", "Show files only"],
+    ["name", "Name: A-Z"],
+    ["name-desc", "Name: Z-A"],
+    ["modified-newest", "Modified: Newest"],
+    ["modified-oldest", "Modified: Oldest"],
+    ["size-largest", "Size: Largest"],
+    ["size-smallest", "Size: Smallest"],
+    ["folders-only", "Folders only"],
+    ["files-only", "Files only"],
   ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   const project = S.servers.find((server) => server.id === S.managedServerId)
     || S.servers.find((server) => server.id === S.activeId);
@@ -2117,6 +2313,43 @@ function fileActions(main, path, entry) {
     overflowActionsMenu(`Actions for ${entry.name}`, items, "mobile-row-actions"));
 }
 
+function openFile(main, rel, returnTo = null) {
+  if (isPreviewableImage(rel)) return openFileImagePreview(main, rel, returnTo);
+  return openFileEditor(main, rel, returnTo);
+}
+
+function fileViewerBack(main, returnTo) {
+  fileEscapeAction = null;
+  if (returnTo?.page === "configuration") {
+    navigate("configuration", { serverId: returnTo.serverId, fromOverview: returnTo.fromOverview, fromServers: returnTo.fromServers, fromConsole: returnTo.fromConsole });
+    return;
+  }
+  pageFiles(main);
+}
+
+function openFileImagePreview(main, rel, returnTo = null) {
+  const preview = DEMO_MODE && rel.toLowerCase().endsWith("server-icon.png")
+    ? (S.servers.find((server) => server.id === (S.managedServerId || S.activeId))?.demo_icon || DEMO_SERVERS[0].demo_icon)
+    : "/api" + serverScopedPath("/files/preview?path=" + encodeURIComponent(rel));
+  const download = DEMO_MODE ? preview : "/api" + serverScopedPath("/files/download?path=" + encodeURIComponent(rel));
+  const back = () => fileViewerBack(main, returnTo);
+  const image = el("img", { src: preview, alt: `Preview of ${rel}`, decoding: "async" });
+  const error = el("p", { class: "muted hidden" }, "This image could not be previewed. You can still download it.");
+  image.addEventListener("error", () => {
+    image.classList.add("hidden");
+    error.classList.remove("hidden");
+  }, { once: true });
+  fileEscapeAction = back;
+  main.innerHTML = "";
+  main.append(
+    el("div", { class: "toolbar" },
+      el("h1", { class: "mono", style: "font-size:1rem" }, rel),
+      el("div", { class: "spacer" }),
+      el("button", { class: "btn ghost", title: returnTo ? "Back to Configuration" : "Back to files", onclick: back }, solarIcon("folder-open-linear"), "Back"),
+      el("a", { class: "btn", href: download, download: rel.split("/").pop() || "image" }, solarIcon("download-linear"), "Download")),
+    el("div", { class: "file-image-viewer" }, image, error));
+}
+
 async function openFileEditor(main, rel, returnTo = null) {
   let data;
   try { data = await api(serverScopedPath("/files/content?path=" + encodeURIComponent(rel))); }
@@ -2128,7 +2361,7 @@ async function openFileEditor(main, rel, returnTo = null) {
   const finishLeaving = () => {
     if (returnTo?.page === "configuration") {
       fileEscapeAction = null;
-      navigate("configuration", { serverId: returnTo.serverId, fromOverview: returnTo.fromOverview, fromServers: returnTo.fromServers });
+      navigate("configuration", { serverId: returnTo.serverId, fromOverview: returnTo.fromOverview, fromServers: returnTo.fromServers, fromConsole: returnTo.fromConsole });
       return;
     }
     pageFiles(main);
@@ -2228,6 +2461,7 @@ function openFileInEditor(path) {
       serverId: S.managedServerId,
       fromOverview: S.overviewReturn,
       fromServers: S.serverManagementReturn,
+      fromConsole: S.consoleReturn,
     },
   };
   navigate("files", { serverId: S.managedServerId });
@@ -2688,6 +2922,11 @@ async function pageConfiguration(main) {
 async function pageBackups(main) {
   const list = await api("/backups");
   main.innerHTML = "";
+  const integrityLabel = (status) => {
+    if (status === "verified") return "Checked";
+    if (status === "failed") return "Error";
+    return "-";
+  };
   const createBackup = async (type, label) => {
     try { await api("/backups", { method: "POST", json: { type } }); toast(label + " backup started", "ok"); }
     catch (e) { toast(e.message, "err"); }
@@ -2714,7 +2953,7 @@ async function pageBackups(main) {
     el("td", {}, b.backup_type.replace(/_/g, " ")),
     el("td", { class: "mobile-hide" }, b.consistency_mode + " / " + b.trigger_type),
     el("td", {}, fmtBytes(b.compressed_size)),
-    el("td", { class: "mobile-hide" }, b.verification_status || "—"),
+    el("td", { class: "mobile-hide" }, integrityLabel(b.verification_status)),
     el("td", { class: "mobile-hide" }, fmtTime(b.created_at)),
     el("td", { class: "table-actions" }, backupActions(b)));
   const tbody = el("tbody");
@@ -2726,10 +2965,11 @@ async function pageBackups(main) {
     if (filterMode === "world") visible = visible.filter((backup) => String(backup.backup_type).includes("world"));
     if (filterMode === "configuration") visible = visible.filter((backup) => String(backup.backup_type).includes("configuration"));
     if (filterMode === "protected") visible = visible.filter((backup) => backup.protected);
-    if (filterMode === "verified") visible = visible.filter((backup) => backup.verification_status === "verified");
+    if (filterMode === "unprotected") visible = visible.filter((backup) => !backup.protected);
     visible.sort((a, b) => {
       if (filterMode === "oldest") return -byNewest(a, b);
-      if (filterMode === "size") return Number(b.compressed_size || 0) - Number(a.compressed_size || 0) || byNewest(a, b);
+      if (filterMode === "size-largest") return Number(b.compressed_size || 0) - Number(a.compressed_size || 0) || byNewest(a, b);
+      if (filterMode === "size-smallest") return Number(a.compressed_size || 0) - Number(b.compressed_size || 0) || byNewest(a, b);
       return byNewest(a, b);
     });
     tbody.replaceChildren(...(visible.length
@@ -2738,14 +2978,15 @@ async function pageBackups(main) {
   };
   const search = pageSearchInput("backups", draw);
   const filter = pageFilterMenu("Filter backups", [
-    ["newest", "Newest first"],
-    ["oldest", "Oldest first"],
-    ["size", "Largest first"],
+    ["newest", "Created: Newest"],
+    ["oldest", "Created: Oldest"],
+    ["size-largest", "Size: Largest"],
+    ["size-smallest", "Size: Smallest"],
     ["full", "Full server only"],
     ["world", "World only"],
     ["configuration", "Configuration only"],
     ["protected", "Protected only"],
-    ["verified", "Verified only"],
+    ["unprotected", "Unprotected only"],
   ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Backups", "Verified archives, retention decisions, and restore controls. Online backups briefly pause world saving.", [
@@ -2757,9 +2998,22 @@ async function pageBackups(main) {
     el("div", { class: "progress hidden", id: "backup-progress" }, el("div", { style: "width:0%" })),
     el("div", { class: "table-wrap backups-table" },
       el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", { class: "mobile-hide" }, "Mode"), el("th", {}, "Size"), el("th", { class: "mobile-hide" }, "Verified"), el("th", { class: "mobile-hide" }, "Created"), el("th", {}, ""))),
+        el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", { class: "mobile-hide" }, "Mode"), el("th", {}, "Size"), el("th", { class: "mobile-hide" }, "Integrity"), el("th", { class: "mobile-hide" }, "Created"), el("th", {}, ""))),
         tbody)));
   draw();
+}
+
+function backupActionIcon(name) {
+  if (name !== "shield-cross-linear" && name !== "file-magnifying-glass") return solarIcon(name);
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("viewBox", name === "shield-cross-linear" ? "0 0 24 24" : "0 0 256 256");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+  svg.innerHTML = name === "shield-cross-linear"
+    ? `<path d="M0 0h24v24H0z" fill="none"/><g fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10.417c0-3.198 0-4.797.378-5.335c.377-.537 1.88-1.052 4.887-2.081l.573-.196C10.405 2.268 11.188 2 12 2s1.595.268 3.162.805l.573.196c3.007 1.029 4.51 1.544 4.887 2.081C21 5.62 21 7.22 21 10.417v1.574c0 5.638-4.239 8.375-6.899 9.536C13.38 21.842 13.02 22 12 22s-1.38-.158-2.101-.473C7.239 20.365 3 17.63 3 11.991z"/><path stroke-linecap="round" d="m14.5 9.5l-5 5m0-5l5 5"/></g>`
+    : `<path d="M0 0h256v256H0z" fill="none"/><path fill="currentColor" d="m213.66 82.34l-56-56A8 8 0 0 0 152 24H56a16 16 0 0 0-16 16v176a16 16 0 0 0 16 16h144a16 16 0 0 0 16-16V88a8 8 0 0 0-2.34-5.66M160 51.31L188.69 80H160ZM200 216H56V40h88v48a8 8 0 0 0 8 8h48zm-45.54-48.85a36.05 36.05 0 1 0-11.31 11.31l11.19 11.2a8 8 0 0 0 11.32-11.32ZM104 148a20 20 0 1 1 20 20a20 20 0 0 1-20-20"/>`;
+  return svg;
 }
 
 function backupActions(backup) {
@@ -2768,11 +3022,14 @@ function backupActions(backup) {
     label: "Restore", icon: "archive-down-minimlistic-linear", run: () => restoreBackup(backup),
   });
   actions.push(
-    { label: "Verify", icon: "shield-check-linear", run: async () => {
-      try { await api(`/backups/${backup.backup_id}/verify`, { method: "POST", json: {} }); toast("Verified", "ok"); renderPage(); }
-      catch (error) { toast(error.message, "err"); }
+    { label: "Check", title: "Check whether this backup is readable and unchanged", icon: "file-magnifying-glass", run: async () => {
+      try {
+        await api(`/backups/${backup.backup_id}/verify`, { method: "POST", json: {} });
+        toast("Backup integrity check passed", "ok");
+        renderPage();
+      } catch (error) { toast(`Backup integrity check failed: ${error.message}`, "err"); }
     } },
-    { label: backup.protected ? "Unprotect" : "Protect", icon: backup.protected ? "shield-keyhole-linear" : "shield-check-linear", run: async () => {
+    { label: backup.protected ? "Unprotect" : "Protect", icon: backup.protected ? "shield-cross-linear" : "shield-check-linear", run: async () => {
       try { await api(`/backups/${backup.backup_id}/protect`, { method: "POST", json: { protected: !backup.protected } }); renderPage(); }
       catch (error) { toast(error.message, "err"); }
     } },
@@ -2783,12 +3040,16 @@ function backupActions(backup) {
       }) });
 
   const desktop = el("div", { class: "row-actions desktop-row-actions" },
-    ...actions.map((action) => el("button", { class: "btn " + (action.danger ? "danger" : "ghost"), onclick: action.run }, action.label)));
+    ...actions.map((action) => el("button", {
+      class: "btn " + (action.danger ? "danger" : "ghost"),
+      title: action.title,
+      onclick: action.run,
+    }, backupActionIcon(action.icon), action.label)));
   const mobile = overflowActionsMenu(`Actions for backup ${backup.backup_id}`,
     actions.map((action) => el("button", {
       class: "action-menu-item" + (action.danger ? " danger" : ""),
-      type: "button", role: "menuitem", onclick: action.run,
-    }, solarIcon(action.icon), action.label)), "mobile-row-actions");
+      type: "button", role: "menuitem", title: action.title, onclick: action.run,
+    }, backupActionIcon(action.icon), action.label)), "mobile-row-actions");
   return el("div", { class: "responsive-row-actions" }, desktop, mobile);
 }
 
@@ -2841,7 +3102,7 @@ async function pageSchedules(main) {
   const list = await api("/schedules");
   main.innerHTML = "";
   const scheduleRow = (s) => el("tr", {},
-    el("td", {}, s.name, s.enabled ? "" : el("span", { class: "tag inline-offset" }, "disabled")),
+    el("td", {}, s.name, s.enabled ? "" : el("span", { class: "tag inline-offset" }, "Disabled")),
     el("td", {}, s.action.replace(/_/g, " ")),
     el("td", { class: "mono" }, s.schedule_type + ": " + s.schedule_expression + " (" + (s.timezone || "UTC") + ")"),
     el("td", {}, fmtTime(s.next_run_at)),
@@ -2855,13 +3116,20 @@ async function pageSchedules(main) {
     let visible = (list || []).filter((schedule) => recordMatchesSearch(schedule, query, fmtTime(schedule.next_run_at)));
     if (filterMode === "enabled") visible = visible.filter((schedule) => schedule.enabled);
     if (filterMode === "disabled") visible = visible.filter((schedule) => !schedule.enabled);
+    if (filterMode === "result-success") visible = visible.filter((schedule) => String(schedule.last_result || "").toLowerCase() === "success");
+    if (filterMode === "result-failed") visible = visible.filter((schedule) => String(schedule.last_result || "").toLowerCase() === "failed");
+    if (filterMode === "result-skipped") visible = visible.filter((schedule) => String(schedule.last_result || "").toLowerCase() === "skipped");
     visible.sort((a, b) => {
-      if (filterMode === "next-run") {
+      if (filterMode === "next-run" || filterMode === "next-run-latest") {
         const aTime = Date.parse(a.next_run_at);
         const bTime = Date.parse(b.next_run_at);
-        return (Number.isFinite(aTime) ? aTime : Infinity) - (Number.isFinite(bTime) ? bTime : Infinity) || byName(a, b);
+        if (Number.isFinite(aTime) !== Number.isFinite(bTime)) return Number.isFinite(aTime) ? -1 : 1;
+        const difference = aTime - bTime;
+        return (filterMode === "next-run-latest" ? -difference : difference) || byName(a, b);
       }
-      if (filterMode === "action") return String(a.action || "").localeCompare(String(b.action || ""), undefined, { sensitivity: "base" }) || byName(a, b);
+      if (filterMode === "name-desc") return -byName(a, b);
+      if (filterMode === "action-asc") return String(a.action || "").localeCompare(String(b.action || ""), undefined, { sensitivity: "base" }) || byName(a, b);
+      if (filterMode === "action-desc") return String(b.action || "").localeCompare(String(a.action || ""), undefined, { sensitivity: "base" }) || byName(a, b);
       return byName(a, b);
     });
     tbody.replaceChildren(...(visible.length
@@ -2870,11 +3138,17 @@ async function pageSchedules(main) {
   };
   const search = pageSearchInput("schedules", draw);
   const filter = pageFilterMenu("Filter schedules", [
-    ["next-run", "Next run"],
-    ["name", "Alphabetically"],
-    ["action", "Action"],
-    ["enabled", "Show enabled only"],
-    ["disabled", "Show disabled only"],
+    ["next-run", "Next run: Soonest"],
+    ["next-run-latest", "Next run: Latest"],
+    ["name", "Name: A-Z"],
+    ["name-desc", "Name: Z-A"],
+    ["action-asc", "Action: A-Z"],
+    ["action-desc", "Action: Z-A"],
+    ["enabled", "Enabled only"],
+    ["disabled", "Disabled only"],
+    ["result-success", "Result: Success only"],
+    ["result-failed", "Result: Failed only"],
+    ["result-skipped", "Result: Skipped only"],
   ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Schedules", "Persistent Linux-host schedules with next run, last result, and manual run controls.", [
@@ -4213,11 +4487,11 @@ async function pageServers(main) {
   main.innerHTML = "";
   const serverCard = (s2) => el("div", { class: "card server-card", id: `server-card-${s2.id}` },
     serverCardIcon(s2),
-    s2.id === S.activeId ? el("span", { class: "tag server-card-active-mobile" }, "active") : null,
+    s2.id === S.activeId ? el("span", { class: "tag server-card-active-mobile" }, "Active") : null,
     el("div", { class: "server-card-body" },
       el("div", { class: "toolbar compact" },
         el("strong", {}, s2.display_name),
-        s2.id === S.activeId ? el("span", { class: "tag server-card-active-desktop" }, "active") : "",
+        s2.id === S.activeId ? el("span", { class: "tag server-card-active-desktop" }, "Active") : "",
         s2.external_directory ? el("span", { class: "tag" }, "external link") : "",
         el("div", { class: "spacer" })),
       el("div", { class: "muted mono" }, s2.slug),
@@ -4235,16 +4509,23 @@ async function pageServers(main) {
           ? serverManagementButton(s2, "configuration", "Configuration", "tuning-2-linear") : "",
         serverActionsMenu(s2))));
   const cardsHost = el("div", { class: "grid cols-2" });
-  let filterMode = "alphabetical";
+  let filterMode = "name-asc";
   const byName = (a, b) => String(a.display_name || "").localeCompare(String(b.display_name || ""), undefined, { sensitivity: "base", numeric: true });
   const draw = (query = "") => {
     let visible = S.servers.filter((server) => recordMatchesSearch(server, query));
     if (filterMode === "active-only") visible = visible.filter((server) => server.id === S.activeId);
     if (filterMode === "non-active-only") visible = visible.filter((server) => server.id !== S.activeId);
+    if (filterMode === "external-only") visible = visible.filter((server) => server.external_directory);
+    if (filterMode === "managed-only") visible = visible.filter((server) => !server.external_directory);
     visible.sort((a, b) => {
+      if (filterMode === "name-desc") return -byName(a, b);
       if (filterMode === "active-first") return Number(b.id === S.activeId) - Number(a.id === S.activeId) || byName(a, b);
+      if (filterMode === "modified-newest") return (Date.parse(b.updated_at || b.created_at) || 0) - (Date.parse(a.updated_at || a.created_at) || 0) || byName(a, b);
+      if (filterMode === "modified-oldest") return (Date.parse(a.updated_at || a.created_at) || 0) - (Date.parse(b.updated_at || b.created_at) || 0) || byName(a, b);
       if (filterMode === "game-version") return String(a.minecraft_version || "").localeCompare(String(b.minecraft_version || ""), undefined, { sensitivity: "base", numeric: true }) || byName(a, b);
+      if (filterMode === "game-version-desc") return String(b.minecraft_version || "").localeCompare(String(a.minecraft_version || ""), undefined, { sensitivity: "base", numeric: true }) || byName(a, b);
       if (filterMode === "modloader") return String(a.modloader || "").localeCompare(String(b.modloader || ""), undefined, { sensitivity: "base" }) || String(a.modloader_version || "").localeCompare(String(b.modloader_version || ""), undefined, { numeric: true }) || byName(a, b);
+      if (filterMode === "modloader-desc") return String(b.modloader || "").localeCompare(String(a.modloader || ""), undefined, { sensitivity: "base" }) || String(b.modloader_version || "").localeCompare(String(a.modloader_version || ""), undefined, { numeric: true }) || byName(a, b);
       return byName(a, b);
     });
     cardsHost.replaceChildren(...(visible.length
@@ -4253,12 +4534,19 @@ async function pageServers(main) {
   };
   const search = pageSearchInput("servers", draw);
   const filter = pageFilterMenu("Filter servers", [
-    ["alphabetical", "Alphabetically"],
+    ["name-asc", "Name: A-Z"],
+    ["name-desc", "Name: Z-A"],
     ["active-first", "Active project first"],
-    ["game-version", "Game version"],
-    ["modloader", "Modloader"],
-    ["active-only", "Show active project"],
-    ["non-active-only", "Show non-active projects"],
+    ["modified-newest", "Modified: Newest"],
+    ["modified-oldest", "Modified: Oldest"],
+    ["game-version", "Game version: Ascending"],
+    ["game-version-desc", "Game version: Descending"],
+    ["modloader", "Modloader: A-Z"],
+    ["modloader-desc", "Modloader: Z-A"],
+    ["active-only", "Active project only"],
+    ["non-active-only", "Non-active projects only"],
+    ["external-only", "External links only"],
+    ["managed-only", "Bonghos storage only"],
   ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Servers", "Project inventory, active-project selection, and persistent import progress.", [
@@ -4549,6 +4837,9 @@ function importWizard() {
 }
 
 // ----- activity --------------------------------------------------------------
+const SECURITY_ACTIVITY_ACTION = /^(login_|passkey_|invitation_|role_|account_|sessions_|user_)/;
+const isSecurityActivity = (event) => SECURITY_ACTIVITY_ACTION.test(String(event?.action || ""));
+
 async function pageActivity(main) {
   const list = await api("/activity");
   main.innerHTML = "";
@@ -4560,11 +4851,16 @@ async function pageActivity(main) {
   const byNewest = (a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0);
   const byText = (field, a, b) => String(a[field] || "").localeCompare(String(b[field] || ""), undefined, { sensitivity: "base", numeric: true });
   const draw = (query = "") => {
-    const visible = (list || []).filter((event) => recordMatchesSearch(event, query, fmtTime(event.at), event.action.replace(/_/g, " ")));
+    let visible = (list || []).filter((event) => recordMatchesSearch(event, query, fmtTime(event.at), event.action.replace(/_/g, " ")));
+    if (filterMode === "security") visible = visible.filter(isSecurityActivity);
+    if (filterMode === "server-management") visible = visible.filter((event) => !isSecurityActivity(event));
+    if (filterMode === "mine") visible = visible.filter((event) => String(event.username || "").toLowerCase() === String(S.me?.username || "").toLowerCase());
     visible.sort((a, b) => {
       if (filterMode === "oldest") return -byNewest(a, b);
-      if (filterMode === "user") return byText("username", a, b) || byNewest(a, b);
-      if (filterMode === "action") return byText("action", a, b) || byNewest(a, b);
+      if (filterMode === "user-asc") return byText("username", a, b) || byNewest(a, b);
+      if (filterMode === "user-desc") return -byText("username", a, b) || byNewest(a, b);
+      if (filterMode === "action-asc") return byText("action", a, b) || byNewest(a, b);
+      if (filterMode === "action-desc") return -byText("action", a, b) || byNewest(a, b);
       return byNewest(a, b);
     });
     tbody.replaceChildren(...(visible.length
@@ -4573,10 +4869,15 @@ async function pageActivity(main) {
   };
   const search = pageSearchInput("activity", draw);
   const filter = pageFilterMenu("Filter activity", [
-    ["newest", "Newest first"],
-    ["oldest", "Oldest first"],
-    ["user", "User"],
-    ["action", "Action"],
+    ["newest", "Date: Newest"],
+    ["oldest", "Date: Oldest"],
+    ["user-asc", "User: A-Z"],
+    ["user-desc", "User: Z-A"],
+    ["action-asc", "Action: A-Z"],
+    ["action-desc", "Action: Z-A"],
+    ["mine", "My activity only"],
+    ["security", "Security only"],
+    ["server-management", "Server management only"],
   ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Activity", "Audit trail of account and server-management actions.", [
@@ -4596,23 +4897,28 @@ async function pageUsers(main) {
   const userRow = (u) => el("tr", {},
     el("td", {}, el("div", { class: "user-identity" },
       el("strong", {}, u.Username),
-      el("span", { class: "mobile-only mobile-row-detail" }, `${u.Role} · ${u.Disabled ? "Disabled" : "Active"}`))),
-    el("td", {}, el("span", { class: "tag" }, u.Role)),
+      el("span", { class: "mobile-only mobile-row-detail" }, `${capitalizeFirst(u.Role)} · ${u.Disabled ? "Disabled" : "Active"}`))),
+    el("td", {}, el("span", { class: "tag" }, capitalizeFirst(u.Role))),
     el("td", {}, u.Disabled ? "Disabled" : "Active"),
     el("td", { class: "table-actions" }, userActions(u)));
   const tbody = el("tbody");
-  let filterMode = "alphabetical";
+  let filterMode = "name-asc";
   const byName = (a, b) => String(a.Username || "").localeCompare(String(b.Username || ""), undefined, { sensitivity: "base" });
   const draw = (query = "") => {
     let visible = (users || []).filter((user) => recordMatchesSearch(user, query, user.Disabled ? "disabled" : "active"));
     if (filterMode === "active-only") visible = visible.filter((user) => !user.Disabled);
     if (filterMode === "disabled-only") visible = visible.filter((user) => user.Disabled);
+    if (/^role-(owner|admin|member|viewer)$/.test(filterMode)) {
+      visible = visible.filter((user) => String(user.Role || "").toLowerCase() === filterMode.slice(5));
+    }
     visible.sort((a, b) => {
-      if (filterMode === "role") {
+      if (filterMode === "role-owner-first") {
         const ownerOrder = Number(String(b.Role || "").toLowerCase() === "owner") - Number(String(a.Role || "").toLowerCase() === "owner");
         return ownerOrder || String(a.Role || "").localeCompare(String(b.Role || ""), undefined, { sensitivity: "base" }) || byName(a, b);
       }
-      if (filterMode === "status") return Number(a.Disabled) - Number(b.Disabled) || byName(a, b);
+      if (filterMode === "name-desc") return -byName(a, b);
+      if (filterMode === "active-first") return Number(a.Disabled) - Number(b.Disabled) || byName(a, b);
+      if (filterMode === "disabled-first") return Number(b.Disabled) - Number(a.Disabled) || byName(a, b);
       return byName(a, b);
     });
     tbody.replaceChildren(...(visible.length
@@ -4621,11 +4927,17 @@ async function pageUsers(main) {
   };
   const search = pageSearchInput("users", draw);
   const filter = pageFilterMenu("Filter users", [
-    ["alphabetical", "Alphabetically"],
-    ["role", "Role"],
-    ["status", "Status"],
-    ["active-only", "Show active only"],
-    ["disabled-only", "Show disabled only"],
+    ["name-asc", "Username: A-Z"],
+    ["name-desc", "Username: Z-A"],
+    ["role-owner-first", "Role: Owner first"],
+    ["active-first", "Status: Active first"],
+    ["disabled-first", "Status: Disabled first"],
+    ["active-only", "Active only"],
+    ["disabled-only", "Disabled only"],
+    ["role-owner", "Owner only"],
+    ["role-admin", "Admin only"],
+    ["role-member", "Member only"],
+    ["role-viewer", "Viewer only"],
   ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
   main.append(
     pageHeader("Users", "Accounts, roles, invitations, sessions, and final-Owner protection.", [
@@ -4701,6 +5013,230 @@ function changeRole(u) {
       try { await api(`/users/${u.ID}/role`, { method: "POST", json: { role: role.value } }); renderPage(); }
       catch (e) { toast(e.message, "err"); }
     }]]);
+}
+
+function accountHasLocalPasskey(passkeys) {
+  const currentRP = location.hostname.toLowerCase();
+  return passkeys.some((passkey) => String(passkey.rp_id || "").toLowerCase() === currentRP);
+}
+
+function verifyAccountAction(purpose, hasLocalPasskey, onVerified) {
+  const password = el("input", {
+    type: "password", autocomplete: "current-password", required: "",
+    value: DEMO_MODE ? "demo-password" : "",
+  });
+  const code = el("input", {
+    class: "account-reauth-code", autocomplete: "one-time-code", maxlength: "32", required: "",
+    placeholder: "6-digit code or recovery code", value: DEMO_MODE ? "123456" : "",
+  });
+  const finish = async (close, actionToken) => {
+    close();
+    try { await onVerified(actionToken); }
+    catch (error) { toast(error.message, "err"); }
+  };
+  const usePasskey = async (close) => {
+    if (!passkeysSupported()) return toast("Passkeys require HTTPS or localhost.", "err");
+    const button = document.activeElement;
+    if (button instanceof HTMLButtonElement) button.disabled = true;
+    try {
+      const started = await api("/account/reauth/passkey/begin", { method: "POST", json: { purpose } });
+      const credential = await navigator.credentials.get({
+        publicKey: passkeyRequestOptions(started.options.publicKey),
+      });
+      const verified = await api(`/account/reauth/passkey/finish?flow=${encodeURIComponent(started.flow)}`, {
+        method: "POST", json: passkeyCredentialJSON(credential),
+      });
+      await finish(close, verified.action_token);
+    } catch (error) {
+      toast(passkeyError(error, "Passkey verification failed."), "err");
+    } finally {
+      if (button instanceof HTMLButtonElement && button.isConnected) button.disabled = false;
+    }
+  };
+  modal("Verify it’s you", [
+    el("p", { class: "muted" }, "Sensitive account changes require a fresh identity check."),
+    el("div", { class: "field-row" }, el("label", {}, "Current password", password)),
+    el("div", { class: "field-row" }, el("label", {}, "Authenticator or recovery code", code),
+      el("span", { class: "hint" }, "A recovery code is one-time and will be consumed.")),
+  ], [
+    ["Cancel", "ghost", (close) => close()],
+    ...(hasLocalPasskey && !DEMO_MODE
+      ? [["Use passkey", "ghost", usePasskey]]
+      : []),
+    ["Verify", "primary", async (close) => {
+      if (!password.value || !code.value.trim()) {
+        toast("Enter your current password and authentication code.", "err");
+        return;
+      }
+      const button = document.activeElement;
+      if (button instanceof HTMLButtonElement) button.disabled = true;
+      try {
+        const verified = await api("/account/reauth/password", { method: "POST", json: {
+          purpose, password: password.value, code: code.value.trim(),
+        }});
+        password.value = "";
+        code.value = "";
+        await finish(close, verified.action_token);
+      } catch (error) {
+        toast(error.message, "err");
+      } finally {
+        if (button instanceof HTMLButtonElement && button.isConnected) button.disabled = false;
+      }
+    }],
+  ]);
+}
+
+function openPasswordChange(hasLocalPasskey) {
+  verifyAccountAction("change_password", hasLocalPasskey, async (actionToken) => {
+    const password = el("input", { type: "password", autocomplete: "new-password", minlength: "10", required: "" });
+    const confirm = el("input", { type: "password", autocomplete: "new-password", minlength: "10", required: "" });
+    modal("Change password", [
+      el("p", { class: "muted" }, "Identity verified. Enter your new password. Every other signed-in device will be signed out."),
+      el("div", { class: "field-row" }, el("label", {}, "New password", password)),
+      el("div", { class: "field-row" }, el("label", {}, "Confirm new password", confirm)),
+    ], [
+      ["Cancel", "ghost", (close) => close()],
+      ["Change password", "primary", async (close) => {
+        if (password.value.length < 10) return toast("Password must be at least 10 characters.", "err");
+        if (password.value !== confirm.value) return toast("Passwords do not match.", "err");
+        const button = document.activeElement;
+        if (button instanceof HTMLButtonElement) button.disabled = true;
+        try {
+          await api("/account/password", { method: "POST", json: {
+            action_token: actionToken, new_password: password.value,
+          }});
+          password.value = "";
+          confirm.value = "";
+          close();
+          toast("Password changed. Other sessions were signed out.", "ok");
+          renderPage();
+        } catch (error) {
+          toast(error.message, "err");
+        } finally {
+          if (button instanceof HTMLButtonElement && button.isConnected) button.disabled = false;
+        }
+      }],
+    ]);
+  });
+}
+
+function recoveryCodesModal(title, codes, message) {
+  const value = (codes || []).join("\n");
+  modal(title, [
+    el("div", { class: "alert danger" }, message || "Save these now. Bonghos cannot show these codes again."),
+    el("div", { class: "activation-recovery-codes account-recovery-plaintext" },
+      el("pre", { class: "mono" }, value),
+      el("button", {
+        class: "btn ghost small icon-button", type: "button", title: "Copy recovery codes",
+        "aria-label": "Copy recovery codes", onclick: () => copyText(value, "Recovery codes copied"),
+      }, solarIcon("copy-linear"))),
+  ], [["Done", "primary", (close) => { close(); renderPage(); }]]);
+}
+
+function showTOTPEnrollment(setup) {
+  const code = el("input", {
+    class: "otp-input", inputmode: "numeric", pattern: "[0-9]{6}", maxlength: "6",
+    autocomplete: "one-time-code", required: "", value: DEMO_MODE ? "123456" : "",
+  });
+  const otpWrap = el("div", { class: "otp-wrap account-totp-code", "aria-hidden": "true" },
+    ...Array.from({ length: 6 }, () => el("span", {}, "")));
+  const qrBox = el("div", { class: "qr-box hidden" });
+  const svgOK = typeof setup.qr_svg === "string" &&
+    setup.qr_svg.startsWith("<svg ") && !/<script|onload=|xlink:href/i.test(setup.qr_svg);
+  if (svgOK) {
+    qrBox.innerHTML = setup.qr_svg;
+    qrBox.classList.remove("hidden");
+  }
+  const secretRow = el("div", { class: "activation-secret-row account-totp-secret" },
+    el("code", { class: "activation-secret mono" }, setup.secret),
+    el("button", {
+      class: "btn ghost small icon-button", type: "button", title: "Copy secret key",
+      "aria-label": "Copy secret key", onclick: () => copyText(setup.secret, "Secret key copied"),
+    }, solarIcon("copy-linear")));
+  modal("Replace authenticator", [
+    el("p", { class: "muted" }, "Scan the new QR code, then enter its six-digit code. Your current authenticator remains active until this succeeds."),
+    qrBox,
+    el("details", { class: "activation-manual", open: svgOK ? null : "" },
+      el("summary", {}, "Can’t scan the QR code?"), secretRow),
+    el("label", { class: "otp-label account-totp-label" }, "New authenticator code", otpWrap, code),
+  ], [
+    ["Cancel", "ghost", (close) => close()],
+    ["Replace authenticator", "primary", async (close) => {
+      if (!/^\d{6}$/.test(code.value)) {
+        otpWrap.classList.add("error");
+        return toast("Enter the six-digit code from the new authenticator.", "err");
+      }
+      const button = document.activeElement;
+      if (button instanceof HTMLButtonElement) button.disabled = true;
+      try {
+        const result = await api("/account/totp/finish", { method: "POST", json: {
+          setup_token: setup.setup_token, code: code.value,
+        }});
+        close();
+        recoveryCodesModal("New recovery codes", result.recovery_codes,
+          "Your authenticator was replaced and every previous recovery code was revoked. Save this new set now.");
+      } catch (error) {
+        otpWrap.classList.add("error");
+        toast(error.message, "err");
+      } finally {
+        if (button instanceof HTMLButtonElement && button.isConnected) button.disabled = false;
+      }
+    }],
+  ]);
+  installOTPControl(code, otpWrap);
+  syncOTPCells(code, otpWrap);
+}
+
+function openTOTPChange(hasLocalPasskey) {
+  verifyAccountAction("change_totp", hasLocalPasskey, async (actionToken) => {
+    const setup = await api("/account/totp/begin", { method: "POST", json: { action_token: actionToken } });
+    showTOTPEnrollment(setup);
+  });
+}
+
+function replaceRecoveryCodes(hasLocalPasskey, hasExistingCodes) {
+  const title = hasExistingCodes ? "Replace recovery codes" : "Generate recovery codes";
+  const message = hasExistingCodes
+    ? "Every current recovery code will be revoked. Save the new set when it appears."
+    : "Generate a set of one-time recovery codes and save it somewhere safe.";
+  verifyAccountAction("regenerate_recovery_codes", hasLocalPasskey, async (actionToken) => {
+    confirmModal(title, message, hasExistingCodes ? "Replace codes" : "Generate codes", async () => {
+      try {
+        const result = await api("/account/recovery-codes/regenerate", { method: "POST", json: { action_token: actionToken } });
+        recoveryCodesModal("New recovery codes", result.recovery_codes);
+      } catch (error) {
+        toast(error.message, "err");
+      }
+    }, false);
+  });
+}
+
+function accountCredentialsCard(hasLocalPasskey) {
+  const row = (icon, title, note, actionLabel, action) => el("div", { class: "account-security-row" },
+    el("span", { class: "account-security-icon", "aria-hidden": "true" }, solarIcon(icon)),
+    el("div", { class: "account-security-copy" }, el("strong", {}, title), el("span", { class: "muted" }, note)),
+    el("button", { class: "btn ghost small", onclick: action }, actionLabel));
+  return el("div", { class: "card account-security-list" },
+    row("lock-keyhole-linear", "Password", "Changing it signs out every other device.", "Change password", () => openPasswordChange(hasLocalPasskey)),
+    row("shield-keyhole-linear", "Authenticator (TOTP)", "Replace it only after the new authenticator code is confirmed.", "Change authenticator", () => openTOTPChange(hasLocalPasskey)));
+}
+
+function recoveryCodeCard(items, hasLocalPasskey) {
+  const available = items.filter((item) => !item.used_at).length;
+  const used = items.length - available;
+  const created = items.length ? items[0].created_at : null;
+  return el("div", { class: "card recovery-code-card" },
+    el("span", { class: "account-security-icon recovery-code-icon", "aria-hidden": "true" },
+      solarIcon("shield-keyhole-linear")),
+    el("div", { class: "recovery-code-summary" },
+      el("strong", {}, items.length ? `${available} of ${items.length} available` : "No recovery codes"),
+      el("span", { class: "muted" }, created
+        ? `Generated ${fmtTime(created)}${used ? ` · ${used} used` : ""}`
+        : "Generate a set before you need account recovery.")),
+    el("button", {
+      class: "btn ghost small",
+      onclick: () => replaceRecoveryCodes(hasLocalPasskey, items.length > 0),
+    }, solarIcon("restart-linear"), items.length ? "Replace codes" : "Generate codes"));
 }
 
 function openPasskeyEnrollment() {
@@ -4797,15 +5333,35 @@ function renamePasskey(passkey) {
   ]);
 }
 
-function removePasskey(passkey) {
+function removePasskey(passkey, hasLocalPasskey) {
   const name = passkey.name || "Passkey";
-  confirmModal("Remove passkey", `Remove “${name}”? Devices using it will no longer be able to sign in.`, "Remove", async () => {
-    try {
-      await api(`/passkeys/${passkey.id}`, { method: "DELETE", json: {} });
-      toast("Passkey removed.", "ok");
-      renderPage();
-    } catch (error) { toast(error.message, "err"); }
+  verifyAccountAction("remove_passkey", hasLocalPasskey, async (actionToken) => {
+    confirmModal("Remove passkey", `Remove “${name}”? Devices using it will no longer be able to sign in.`, "Remove", async () => {
+      try {
+        await api(`/passkeys/${passkey.id}`, { method: "DELETE", json: { action_token: actionToken } });
+        toast("Passkey removed.", "ok");
+        renderPage();
+      } catch (error) { toast(error.message, "err"); }
+    });
   });
+}
+
+function passkeyRowActions(passkey, hasLocalPasskey) {
+  const actions = [
+    { label: "Rename", icon: "pen-new-square-linear", run: () => renamePasskey(passkey) },
+    { label: "Remove", icon: "trash-bin-trash-linear", danger: true, run: () => removePasskey(passkey, hasLocalPasskey) },
+  ];
+  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+    ...actions.map((action) => el("button", {
+      class: "btn " + (action.danger ? "danger" : "ghost") + " small",
+      type: "button", onclick: action.run,
+    }, action.label)));
+  const mobile = overflowActionsMenu(`Actions for ${passkey.name || "passkey"}`,
+    actions.map((action) => el("button", {
+      class: "action-menu-item" + (action.danger ? " danger" : ""),
+      type: "button", role: "menuitem", onclick: action.run,
+    }, solarIcon(action.icon), action.label)), "mobile-row-actions");
+  return el("div", { class: "responsive-row-actions passkey-row-actions" }, desktop, mobile);
 }
 
 function securitySectionHead(title, description, action = null) {
@@ -4814,7 +5370,7 @@ function securitySectionHead(title, description, action = null) {
     action);
 }
 
-function passkeyCard(passkeys) {
+function passkeyCard(passkeys, hasLocalPasskey) {
   const supported = DEMO_MODE || passkeysSupported();
   const currentRP = location.hostname.toLowerCase();
   const addButton = el("button", {
@@ -4836,22 +5392,13 @@ function passkeyCard(passkeys) {
           el("div", { class: "passkey-row-title" },
             el("strong", {}, passkey.name || "Passkey"),
             el("span", { class: "tag passkey-kind" }, kind)),
-          el("span", { class: "passkey-row-origin" },
-            isCurrentRP ? "Works on this panel address" : `Added on ${passkey.rp_id || "another address"}`,
-            !isCurrentRP ? el("span", { class: "tag passkey-other-origin" }, "Different address") : null),
-          el("span", { class: "passkey-row-meta muted" },
+          el("div", { class: "passkey-row-details muted" },
+            el("span", { class: "passkey-row-origin" },
+              isCurrentRP ? "This panel address" : `Added on ${passkey.rp_id || "another address"}`),
+            !isCurrentRP ? el("span", { class: "tag passkey-other-origin" }, "Different address") : null,
             el("span", {}, `Added ${fmtTime(passkey.created_at)}`),
             el("span", {}, passkey.last_used_at ? `Last used ${fmtTime(passkey.last_used_at)}` : "Not used yet"))),
-        overflowActionsMenu(`Actions for ${passkey.name || "passkey"}`, [
-          el("button", {
-            class: "action-menu-item", type: "button", role: "menuitem",
-            onclick: () => renamePasskey(passkey),
-          }, solarIcon("pen-new-square-linear"), "Rename"),
-          el("button", {
-            class: "action-menu-item danger", type: "button", role: "menuitem",
-            onclick: () => removePasskey(passkey),
-          }, solarIcon("trash-bin-trash-linear"), "Remove"),
-        ], "passkey-row-actions"));
+        passkeyRowActions(passkey, hasLocalPasskey));
     }))
     : el("div", { class: "card passkey-empty" },
       el("strong", {}, "No passkeys added"),
@@ -4870,13 +5417,14 @@ function passkeyCard(passkeys) {
 
 async function pageSecurity(main) {
   const canViewSystemSecurity = can("server.configuration.manage");
-  const [activity, host, passkeys] = await Promise.all([
+  const [activity, host, passkeys, recoveryCodes] = await Promise.all([
     canViewSystemSecurity ? api("/activity").catch(() => []) : Promise.resolve([]),
     canViewSystemSecurity ? api("/host").catch(() => null) : Promise.resolve(null),
     api("/passkeys").catch(() => []),
+    api("/account/recovery-codes").catch(() => []),
   ]);
-  const securityActions = /^(login_|passkey_|invitation_|role_|account_|sessions_|user_)/;
-  const securityActivity = (activity || []).filter((entry) => securityActions.test(String(entry.action || ""))).slice(0, 8);
+  const hasLocalPasskey = accountHasLocalPasskey(passkeys || []);
+  const securityActivity = (activity || []).filter(isSecurityActivity).slice(0, 8);
   const secureConnection = location.protocol === "https:";
   const bindAddress = String(host?.bind_address || "").trim();
   const localListener = /^(localhost|127(?:\.|$)|::1$)/i.test(bindAddress);
@@ -4905,13 +5453,33 @@ async function pageSecurity(main) {
       `${listenerAddress}. ${localListener ? "A tunnel or reverse proxy may still provide external access." : "Restrict access with a firewall or trusted reverse proxy."}`,
       !localListener));
   }
+  const protectionSection = el("section", {
+    id: "account-protection-details",
+    class: "security-protection-details hidden",
+  },
+    securitySectionHead("Account protection", "Security controls currently protecting your account and this panel."),
+    el("div", { class: "card security-posture-card" },
+      el("div", { class: "security-posture-list" }, protectionItems)));
+  const protectionToggle = el("button", {
+    class: "btn ghost small security-yapping-toggle",
+    type: "button",
+    "aria-controls": "account-protection-details",
+    "aria-expanded": "false",
+    onclick: (event) => {
+      const button = event.currentTarget;
+      const showing = protectionSection.classList.toggle("hidden") === false;
+      button.setAttribute("aria-expanded", String(showing));
+      button.textContent = showing ? "Hide yapping" : "Show yapping";
+    },
+  }, "Show yapping");
   main.innerHTML = "";
   main.append(
     pageHeader("Security", "Manage your sign-in methods and review the protections around your account."),
-    ...passkeyCard(passkeys || []),
-    securitySectionHead("Account protection", "Security controls currently protecting your account and this panel."),
-    el("div", { class: "card security-posture-card" },
-      el("div", { class: "security-posture-list" }, protectionItems)),
+    securitySectionHead("Sign-in credentials", "Sensitive changes require your current password plus TOTP or a recovery code, or a user-verified passkey."),
+    accountCredentialsCard(hasLocalPasskey),
+    ...passkeyCard(passkeys || [], hasLocalPasskey),
+    securitySectionHead("Recovery codes", "One-time fallback codes. Their plaintext is shown only when generated and cannot be viewed again."),
+    recoveryCodeCard(recoveryCodes || [], hasLocalPasskey),
     ...(canViewSystemSecurity ? [securitySectionHead("Recent security activity", "Latest sign-in and account-management events.",
       el("button", { class: "btn ghost small", onclick: () => navigate("activity") }, solarIcon("history-linear"), "View all")),
     securityActivity.length
@@ -4924,7 +5492,9 @@ async function pageSecurity(main) {
             el("td", {}, String(entry.action || "").replace(/_/g, " ")),
             el("td", {}, entry.target || "Not available"),
             el("td", { class: "mono" }, entry.remote_addr || "Not available"))))))
-      : el("div", { class: "card" }, el("p", { class: "muted" }, "No recent sign-in or account-management activity."))] : []));
+      : el("div", { class: "card" }, el("p", { class: "muted" }, "No recent sign-in or account-management activity."))] : []),
+    el("div", { class: "security-yapping-toggle-row" }, protectionToggle),
+    protectionSection);
 }
 
 const BOT_EVENT_FIELDS = [
@@ -5210,7 +5780,31 @@ async function pageSettings(main) {
             host.service_bonghos, host.systemd),
           settingsServiceCard("Minecraft server", "bonghos-minecraft.service",
             "Active server pack and Java process.",
-            host.service_minecraft, host.systemd))) : null)));
+            host.service_minecraft, host.systemd))) : null)),
+    el("footer", { class: "settings-footer" },
+      el("div", { class: "settings-footer-line" }, "Made by ",
+        el("a", {
+          class: "settings-footer-author",
+          href: "https://github.com/Chansovisoth",
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
+          el("i", { class: "fa fa-github", "aria-hidden": "true" }),
+          "Chansovisoth"),
+        " · Bonghos © 2026."),
+      el("div", { class: "settings-footer-line" },
+        "Open-source software · ",
+        el("a", {
+          href: "https://github.com/Chansovisoth/Bonghos/blob/main/LICENSE",
+          target: "_blank",
+          rel: "noopener noreferrer",
+        }, "GNU AGPL v3 or later"),
+        " · No warranty · ",
+        el("a", {
+          href: "https://github.com/Chansovisoth/Bonghos",
+          target: "_blank",
+          rel: "noopener noreferrer",
+        }, "Source"))));
 }
 
 // ---------------------------------------------------------------------------
@@ -5514,3 +6108,4 @@ else {
   installOTPControl();
   boot();
 }
+startConnectivityMonitor();

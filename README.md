@@ -194,6 +194,19 @@ cd ~/bonghos-source
 ./setup.sh
 ```
 
+The installer creates `~/.local/bin/bonghos`, a managed per-user command that
+remembers the selected runtime directory, including custom `--home` locations.
+If `~/.local/bin` was not already in the current shell's `PATH`, open a new
+login shell or run:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+After that, commands such as `bonghos version`, `bonghos doctor` and
+`bonghos console` work without the full executable path. Repair recreates the
+launcher, and uninstall removes it only when it is managed by Bonghos.
+
 ### From an extracted source archive
 
 ```bash

@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Password, authenticator and recovery-code changes require fresh verification
+  with the current password plus TOTP or a one-time recovery code, or with a
+  user-verified passkey. Five-minute action grants are single-use, purpose-bound
+  and tied to the exact browser session. Password and TOTP changes revoke every
+  other session; TOTP replacement keeps the old secret active until the new
+  authenticator is confirmed and then rotates all recovery codes.
+- Login now has a distinct recovery-code mode instead of forcing one-time
+  recovery codes through the six TOTP cells. Numeric-only hexadecimal recovery
+  codes are preserved correctly, and a code is consumed only after the password
+  and account state also pass authentication.
 - WebSocket subscriptions now use an explicit topic allowlist. Activity,
   backup, schedule and console-command events require their matching backend
   permissions; unknown topics are rejected instead of inheriting
@@ -71,6 +81,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The Security page now supports changing the current account password,
+  replacing its TOTP authenticator, and viewing recovery-code creation and use
+  metadata without exposing stored code hashes. Recovery codes can be replaced
+  as a complete set whose plaintext is shown once.
+- The installer now creates a managed `~/.local/bin/bonghos` command, including
+  the selected runtime home so custom `--home` installations can use short CLI
+  commands. Update and repair recreate it; uninstall removes only Bonghos's own
+  launcher and never overwrites an unrelated command.
 - WebAuthn passkeys can now be enrolled, renamed and removed from Security, then used
   for username-free sign-in. Enrollment requires password and TOTP
   re-verification, discoverable credentials and user verification; the native

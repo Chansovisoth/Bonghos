@@ -42,7 +42,7 @@ func TestEverySQLStatementMatchesTheSchema(t *testing.T) {
 		if d.IsDir() {
 			// Vendored dependencies carry their own SQL and schemas.
 			switch d.Name() {
-			case "third_party", "testdata", "node_modules", ".git", "web":
+			case "bin", "third_party", "testdata", "node_modules", ".git", "web":
 				return filepath.SkipDir
 			}
 			return nil

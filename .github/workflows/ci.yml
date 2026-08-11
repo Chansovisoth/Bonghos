@@ -23,6 +23,10 @@ jobs:
           go-version-file: source/go.mod
           cache-dependency-path: source/go.sum
 
+      - name: Build Web UI
+        working-directory: source
+        run: make web
+
       - name: gofmt
         working-directory: source
         run: |
