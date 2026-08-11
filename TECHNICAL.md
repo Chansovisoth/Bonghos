@@ -1,0 +1,311 @@
+# Bonghos Technical Reference
+
+This document contains the implementation, architecture, security, storage, development, and validation details intentionally kept out of the user-focused [README](README.md).
+
+## Architecture
+
+Bonghos runs natively on Linux. It does not use Docker, Compose, Kubernetes, or another container runtime.
+
+```text
+systemd user manager
+|
+|-- bonghos.service
+|   `-- Bonghos control plane
+|       |-- Embedded Web UI
+|       |-- REST API and WebSocket API
+|       |-- Authentication and authorization
+|       `-- Scheduler, imports, backups, bots, and monitoring
+|
+`-- bonghos-minecraft.service
+    `-- Bonghos supervisor
+        `-- Selected server startup script
+            `-- Java / Minecraft
+```
+
+The control panel and Minecraft run as a normal Linux user. Bonghos does not require root.
+
+### Process ownership
+
+systemd and the Bonghos supervisor own Minecraft's lifecycle. The optional tmux session is only a console client:
+
+```text
+bonghos console
+    `-- tmux session named "bonghos"
+        `-- console client
+            `-- framed Unix-domain socket
+                `-- Bonghos supervisor
+                    `-- Minecraft standard input and output
+```
+
+Killing the tmux session does not stop, restart, or signal Minecraft. Minecraft can run without tmux installed.
+
+### Technology stack
+
+| Layer | Choice |
+|---|---|
+| Backend, CLI, and supervisor | Go 1.26.5 |
+| Database | SQLite with WAL, foreign keys, and versioned migrations |
+| Frontend | Dependency-free HTML, CSS, and JavaScript embedded with Go `embed` |
+| Process management | systemd user services |
+| Console transport | Framed Unix-domain socket |
+| Backups | `tar.zst`, with `tar.gz` fallback |
+
+Production ships as one executable with the Web UI compiled into it. There is no Node.js, npm, or separate frontend process at runtime.
+
+Archive imports use built-in readers for `.zip`, `.tar`, `.tar.gz`, and `.tar.zst`. Bonghos does not delegate extraction to an external archive utility.
+
+The frontend deliberately differs from the earlier React/TypeScript/Vite/Tailwind proposal. The dependency-free implementation builds reproducibly without a JavaScript supply chain, but currently has no Playwright or equivalent browser automation. The rationale and frontend workflow are documented in [source/web/README.md](source/web/README.md).
+
+## Runtime data layout
+
+The source checkout and installed runtime are separate:
+
+```text
+~/bonghos-source/       cloned or extracted source
+~/bonghos/              installed runtime and user data
+```
+
+The runtime root has three top-level areas:
+
+```text
+<BONGHOS_HOME>/
+|-- servers/            Minecraft worlds, mods, configs, and scripts
+|-- backups/            portable backup archives
+`-- system/             executable, config, database, logs, runtime, and temp data
+```
+
+Minecraft files remain normal files. They can be edited over SSH, SFTP, or directly on disk. Bonghos watches for outside changes and does not use SQLite as a second source of truth for server files.
+
+SQLite stores Bonghos metadata such as users, projects, schedules, audit records, and operational state. Backups are normal archives that can be extracted without Bonghos, for example:
+
+```bash
+tar --zstd -xf 2026-08-02_04-00-00_full.tar.zst
+```
+
+### Runtime location resolution
+
+Bonghos resolves its runtime directory in this order:
+
+1. The global `--home DIR` CLI flag
+2. `BONGHOS_HOME`
+3. `$HOME/bonghos`
+
+Examples:
+
+```bash
+bonghos --home /mnt/storage/bonghos doctor
+BONGHOS_HOME=/mnt/storage/bonghos bonghos doctor
+```
+
+The installer creates `~/.local/bin/bonghos` as a managed launcher instead of a simple symlink. This lets custom runtime locations remain associated with the short command. Repair recreates the launcher; uninstall removes it only if Bonghos owns it.
+
+## Portability and migration
+
+Paths stored by Bonghos are relative to the runtime root where possible, so the runtime can be moved or copied.
+
+### Move to another directory
+
+```bash
+systemctl --user stop bonghos-minecraft.service bonghos.service
+mv ~/bonghos /mnt/storage/bonghos
+/mnt/storage/bonghos/system/bin/bonghos --home /mnt/storage/bonghos doctor --repair
+/mnt/storage/bonghos/system/bin/bonghos --home /mnt/storage/bonghos service repair
+```
+
+### Copy to another Linux machine
+
+```bash
+rsync -a ~/bonghos/ user@new-host:~/bonghos/
+ssh user@new-host
+~/bonghos/system/bin/bonghos doctor --repair
+~/bonghos/system/bin/bonghos service repair
+```
+
+Because the account database and `system/config/secret.key` travel with the runtime, accounts, authenticator secrets, passkey records, and notification bot credentials remain usable after migration when the WebAuthn origin is unchanged. Losing `secret.key` makes encrypted TOTP secrets and notification bot tokens unrecoverable.
+
+Portable exports provide an alternative:
+
+```bash
+bonghos export --output bonghos-export.tar.zst
+bonghos import <archive.tar.zst>
+```
+
+Exports exclude the account database and `secret.key` unless `--include-secrets` is supplied. An export containing secrets must be stored as carefully as the live runtime.
+
+### Update safety
+
+`./setup.sh --update` builds and tests in a temporary directory before touching the installed executable. It checks the database, preserves a safety copy of critical configuration and data, replaces the executable atomically, repairs paths and services, and rolls back if post-update health checks fail.
+
+`./setup.sh --update --pull` accepts only a clean Git worktree and fast-forward-only history. It does not run `reset --hard`, `clean -fd`, `stash`, an automatic merge, or a rebase. Local changes or diverged history stop the update for manual review.
+
+Updates preserve `servers/`, `backups/`, `bonghos.toml`, `secret.key`, `bonghos.db`, and `logs/`.
+
+## Accounts and authorization
+
+There is no public registration. Setup creates the first Owner; an Owner or Admin invites other users through single-use activation links.
+
+| Capability | Owner | Admin | Member | Viewer |
+|---|:---:|:---:|:---:|:---:|
+| View status and players | Yes | Yes | Yes | Yes |
+| Start, stop, and restart | Yes | Yes | Yes | No |
+| View console | Yes | Yes | No | Yes |
+| Use console | Yes | Yes | No | No |
+| Force stop | Yes | Yes | No | No |
+| Manage players | Yes | Yes | No | No |
+| Edit files, configuration, and JVM settings | Yes | Yes | No | No |
+| Import, upload, and download projects | Yes | Yes | No | No |
+| Create backups, restore, and manage schedules | Yes | Yes | No | No |
+| Manage users | Yes | Limited | No | No |
+| Manage host, security, and portability settings | Yes | No | No | No |
+
+Admins cannot create, modify, demote, or delete Owners. Users cannot raise their own role. The final active Owner cannot be disabled, demoted, or deleted. These rules are enforced in backend authorization checks, not only hidden in the UI.
+
+Every account enrolls in TOTP. Recovery codes are one-use fallback credentials, stored as hashes and shown in plaintext only when generated. Passkeys use WebAuthn and are scoped to the site origin on which they were registered.
+
+## Networking model
+
+Bonghos binds to `127.0.0.1` by default. It does not modify firewall rules, router settings, port forwarding, reverse proxies, Cloudflare Tunnel, playit.gg, Tailscale, or VPN configuration.
+
+For remote administration, an operator can use an SSH tunnel:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 user@your-server
+```
+
+The panel can report whether Minecraft appears to be listening locally, but local listening does not prove that a game port is reachable from the public internet.
+
+When Bonghos is placed behind a reverse proxy or tunnel, the operator is responsible for TLS, stable origin configuration, trusted proxy settings, access policy, and upload limits. WebAuthn passkeys are bound by browser standards to their relying-party ID and origin; changing the panel's hostname or IP can require registering another passkey at the new origin.
+
+## Security design
+
+- Passwords are hashed with Argon2id.
+- TOTP secrets and notification bot tokens are encrypted with authenticated encryption.
+- Recovery codes are stored as one-way hashes and can be used once.
+- Passkeys use WebAuthn challenge-response verification.
+- Login performs dummy verification work and returns non-enumerating errors.
+- Authentication endpoints and other sensitive operations are rate limited.
+- Sessions are server-side; cookies use HttpOnly and SameSite protections.
+- State-changing browser requests require CSRF tokens.
+- Responses include a Content Security Policy and other security headers.
+- File access uses canonical path containment rather than string-prefix checks.
+- Archive extraction rejects traversal, absolute paths, symlink and hard-link escapes, decompression bombs, and configured size/file-count excesses.
+- Server-side URL downloads enforce SSRF protections, including address validation, redirect revalidation, HTTPS defaults, and size/disk-space limits.
+- Process launch uses argument arrays rather than concatenated shell commands.
+- The Web UI console talks only to the selected Minecraft process; it is not a Linux shell.
+- Audit records omit passwords, TOTP codes, recovery codes, session cookies, encryption keys, bot tokens, and sensitive URL parameters.
+
+Private vulnerability reports should follow [.github/SECURITY.md](.github/SECURITY.md).
+
+## Repository layout
+
+```text
+Bonghos/
+|-- setup.sh                 install, build, update, repair, and uninstall
+|-- README.md                user introduction and command reference
+|-- TECHNICAL.md             this technical reference
+|-- Tutorial.txt             complete operator walkthrough
+|-- LICENSE                  AGPL-3.0-only
+|-- scripts/                 repository maintenance and integration helpers
+|-- .github/                 CI, release, security, and contribution files
+`-- source/
+    |-- cmd/bonghos/         executable entry point and CLI
+    |-- internal/            implementation packages
+    |-- migrations/          versioned SQLite migrations
+    |-- web/src/             frontend source
+    |-- deploy/              systemd unit templates
+    |-- docs/                changelog
+    |-- third_party/         maintained local dependency replacements
+    `-- Makefile             development commands
+```
+
+Normal operators should not need to work inside `source/`.
+
+## Development
+
+From `source/`, use the existing Makefile targets:
+
+```bash
+make web          # rebuild the embedded frontend assets
+make fmt-check    # check Go formatting
+make vet          # run go vet
+make test         # run the test suite
+make build        # build ./bin/bonghos
+make run          # build and run with BONGHOS_HOME=./devhome
+make fmt          # format the Go tree
+make clean        # remove build artifacts
+```
+
+Or prepare and verify the development environment from the repository root:
+
+```bash
+./setup.sh --dev
+```
+
+The frontend has no JavaScript build tool. Edit `source/web/src/`, then run `make web` before Go builds so the generated embedded assets are current.
+
+The SQLite driver uses cgo. A `CGO_ENABLED=0` binary may link successfully but cannot open the database, so production builds must keep cgo enabled. Cross-building ARM64 from x86 additionally requires an ARM64 C compiler such as `gcc-aarch64-linux-gnu`.
+
+### Web UI branch integration
+
+Use the guarded helper instead of hand-merging the `webui` branch:
+
+```bash
+./scripts/integrate-webui.sh
+```
+
+With no flags, the helper fetches refs, tests the merge in a temporary worktree, validates it, and exits without updating `main`, pushing, or installing anything. Additional modes are:
+
+```bash
+./scripts/integrate-webui.sh --apply
+./scripts/integrate-webui.sh --apply --push
+./scripts/integrate-webui.sh --apply --push --install
+./scripts/integrate-webui.sh --race
+```
+
+If conflicts or validation failures occur, the helper leaves `main` untouched and preserves the temporary worktree for inspection.
+
+See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) before contributing.
+
+## Validation status and limitations
+
+This section describes the v0.2.0-rc.1 prerelease.
+
+### Automated coverage
+
+- Unit tests cover canonical path containment, archive safety, authenticated encryption, TOTP against the RFC 6238 vector, role permissions, scheduler next-run calculation, SSRF validation, slug generation, and running-process detection.
+- API tests drive the real HTTP handler through `httptest`, including login anti-enumeration behavior, CSRF rejection, session revocation, disabled accounts, Member/Viewer restrictions, Owner protections, and restore safety/scope handling.
+- Linux validation launches OpenJDK to check Java-process discovery and cleanup, but uses synthetic server-pack fixtures rather than a complete modded server.
+- Generated service units are checked with `systemd-analyze verify`, including custom runtime paths containing spaces.
+- The cgo-enabled ARM64 release binary is executed under ARM64 emulation and opens its SQLite database.
+
+### Remaining limitations
+
+- There are no automated browser-level tests. Web UI behavior is still verified manually.
+- Supervisor crash/restart/backoff behavior, boot autostart, unclean-shutdown recovery, tmux lifecycle, archive import, scheduled execution, and retention pruning need more real-system integration coverage.
+- A complete modded server has not yet been validated across long-running real hardware scenarios.
+- Boot and restart lifecycle behavior still needs broader testing with live systemd user managers.
+- The ARM64 build has not yet been tested on physical ARM hardware.
+- Interrupted URL downloads restart from zero; HTTP range resume is not implemented.
+
+Treat the prerelease as unproven for irreplaceable worlds until you have independent backups and have tested a restore yourself.
+
+## Roadmap boundaries
+
+Deferred features that the data model is intended to accommodate include:
+
+- CurseForge browsing, search, API keys, and project-link resolution
+- Modrinth browsing
+- Vanilla Java and Bedrock server types
+- Multiple simultaneously running servers and multiple physical nodes
+- In-game TPS, MSPT, JVM heap, chunk, and entity metrics through an optional mod
+- HTTP range-based download resumption
+
+The source-type and server-type models are already generalized for `curseforge`, `modrinth`, `manual-upload`, `direct-url`, and `existing-directory` sources, and for modded Java, vanilla Java, and vanilla Bedrock servers. Supporting those deferred types should not require replacing the core schema.
+
+Not planned: Docker or containers, billing, public registration, browser shell access, automatic network configuration, or required telemetry.
+
+## Acknowledgements and license
+
+Bonghos learns from the usability and reliability of BisectHosting, Hostinger, Apex Hosting, Shockbyte, Crafty Controller, and Pterodactyl. It copies none of their branding, proprietary assets, or layouts.
+
+Bonghos is licensed under [AGPL-3.0-only](LICENSE). If you run a modified version as a network service, the AGPL requires you to offer its users the corresponding source code.

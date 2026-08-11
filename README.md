@@ -1,190 +1,43 @@
 # Bonghos
 
-**A free-forever, open-source, self-hosted web control panel for modded Minecraft servers on Linux.**
+**A free, open-source, self-hosted web control panel for modded Minecraft servers on Linux.**
 
-*Bonghos* (បង្ហោះ) is the Khmer word for **hosting**.
+**Bonghos** (បង្ហោះ) is the Khmer word for **hosting**.
 
-- Repository: <https://github.com/Chansovisoth/Bonghos>
-- License: AGPL-3.0-only
-- Status: v0.2.0-rc.1 — prerelease, actively developed. See [Known limitations](#known-limitations).
+Bonghos lets you import, configure, run, monitor, schedule, back up, restore, and manage Minecraft Java Edition servers from a browser. It runs directly on your Linux machine with no Docker, cloud account, subscription, or required telemetry.
 
-Bonghos imports, configures, runs, monitors, schedules, backs up, restores and manages
-Minecraft Java Edition modded servers directly on Linux — no Docker, no cloud account,
-no subscription, no telemetry.
+> **Current release:** v0.2.0-rc.1 is a prerelease. Keep independent backups and test restores before using it with an important world.
 
----
+For implementation details, security design, data layout, development instructions, and current limitations, see [TECHNICAL.md](TECHNICAL.md).
 
-## Quick start
+## Key features
 
-```bash
-git clone https://github.com/Chansovisoth/Bonghos.git ~/bonghos-source
-cd ~/bonghos-source
-./setup.sh
-```
-
-That's the whole installation. The guided installer checks dependencies, builds
-everything, creates your Owner account with two-factor authentication, and offers to
-install the systemd services.
-
-Then open <http://127.0.0.1:8080>.
-
-**New here? Read [`Tutorial.txt`](Tutorial.txt)** — it has complete copyable instructions
-for everything from installation to backups to migration.
-
----
-
-## Free forever
-
-Bonghos is and will remain:
-
-- Free, with no paid tier, license key or subscription
-- Open source under AGPL-3.0-only
-- Usable with no Bonghos account, no advertisements and no required telemetry
-- Usable with no external database
-
-Any future telemetry would be disabled by default and strictly opt-in.
-
----
-
-## Features
-
-**Server projects**
-- Multiple stored projects; one runs at a time (v1)
-- Add packs by drag-and-drop upload, file picker, direct server-side URL download,
-  local archive, or importing an existing directory
-- Streaming uploads with progress, speed, ETA and cancellation
-- Server-side downloads that continue after you close the browser
-- Safe extraction with traversal, symlink, size and file-count protection
-- Automatic startup-script and JVM-configuration detection
-- 64×64 PNG server icons
-
-**Running servers**
-- Start, graceful stop, restart and force stop
-- Live console in the Web UI, in the terminal, or via an optional tmux session
-- Java selection and safe RAM/JVM argument editing
-- Restart policies with backoff and crash-loop protection
-- Autostart after reboot with unclean-shutdown recovery
-
-**Operations**
-- Process and host monitoring with historical charts
-- Online and historical player lists; kick, ban, whitelist and operator management
-- Persistent schedules that run without a browser (start/stop/restart/commands/
-  broadcasts/saves/backups), with timezones and multi-step warning sequences
-- Full, world-only and configuration-only backups, online or offline
-- Backup verification, retention policies and restore (including restore-as-new)
-- Constrained file manager scoped to the server directory
-
-**Accounts and security**
-- Multiple accounts with **mandatory** TOTP two-factor authentication, enrolled
-  by scanning a QR code in the terminal or the Web UI (with the secret and
-  `otpauth://` URI always shown as a fallback)
-- Owner / Admin / Member / Viewer roles enforced in the backend
-- Admin-created invitations; no public registration
-- Argon2id passwords, encrypted TOTP secrets, hashed one-use recovery codes
-- Anti-enumeration login, rate limiting, CSRF protection, audit logging
-
-**Portability**
-- One self-contained runtime directory you can move or copy anywhere
-- `doctor --repair` re-resolves everything after a move
-- Portable export/import archives
-
----
-
-## Architecture: no Docker, no containers
-
-Bonghos runs **natively** on Linux. There is no Dockerfile, no Compose file, no
-Kubernetes manifest, and no container runtime anywhere in the project.
-
-```
-systemd user manager
-    │
-    ├── bonghos.service
-    │       └── Bonghos control plane
-    │           ├── Embedded Web UI
-    │           ├── REST API + WebSocket API
-    │           ├── Authentication and authorization
-    │           └── Scheduler, imports, backups, monitoring
-    │
-    └── bonghos-minecraft.service
-            └── Bonghos supervisor
-                └── Selected modpack startup script
-                    └── Java / Minecraft
-```
-
-**systemd and the supervisor own Minecraft's lifecycle — not tmux.**
-
-tmux is an *optional console client*, created lazily only when you run
-`bonghos console`. Killing the tmux session, or the whole tmux server, does not stop,
-restart or signal Minecraft. Minecraft runs fine with tmux not installed at all.
-
-Optional console access:
-
-```
-bonghos console  →  tmux session `bonghos`  →  console client
-                                                    ↓
-                                        supervisor Unix socket
-                                                    ↓
-                                        running Minecraft console
-```
-
-Bonghos and Minecraft run as a **normal Linux user**. Root is never required.
-
----
-
-## Technology stack
-
-| Layer | Choice |
-|---|---|
-| Backend, CLI, supervisor | Go 1.26.5 |
-| Database | SQLite (WAL, foreign keys, versioned migrations) |
-| Frontend | Dependency-free HTML/CSS/JavaScript, embedded via Go `embed` |
-| Process management | systemd **user** services |
-| Console transport | Framed Unix-domain socket |
-| Backups | `tar.zst` (falls back to `tar.gz`) |
-
-Production ships as **one executable** with the Web UI compiled in. No Node.js, no
-npm, no separate frontend process at runtime.
-
-> **Known deviation — the frontend stack.** The specification asked for React,
-> TypeScript, Vite, Tailwind, shadcn-style components, TanStack Query, Motion, Recharts,
-> Vitest, React Testing Library, Playwright and pnpm. **None of that is present.** The
-> frontend is dependency-free HTML, CSS and JavaScript, chosen so the project builds
-> reproducibly offline with no JavaScript supply chain. The rationale is in
-> [`source/web/README.md`](source/web/README.md).
->
-> This is a real trade-off, not a free win. The visual design, layout, motion and
-> accessibility goals are met, and there is no build step to break — but the project
-> also has **no browser-level tests**, because Vitest, RTL and Playwright came with the
-> stack that was dropped and nothing replaced them. A frontend/backend protocol
-> mismatch that silently disabled every live update shipped in v0.1.0 for exactly this
-> reason. If you want the specified stack, this is the piece to revisit first.
-
----
-
-## Repository layout
-
-```
-Bonghos/
-├── setup.sh          Install, build, update, repair, uninstall
-├── Tutorial.txt      Complete instructions for users
-├── README.md         This file
-├── LICENSE           AGPL-3.0-only
-├── .github/          Community files, issue templates, CI
-└── source/           Everything developers need
-    ├── cmd/bonghos/  Executable entry point
-    ├── internal/     Implementation packages
-    ├── migrations/   Versioned SQLite migrations
-    ├── web/src/      Frontend source
-    ├── deploy/       systemd unit templates
-    ├── docs/         CHANGELOG
-    └── Makefile      Developer commands
-```
-
-Normal users never need to look inside `source/`.
-
----
+- Manage multiple server projects, with one active server at a time
+- Stay fully self-hosted with no paid tier, Bonghos account, advertisements, or external database
+- Import an existing directory, upload an archive, or download a server pack from a URL
+- Detect common startup scripts, modloader/game versions, Java installations, and JVM memory arguments
+- Start, gracefully stop, restart, or force-stop a server
+- Use the live console from the Web UI or terminal
+- Monitor CPU, memory, disk, load, temperatures, and player activity
+- Manage players, operators, bans, and the whitelist
+- Create scheduled actions, announcements, saves, and backups
+- Make full, world-only, or configuration-only backups; verify and restore them
+- Browse and edit server files, properties, icons, and startup settings
+- Send selected server and player notifications through Discord or Telegram bots
+- Invite users with Owner, Admin, Member, or Viewer access
+- Protect accounts with mandatory TOTP, recovery codes, and optional passkeys
+- Move the self-contained Bonghos runtime to another disk or Linux machine
 
 ## Installation
+
+### Requirements
+
+- A 64-bit Linux system
+- Java 17 or 21 for Minecraft
+- Git, Go, and a C compiler for building from source
+- `tmux` only if you want the optional terminal console session
+
+Run the installer as your normal Linux user, not as root.
 
 ### From Git (recommended)
 
@@ -194,20 +47,7 @@ cd ~/bonghos-source
 ./setup.sh
 ```
 
-The installer creates `~/.local/bin/bonghos`, a managed per-user command that
-remembers the selected runtime directory, including custom `--home` locations.
-If `~/.local/bin` was not already in the current shell's `PATH`, open a new
-login shell or run:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-After that, commands such as `bonghos version`, `bonghos doctor` and
-`bonghos console` work without the full executable path. Repair recreates the
-launcher, and uninstall removes it only when it is managed by Bonghos.
-
-### From an extracted source archive
+### From an extracted release archive
 
 ```bash
 cd ~/Downloads/Bonghos-0.2.0-rc.1
@@ -215,319 +55,215 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-`setup.sh` and `Tutorial.txt` are at the top level of the archive.
+The installer checks dependencies, builds and tests Bonghos, creates the runtime directory, installs the `bonghos` command, guides you through the first Owner account, and can install the systemd user services.
 
-### Options
+By default, source and runtime data stay separate:
 
-```bash
-./setup.sh                  # guided install
-./setup.sh --dev            # verify development dependencies
-./setup.sh --build          # build and test without installing
-./setup.sh --update         # install the source present here
-./setup.sh --update --pull  # fast-forward Git, then update
-./setup.sh --repair         # repair installation and services
-./setup.sh --uninstall      # remove services and executable, keep data
-./setup.sh --home DIR       # custom runtime location
-./setup.sh --help
+```text
+~/bonghos-source/    source checkout
+~/bonghos/           servers, backups, configuration, and Bonghos data
 ```
 
-### Runtime dependencies
-
-Required: a 64-bit Linux system and Java 17 or 21 for Minecraft.
-Optional: `tmux` (console). Archive imports use built-in readers for `.zip`,
-`.tar`, `.tar.gz`, and `.tar.zst`; external archive extractors are not used.
-
-Build-time only: patched Go 1.26.5+ (older Go installations can select it
-automatically through `go.mod`), Git, and a C compiler (`gcc`, usually already
-present). The SQLite driver is a cgo package, so `CGO_ENABLED=0` builds link
-successfully but fail at the first database access — keep cgo enabled. Building
-for ARM64 from an x86 machine additionally needs `gcc-aarch64-linux-gnu`.
-
----
-
-## Directory structure
-
-Keep the source checkout and the installed runtime separate:
-
-```
-~/bonghos-source/     cloned or extracted source (the code)
-~/bonghos/            installed runtime (your data)
-```
-
-The runtime root contains exactly three things:
-
-```
-~/bonghos/
-├── servers/     real Minecraft files — worlds, mods, configs, scripts
-├── backups/     portable backup archives
-└── system/      Bonghos internals (bin, config, database, logs, runtime, temp)
-```
-
-Minecraft files stay **normal files**. Edit them over SSH, SFTP or with any editor —
-Bonghos watches for external changes and will not overwrite your manual edits. Backups
-are plain archives you can extract without Bonghos:
-
-```bash
-tar --zstd -xf 2026-08-02_04-00-00_full.tar.zst
-```
-
-SQLite stores only Bonghos metadata: users, schedules, audit records and operational
-state. It is never a second source of truth for Minecraft files.
-
-### Custom location
+To use another runtime location:
 
 ```bash
 ./setup.sh --home /mnt/storage/bonghos
-# or
-export BONGHOS_HOME=/mnt/storage/bonghos
 ```
 
-Resolution order: `--home`, then `BONGHOS_HOME`, then `$HOME/bonghos`.
-
----
-
-## Moving and migrating
-
-Paths are stored relative to the runtime root, so the whole directory is portable.
-
-**To another directory:**
+If `bonghos` is not found immediately after installation, open a new login shell or run:
 
 ```bash
-systemctl --user stop bonghos-minecraft.service bonghos.service
-mv ~/bonghos /mnt/storage/bonghos
-/mnt/storage/bonghos/system/bin/bonghos --home /mnt/storage/bonghos doctor --repair
-/mnt/storage/bonghos/system/bin/bonghos --home /mnt/storage/bonghos service repair
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-**To another computer:**
+## Setup
+
+During guided setup, you will:
+
+1. Choose the Bonghos runtime directory.
+2. Create the first Owner username and password.
+3. Scan a TOTP QR code and enter the six-digit code from your authenticator app.
+4. Save the one-time recovery codes somewhere safe.
+5. Decide whether to install the recommended systemd user services.
+
+Start the Web UI service:
 
 ```bash
-rsync -a ~/bonghos/ user@new-host:~/bonghos/
-~/bonghos/system/bin/bonghos doctor --repair
+systemctl --user enable --now bonghos.service
+systemctl --user status bonghos.service
 ```
 
-Because `system/config/secret.key` travels with it, accounts, authenticator apps and
-notification bots keep working. **Losing `secret.key` makes encrypted TOTP secrets
-and bot tokens permanently unrecoverable.**
-
-Or use portable exports:
+To let the user service start after boot without waiting for an interactive login, enable lingering once:
 
 ```bash
-bonghos export --output bonghos-export.tar.zst
-bonghos import <archive>
+sudo loginctl enable-linger "$USER"
 ```
 
----
-
-## Updating
-
-Bonghos updates from source. There is no Web UI button that silently downloads and
-installs unverified code.
+If systemd user services are unavailable, run Bonghos in the foreground:
 
 ```bash
-# Retrieve source and update in one command (clean Git checkout)
-cd ~/bonghos-source
-./setup.sh --update --pull
-
-# Retrieve manually, review, then update
-cd ~/bonghos-source
-git pull --ff-only
-./setup.sh --update
-
-# From a newly extracted source archive (no Git metadata)
-cd ~/Downloads/Bonghos-0.2.0
-./setup.sh --update
+bonghos serve
 ```
 
-Understanding the difference:
+Open <http://127.0.0.1:8080>, sign in, then:
 
-| Command | What it does |
-|---|---|
-| `git pull --ff-only` | Updates the local source checkout only |
-| `./setup.sh --update` | Builds and installs the source present here |
-| `./setup.sh --update --pull` | Fast-forwards a clean checkout, then updates |
+1. Add a server project from an archive, URL, or existing directory.
+2. Select its startup script and Java version.
+3. Set its memory limits and accept the Minecraft EULA.
+4. Start the server.
 
-Updates build and **run the tests in a temporary area first** — a failure stops the
-update before anything installed is touched. The executable is replaced atomically and
-rolled back automatically if health verification fails.
-
-`--pull` is fast-forward-only and **never** runs `reset --hard`, `clean -fd`, `stash`,
-an automatic merge or a rebase. If you have local changes or diverged history, it stops
-and shows you the commands to inspect the situation yourself.
-
-Always preserved: `servers/`, `backups/`, `bonghos.toml`, `secret.key`, `bonghos.db`,
-`logs/`.
-
----
-
-## Users and roles
-
-No public registration. The first Owner is created during setup; everyone else is
-invited by an Owner or Admin.
-
-| | Owner | Admin | Member | Viewer |
-|---|:--:|:--:|:--:|:--:|
-| View status, players | ✓ | ✓ | ✓ | ✓ |
-| Start / stop / restart | ✓ | ✓ | ✓ | |
-| Console (view / use) | ✓ | ✓ | | view |
-| Force stop | ✓ | ✓ | | |
-| Manage players | ✓ | ✓ | | |
-| Files, configuration, JVM | ✓ | ✓ | | |
-| Import / upload / download | ✓ | ✓ | | |
-| Backups, restore, schedules | ✓ | ✓ | | |
-| Manage users | ✓ | partial | | |
-| Security, host, portability | ✓ | | | |
-
-Admins cannot modify, demote, delete or create Owners, and nobody can raise their own
-role. The last active Owner can never be deleted or demoted. **All of this is enforced
-in the backend, not merely hidden in the interface.**
-
-TOTP is mandatory for every account, with its own secret and one-use recovery codes.
-Login errors are identical whether the username, password or code was wrong.
-
----
-
-## Networking is your responsibility
-
-Bonghos binds to `127.0.0.1` by default and **never** configures port forwarding,
-firewall rules, routers, tunnels, Cloudflare Tunnel, playit.gg, Tailscale, VPNs or
-reverse proxies. That stays entirely with you.
-
-For remote access, tunnel over SSH from your own machine:
+Bonghos listens on `127.0.0.1` by default. To reach it securely from another computer, create an SSH tunnel from that computer:
 
 ```bash
 ssh -L 8080:127.0.0.1:8080 user@your-server
 ```
 
-Bonghos shows its listening address and whether Minecraft appears to be listening
-locally — but local listening never proves public reachability.
+Then open <http://127.0.0.1:8080> locally. Bonghos does not configure routers, firewalls, reverse proxies, or tunnels for you.
 
----
+For a complete walkthrough, see [Tutorial.txt](Tutorial.txt).
 
-## Security
+## Updating
 
-- Argon2id password hashing; TOTP secrets encrypted with authenticated encryption
-- Anti-enumeration login with dummy verification work and rate limiting
-- Server-side sessions, HttpOnly + SameSite cookies, CSRF tokens, security headers, CSP
-- Canonical path containment everywhere (never string-prefix comparison)
-- Safe archive extraction: traversal, absolute paths, symlink and hard-link escapes,
-  decompression bombs, file-count and size limits
-- SSRF protection on URL downloads: HTTPS by default, blocked loopback/private/
-  link-local/metadata addresses, redirect revalidation, size and disk-space limits
-- Argument arrays instead of shell string concatenation; **no arbitrary shell execution
-  anywhere**, and the Web UI console is never a Linux shell
-- Audit logging that never records passwords, TOTP codes or secrets, session cookies,
-  encryption keys or sensitive URL parameters
+### Git installation
 
-Report vulnerabilities privately — see [`.github/SECURITY.md`](.github/SECURITY.md).
-
----
-
-## Development
+Retrieve and install the latest source in one command:
 
 ```bash
-cd source
-make build     # build into ./bin/bonghos
-make test      # run the test suite
-make vet       # go vet
-make run       # run with BONGHOS_HOME=./devhome
-make fmt       # gofmt
+cd ~/bonghos-source
+./setup.sh --update --pull
 ```
 
-Or verify your environment first with `./setup.sh --dev`.
-
-The frontend has no JavaScript build step: edit `source/web/src/` and rebuild to
-re-embed. Selected dependencies are maintained as local replacements under
-`source/third_party/`; remaining Go modules are verified through `go.sum` and
-the standard Go checksum database.
-
-To safely merge the `webui` branch into `main`, use the guarded integration helper:
+Or review the source update before installing it:
 
 ```bash
-./scripts/integrate-webui.sh
+cd ~/bonghos-source
+git pull --ff-only
+./setup.sh --update
 ```
 
-With no flags, it fetches the latest refs, tests the merge in a temporary worktree,
-runs validation, and exits without changing `main`, pushing, or installing anything.
-Use `--apply` to update local `main`, add `--push` to publish it, and add `--install`
-to install/restart the local `~/bonghos` service. If conflicts occur, `main` is
-untouched and the script leaves the temporary worktree in place for manual resolution.
+### Extracted release archive
 
-Contributions welcome — see [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md).
+Extract the new archive into a new source directory, then run:
 
----
+```bash
+cd ~/Downloads/Bonghos-NEW_VERSION
+./setup.sh --update
+```
 
-## Known limitations
+Updates build and test in a temporary area before replacing the installed executable. Server projects, backups, configuration, accounts, secrets, database records, and logs are preserved. If validation or health checks fail, the installed version is left in place or restored automatically.
 
-This is v0.2.0-rc.1. Being honest about what is and is not proven:
+## Commands
 
-- **Covered by unit tests** (`source/internal/*/`): canonical path containment,
-  archive-extraction safety, authenticated encryption, TOTP against the RFC 6238
-  vector, the role permission matrix, scheduler next-run calculation, SSRF URL
-  validation, slug generation, and running-process detection.
-- **Covered by API tests** (`source/internal/app/`): these drive the real HTTP handler
-  through `httptest` — login, resistance to account enumeration, CSRF rejection,
-  session revocation, disabled accounts, the exact Member and Viewer restrictions,
-  Owner protections, and restore safety and scope handling.
-- **Exercised manually, not yet under automated integration tests:** the supervisor's
-  crash/restart/backoff behaviour against real Minecraft, boot autostart and
-  unclean-shutdown recovery, tmux console lifecycle, archive import end to end,
-  scheduled execution, and retention pruning.
-- **No browser-level tests.** There is no Playwright or equivalent suite, so the Web UI
-  is verified by hand. A subscription-key mismatch that silently disabled every live
-  update survived release precisely because nothing tested the browser side; treat UI
-  behaviour as the least-proven part of the project.
-- **Not yet verified against a complete modded server on real hardware.** The Linux
-  suite now launches OpenJDK and verifies Java-process discovery and cleanup, but its
-  server-pack fixtures remain synthetic.
-- Generated systemd units pass `systemd-analyze verify`, including custom home paths
-  containing spaces. Boot and restart lifecycle behaviour still needs a live systemd
-  user manager.
-- The CGO-enabled ARM64 release binary is cross-built and run under ARM64 emulation,
-  including opening its SQLite database. Physical ARM hardware remains untested.
-- URL downloads restart from zero if interrupted (range-resume is designed for, not
-  implemented).
+Run `bonghos help` or `./setup.sh --help` on the server for the current built-in help.
 
-Do not treat this as production-ready for a server you care about until you have taken
-your own backups and tested a restore.
+### Installer and updater
 
----
+| Command | Purpose |
+|---|---|
+| `./setup.sh` | Guided production installation |
+| `./setup.sh --dev` | Prepare and verify development dependencies |
+| `./setup.sh --build` | Build and test without installing |
+| `./setup.sh --update` | Install the source currently in this directory |
+| `./setup.sh --update --pull` | Fast-forward a clean Git checkout, then update |
+| `./setup.sh --repair` | Repair the installation, services, and portable paths |
+| `./setup.sh --uninstall` | Remove services and the executable while keeping data |
+| `./setup.sh --home DIR` | Use a custom runtime directory |
+| `./setup.sh --yes` | Accept supported installer prompts non-interactively |
+| `./setup.sh --help` | Show every installer option |
 
-## Roadmap
+### Panel and server control
 
-**Deferred from v1, kept extensible:**
+| Command | Purpose |
+|---|---|
+| `bonghos serve` | Run the Web UI and API in the foreground |
+| `bonghos version` | Print the installed version |
+| `bonghos server list` | List server projects |
+| `bonghos server import <directory> [display name]` | Copy an existing server into Bonghos |
+| `bonghos server select <slug-or-id>` | Select the active project |
+| `bonghos server start` | Start the active server |
+| `bonghos server stop` | Save and stop the active server gracefully |
+| `bonghos server restart` | Save, stop fully, then start again |
+| `bonghos server force-stop` | Kill a stuck server immediately; recent changes may be lost |
+| `bonghos console` | Create or attach the optional tmux console session |
+| `bonghos console --direct` | Attach directly without tmux |
 
-- CurseForge browsing, search, API keys and project-link resolution
-- Modrinth browsing
-- Vanilla Java and Bedrock server types
-- Multiple simultaneously running servers, multiple physical nodes
-- In-game metrics (TPS, MSPT, JVM heap, chunk and entity counts) via an optional mod
-- HTTP range-based download resumption
+### Accounts
 
-The source-type and server-type models are already generalized
-(`curseforge`/`modrinth`/`manual-upload`/`direct-url`/`existing-directory`;
-`minecraft-java-modded`/`minecraft-java-vanilla`/`minecraft-bedrock-vanilla`) so these
-can be added without redesigning the schema.
+| Command | Purpose |
+|---|---|
+| `bonghos setup` | Run first-account and service setup |
+| `bonghos admin create` | Create the first Owner if none exists |
+| `bonghos user list` | List accounts and their status |
+| `bonghos user invite [admin\|member\|viewer]` | Create a single-use invitation |
+| `bonghos user disable <username>` | Disable an account and revoke its sessions |
+| `bonghos user enable <username>` | Re-enable an account |
+| `bonghos user revoke-sessions <username>` | Sign an account out everywhere |
+| `bonghos user reset-password <username>` | Set a new password and revoke existing sessions |
 
-**Never planned:** Docker or containers, billing, public registration, browser shell
-access, automatic network configuration, required telemetry.
+### Backups and portability
 
----
+| Command | Purpose |
+|---|---|
+| `bonghos backup <world\|full\|configuration>` | Create a backup of the active project |
+| `bonghos backup list` | List backups for the active project |
+| `bonghos backup verify <backup-id>` | Check an archive and its checksum again |
+| `bonghos backup restore <backup-id>` | Restore a backup while the server is stopped |
+| `bonghos export --output <file.tar.zst>` | Create a portable export without account secrets |
+| `bonghos export --include-secrets --output <file.tar.zst>` | Export accounts and secrets too; protect this archive |
+| `bonghos import [--force] <archive.tar.zst>` | Import a portable Bonghos export |
 
-## Acknowledgements
+Limit an export to one area with `--scope complete`, `configuration_only`, `system_data`, `servers`, or `backups`:
 
-Bonghos learns from the usability and reliability of BisectHosting, Hostinger, Apex
-Hosting, Shockbyte, Crafty Controller and Pterodactyl. It copies none of their branding,
-proprietary assets or layouts.
+```bash
+bonghos export --scope servers --output bonghos-servers.tar.zst
+```
 
-It grew out of a hand-rolled tmux autostart script — which is exactly what the
-systemd + supervisor architecture replaces.
+Restore only part of a backup with:
 
----
+```bash
+bonghos backup restore <backup-id> --scope world_only
+bonghos backup restore <backup-id> --scope configuration_only
+```
+
+### Maintenance and services
+
+| Command | Purpose |
+|---|---|
+| `bonghos doctor` | Diagnose the installation |
+| `bonghos doctor --repair` | Apply safe automatic repairs |
+| `bonghos doctor --fix-permissions` | Restore expected file permissions |
+| `bonghos doctor --json` | Print diagnostic results as JSON |
+| `bonghos database checkpoint` | Check SQLite integrity and checkpoint its WAL |
+| `bonghos fix-permissions` | Restore expected file permissions |
+| `bonghos service install` | Install and enable the user services |
+| `bonghos service status` | Show control-panel and Minecraft service status |
+| `bonghos service repair` | Regenerate service files for the current runtime path |
+| `bonghos service uninstall` | Remove the user services without deleting data |
+
+Useful systemd commands:
+
+```bash
+systemctl --user status bonghos.service
+systemctl --user restart bonghos.service
+journalctl --user -u bonghos.service -f
+journalctl --user -u bonghos-minecraft.service -f
+```
+
+Every CLI command supports a custom runtime directory through either form:
+
+```bash
+bonghos --home /mnt/storage/bonghos <command>
+BONGHOS_HOME=/mnt/storage/bonghos bonghos <command>
+```
+
+## More documentation
+
+- [Complete user walkthrough](Tutorial.txt)
+- [Technical reference](TECHNICAL.md)
+- [Changelog](source/docs/CHANGELOG.md)
+- [Security policy](.github/SECURITY.md)
+- [Contributing guide](.github/CONTRIBUTING.md)
 
 ## License
 
-AGPL-3.0-only. See [`LICENSE`](LICENSE).
-
-If you run a modified Bonghos as a network service, the AGPL requires you to offer your
-users the corresponding source code.
+Bonghos is free and open-source software licensed under [AGPL-3.0-only](LICENSE).
