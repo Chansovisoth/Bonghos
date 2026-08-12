@@ -25,12 +25,12 @@ func TestSenderTelegram(t *testing.T) {
 	sender := NewSender()
 	sender.TelegramBaseURL = server.URL
 	err := sender.Send(context.Background(), Target{
-		Provider: ProviderTelegram, Token: "123456789:telegram_token_secret", DestinationID: "-1001234567890",
+		Provider: ProviderTelegram, Token: "123456789:telegram_token_secret", DestinationID: "-1001234567890", ThreadID: 42,
 	}, "Server ready")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if received["chat_id"] != "-1001234567890" || received["text"] != "Server ready" {
+	if received["chat_id"] != "-1001234567890" || received["text"] != "Server ready" || received["message_thread_id"] != float64(42) {
 		t.Fatalf("payload = %+v", received)
 	}
 }
@@ -83,6 +83,137 @@ func TestTelegramNetworkErrorDoesNotExposeToken(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), token) {
 		t.Fatalf("network error exposed token: %v", err)
+	}
+}
+
+func TestDiscoverTelegramGroupsReturnsUniqueGroupChoices(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/getMe"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"bonghos_test_bot"}}`))
+		case strings.HasSuffix(r.URL.Path, "/getUpdates"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":[
+				{"message":{"chat":{"id":42,"type":"private","username":"owner"}}},
+				{"message":{"chat":{"id":-100222,"type":"supergroup","title":"Projects"}}},
+				{"message":{"message_id":101,"message_thread_id":99,"is_topic_message":true,"chat":{"id":-100222,"type":"supergroup","title":"Projects","is_forum":true},"reply_to_message":{"forum_topic_created":{"name":"Announcements"}}}},
+				{"message":{"message_id":102,"message_thread_id":100,"is_topic_message":true,"chat":{"id":-100222,"type":"supergroup","title":"Projects","is_forum":true},"reply_to_message":{"forum_topic_created":{"name":"Announcements"}}}},
+				{"my_chat_member":{"chat":{"id":-100111,"type":"group","title":"Alerts"}}},
+				{"my_chat_member":{"chat":{"id":-100333,"type":"group","title":"Removed"},"new_chat_member":{"status":"kicked"}}},
+				{"edited_message":{"chat":{"id":-100222,"type":"supergroup","title":"Projects"}}}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	sender := NewSender()
+	sender.TelegramBaseURL = server.URL
+	discovery, err := sender.DiscoverTelegramGroups(context.Background(), "123456789:telegram_discovery_secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discovery.BotUsername != "bonghos_test_bot" || len(discovery.Groups) != 2 {
+		t.Fatalf("discovery = %+v", discovery)
+	}
+	if discovery.Groups[0].Name != "Alerts" || discovery.Groups[1].Name != "Projects" {
+		t.Fatalf("groups are not sorted or deduplicated: %+v", discovery.Groups)
+	}
+	if !discovery.Groups[1].Forum || len(discovery.Groups[1].Topics) != 1 || discovery.Groups[1].Topics[0].Name != "Announcements" || discovery.Groups[1].Topics[0].ID != 100 {
+		t.Fatalf("forum topics = %+v", discovery.Groups[1])
+	}
+}
+
+func TestDiscoverTelegramGroupsIncludesSafeProfilePhoto(t *testing.T) {
+	const token = "123456789:telegram_photo_secret"
+	photo := []byte("\x89PNG\r\n\x1a\nprofile")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/getMe"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"bonghos_test_bot"}}`))
+		case strings.HasSuffix(r.URL.Path, "/getUpdates"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":[{"message":{"chat":{"id":-100111,"type":"group","title":"Alerts"}}}]}`))
+		case strings.HasSuffix(r.URL.Path, "/getChat"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":-100111,"type":"group","title":"Alerts","photo":{"small_file_id":"photo-small"}}}`))
+		case strings.HasSuffix(r.URL.Path, "/getFile"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"file_path":"photos/group.png"}}`))
+		case strings.HasPrefix(r.URL.Path, "/file/bot"):
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(photo)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	sender := NewSender()
+	sender.TelegramBaseURL = server.URL
+	sender.TelegramFileBaseURL = server.URL
+	discovery, err := sender.DiscoverTelegramGroups(context.Background(), token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(discovery.Groups) != 1 || discovery.Groups[0].PhotoFileID != "photo-small" {
+		t.Fatalf("discovery group = %+v", discovery.Groups)
+	}
+	if !strings.HasPrefix(discovery.Groups[0].PhotoDataURL, "data:image/png;base64,") {
+		t.Fatalf("photo data URL = %q", discovery.Groups[0].PhotoDataURL)
+	}
+}
+
+func TestDiscoverTelegramGroupsErrorDoesNotExposeToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"ok":false,"description":"Unauthorized"}`))
+	}))
+	defer server.Close()
+
+	const token = "123456789:telegram_discovery_secret"
+	sender := NewSender()
+	sender.TelegramBaseURL = server.URL
+	_, err := sender.DiscoverTelegramGroups(context.Background(), token)
+	if err == nil {
+		t.Fatal("discovery unexpectedly succeeded")
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("discovery error exposed token: %v", err)
+	}
+}
+
+func TestDispatcherTestSendsToEveryTelegramDestination(t *testing.T) {
+	store := testStore(t)
+	config, err := store.Create(CreateInput{
+		Name: "Telegram groups", Provider: ProviderTelegram,
+		Token: "123456789:telegram_multi_send_secret",
+		Destinations: []Destination{
+			{ID: "-1001111111111", Name: "Projects"},
+			{ID: "-1002222222222", Name: "Staff"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chatIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			ChatID string `json:"chat_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		chatIDs = append(chatIDs, payload.ChatID)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+	sender := NewSender()
+	sender.TelegramBaseURL = server.URL
+	dispatcher := &Dispatcher{Store: store, Sender: sender}
+	if err := dispatcher.Test(context.Background(), config.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(chatIDs) != 2 || chatIDs[0] != "-1001111111111" || chatIDs[1] != "-1002222222222" {
+		t.Fatalf("test notification chat IDs = %v", chatIDs)
 	}
 }
 

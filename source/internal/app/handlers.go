@@ -62,9 +62,12 @@ func (a *App) routes() http.Handler {
 	// --- notification bots -------------------------------------------------
 	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotList))
 	mux.HandleFunc("POST /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotCreate))
+	mux.HandleFunc("POST /api/bots/telegram/discover", a.requirePerm(authorization.PermSecurityManage, a.handleBotTelegramDiscover))
 	mux.HandleFunc("PATCH /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotUpdate))
 	mux.HandleFunc("DELETE /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotDelete))
 	mux.HandleFunc("POST /api/bots/{id}/test", a.requirePerm(authorization.PermSecurityManage, a.handleBotTest))
+	mux.HandleFunc("POST /api/bots/{id}/telegram/discover", a.requirePerm(authorization.PermSecurityManage, a.handleBotTelegramDiscoverExisting))
+	mux.HandleFunc("GET /api/bots/{id}/telegram/destinations/{destination}/photo", a.requirePerm(authorization.PermSecurityManage, a.handleBotTelegramGroupPhoto))
 
 	// --- servers ------------------------------------------------------------
 	mux.HandleFunc("GET /api/servers", a.requirePerm(authorization.PermServerView, a.handleServerList))

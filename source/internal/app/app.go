@@ -160,6 +160,7 @@ func (a *App) Serve(ctx context.Context) error {
 	go a.Sched.Run(ctx)
 	go a.metricsLoop(ctx)
 	go a.playerPollLoop(ctx)
+	go a.BotNotify.RunTelegramCommands(ctx)
 	go a.bootAutostart(ctx)
 	go a.Runner.attachConsole()
 

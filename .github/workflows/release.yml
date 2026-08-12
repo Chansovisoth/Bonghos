@@ -90,15 +90,16 @@ jobs:
           v="${{ steps.version.outputs.version }}"
           # The archive contains a single Bonghos-<version>/ directory, which
           # is the normal convention for a release tarball. setup.sh,
-          # Tutorial.txt, README.md, TECHNICAL.md, LICENSE and source/ sit
-          # directly inside it. There is no second nesting layer, so the user is
-          # one `cd` away from running ./setup.sh.
+          # Tutorial.txt, README.md, TECHNICAL.md, LICENSE, source/, scripts/
+          # and the environment placeholder sit directly inside it. There is no
+          # second nesting layer, so the user is one `cd` away from setup.sh.
           tar --exclude-vcs \
               --exclude='./bonghos-linux-*' \
               --exclude='./source/bin' \
               --transform "s,^\./,Bonghos-$v/," \
               -czf "Bonghos-$v-source.tar.gz" \
-              ./setup.sh ./Tutorial.txt ./README.md ./TECHNICAL.md ./LICENSE ./source ./.github
+              ./setup.sh ./Tutorial.txt ./README.md ./TECHNICAL.md ./LICENSE \
+              ./.env.development.example ./source ./scripts ./.github
 
       - name: Generate checksums
         run: sha256sum bonghos-linux-* Bonghos-*-source.tar.gz > SHA256SUMS.txt

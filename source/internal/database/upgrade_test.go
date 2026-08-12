@@ -17,6 +17,26 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 		VALUES ('existing-owner', 'hash', X'01', 'owner', 0, '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`INSERT INTO notification_bots
+		(name, provider, token_enc, destination_id, enabled,
+		 notify_server_started, notify_server_stopped, notify_player_joined, notify_player_left,
+		 created_at, updated_at)
+		VALUES ('existing-alerts', 'telegram', X'01', '-1001234567890', 1, 1, 1, 1, 1,
+		 '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TRIGGER notification_bots_limit_insert`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE notification_bot_telegram_state`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE notification_bot_discoveries`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE notification_bot_destinations`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`DROP TABLE passkeys`); err != nil {
 		t.Fatal(err)
 	}
@@ -71,11 +91,14 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if version, err := Version(upgraded); err != nil || version != 7 {
-		t.Fatalf("upgraded schema version = %d, %v; want 7", version, err)
+	if version, err := Version(upgraded); err != nil || version != 10 {
+		t.Fatalf("upgraded schema version = %d, %v; want 10", version, err)
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='passkeys'`).Scan(&table); err != nil {
 		t.Fatalf("passkeys migration was not applied: %v", err)
+	}
+	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='notification_bot_telegram_state'`).Scan(&table); err != nil {
+		t.Fatalf("Telegram command-state migration was not applied: %v", err)
 	}
 	var recoveryCreatedAt string
 	if err := upgraded.QueryRow(`SELECT created_at FROM recovery_codes LIMIT 1`).Scan(&recoveryCreatedAt); err != sql.ErrNoRows {
@@ -84,5 +107,15 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	var users int
 	if err := upgraded.QueryRow(`SELECT COUNT(*) FROM users WHERE username='existing-owner'`).Scan(&users); err != nil || users != 1 {
 		t.Fatalf("existing account count = %d, %v; want 1", users, err)
+	}
+	var destinations int
+	if err := upgraded.QueryRow(`SELECT COUNT(*) FROM notification_bot_destinations
+		WHERE bot_id=(SELECT id FROM notification_bots WHERE name='existing-alerts')`).Scan(&destinations); err != nil || destinations != 0 {
+		t.Fatalf("legacy Telegram destinations = %d, %v; want reset", destinations, err)
+	}
+	var destination string
+	if err := upgraded.QueryRow(`SELECT destination_id FROM notification_bots
+		WHERE name='existing-alerts'`).Scan(&destination); err != nil || destination != "" {
+		t.Fatalf("legacy Telegram destination field = %q, %v; want empty", destination, err)
 	}
 }

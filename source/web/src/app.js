@@ -387,6 +387,7 @@ initializeThemeToggles();
 const DEMO_PARAMS = new URLSearchParams(location.search);
 const DEMO_MODE = DEMO_PARAMS.has("demo");
 const DEMO_VIEW = (DEMO_PARAMS.get("demo") || "app").toLowerCase();
+const DEMO_DEBUG_BOTS = DEMO_MODE && DEMO_PARAMS.has("debug-bots");
 const DEMO_PERMS = [
   "server.view", "server.start", "server.stop", "server.restart", "server.force_stop",
   "server.console.view", "server.console.use", "server.players.view", "server.players.manage",
@@ -401,8 +402,13 @@ const DEMO_SERVERS = [
   { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", external_directory: false, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), demo_icon: "demo-server-creative-lab.png" },
 ];
 const DEMO_BOTS = [
-  { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
-  { id: 2, name: "Staff channel", provider: "discord", destination_id: "123456789012345678", enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
+  { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, thread_id: 23, thread_name: "Server alerts" }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png" }], enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
+  { id: 2, name: "Staff channel", provider: "discord", destination_id: "123456789012345678", destinations: [{ id: "123456789012345678", name: "Staff alerts", type: "channel" }], enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
+];
+const DEMO_TELEGRAM_GROUPS = [
+  { id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, topics: [{ id: 23, name: "Server alerts" }, { id: 91, name: "Admin chat" }] },
+  { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png" },
+  { id: "-1005555555555", name: "Build testing", type: "group" },
 ];
 const DEMO_PASSKEYS = [
   { id: 1, name: "Laptop passkey", rp_id: location.hostname, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), last_used_at: new Date(Date.now() - 18 * 60000).toISOString(), backup_eligible: true, backed_up: true },
@@ -456,11 +462,31 @@ function demoDelay() {
   return new Promise((resolve) => setTimeout(resolve, 80));
 }
 
+async function developmentBotApi(path, opts = {}) {
+  const method = opts.method || "GET";
+  const response = await fetch("/__dev" + path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Bonghos-Dev-Relay": "1",
+    },
+    body: method === "GET" ? undefined : JSON.stringify(opts.json || {}),
+    credentials: "same-origin",
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch { /* handled below */ }
+  if (!response.ok) throw new Error(payload.error || `Development relay returned HTTP ${response.status}`);
+  return payload;
+}
+
 async function demoApi(path, opts = {}) {
   await demoDelay();
   const method = opts.method || "GET";
   const clean = path.split("?")[0];
   const query = new URL(path, "http://bonghos.demo").searchParams;
+  if (DEMO_DEBUG_BOTS && /^\/bots(?:\/|$)/.test(clean)) {
+    return developmentBotApi(clean, opts);
+  }
   if (method !== "GET") {
     if (clean === "/auth/login") return DEMO_ME;
     if (clean === "/account/reauth/password") return { action_token: "demo-account-action" };
@@ -507,9 +533,13 @@ async function demoApi(path, opts = {}) {
       const name = (opts.json && opts.json.name) || "server";
       return { slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "server" };
     }
+    if (method === "POST" && (clean === "/bots/telegram/discover" || /^\/bots\/\d+\/telegram\/discover$/.test(clean))) {
+      return { bot_username: "bonghos_demo_bot", groups: DEMO_TELEGRAM_GROUPS.map((group) => ({ ...group })) };
+    }
     if (method === "POST" && clean === "/bots") {
       const created = { id: Math.max(0, ...DEMO_BOTS.map((bot) => bot.id)) + 1, ...opts.json, token_configured: true };
       delete created.token;
+      if (Array.isArray(created.destinations) && created.destinations.length) created.destination_id = created.destinations[0].id;
       DEMO_BOTS.push(created);
       return { ...created };
     }
@@ -525,6 +555,7 @@ async function demoApi(path, opts = {}) {
         const next = { ...opts.json };
         delete next.token;
         Object.assign(DEMO_BOTS[index], next);
+        if (Array.isArray(next.destinations) && next.destinations.length) DEMO_BOTS[index].destination_id = next.destinations[0].id;
         return { ...DEMO_BOTS[index] };
       }
     }
@@ -5569,8 +5600,42 @@ function botPowerButton(bot) {
   return button;
 }
 
+function botDestinations(bot) {
+  if (Array.isArray(bot.destinations) && bot.destinations.length) {
+    return bot.destinations.filter((destination) => destination && destination.id);
+  }
+  return bot.destination_id ? [{ id: bot.destination_id, name: "", type: "" }] : [];
+}
+
+function botGroupInitials(destination) {
+  const words = String(destination?.name || "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return "#";
+  return (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
+}
+
+function botGroupAvatar(destination, bot = null) {
+  const inline = String(destination?.photo_data_url || "");
+  const local = String(destination?.photo_url || "");
+  let source = /^data:image\/(?:png|jpeg|webp);base64,/i.test(inline) ? inline : "";
+  if (!source && local.startsWith("/")) source = local;
+  if (!source && bot?.id) {
+    source = `/api/bots/${encodeURIComponent(bot.id)}/telegram/destinations/${encodeURIComponent(destination.id)}/photo`;
+  }
+  const avatar = el("span", { class: "bot-group-avatar", "aria-hidden": "true" }, botGroupInitials(destination));
+  if (source) {
+    avatar.append(el("img", {
+      src: source, alt: "", loading: "lazy",
+      onerror: (event) => event.currentTarget.remove(),
+    }));
+  }
+  return avatar;
+}
+
 function botCard(bot) {
-  const destinationLabel = bot.provider === "telegram" ? "Chat" : "Channel";
+  const destinations = botDestinations(bot);
+  const destinationLabel = bot.provider === "telegram"
+    ? `${destinations.length} of 3 groups`
+    : "Channel";
   return el("article", { class: "card bot-card" + (bot.enabled ? "" : " is-disabled") },
     el("div", { class: "bot-card-head" },
       botProviderMark(bot.provider),
@@ -5579,8 +5644,16 @@ function botCard(bot) {
         el("span", { class: "muted" }, botProviderName(bot.provider))),
       botPowerButton(bot)),
     el("div", { class: "bot-destination" },
-      el("span", {}, destinationLabel),
-      el("code", {}, bot.destination_id)),
+      el("span", { class: "bot-destination-label" }, destinationLabel),
+      el("div", { class: "bot-destination-values" }, destinations.length ? destinations.map((destination) =>
+        el("span", { class: "bot-destination-value" + (bot.provider === "telegram" ? " has-avatar" : "") },
+          bot.provider === "telegram" ? botGroupAvatar(destination, bot) : null,
+          el("span", { class: "bot-destination-copy" },
+            el("span", { class: "bot-destination-name" },
+              destination.name ? el("strong", {}, destination.name) : null,
+              destination.thread_id ? el("small", {}, destination.thread_name || `Channel ${destination.thread_id}`) : null),
+            el("code", {}, destination.id)))) :
+        el("span", { class: "muted" }, bot.provider === "telegram" ? "Run /bonghos here in a Telegram group" : "Not configured"))),
     el("div", { class: "bot-events-title" }, "Notify when"),
     el("div", { class: "bot-event-grid" },
       ...BOT_EVENT_FIELDS.map(([field, label, note]) => botEventToggle(bot, field, label, note))),
@@ -5596,35 +5669,99 @@ function botCard(bot) {
         finally { button.disabled = false; }
       } }, "Send test"),
       el("div", { class: "spacer" }),
-      el("button", { class: "btn danger small", onclick: () => removeBot(bot) }, "Remove")));
+      DEMO_DEBUG_BOTS ? null : el("button", { class: "btn danger small", onclick: () => removeBot(bot) }, "Remove")));
 }
 
-function botEditor(existing = null) {
+function botEditor(existing = null, currentBots = []) {
   const name = el("input", { value: existing?.name || "", maxlength: "80", autocomplete: "off", placeholder: "Bot name" });
-  const provider = el("select", {},
-    el("option", { value: "telegram" }, "Telegram"),
-    el("option", { value: "discord" }, "Discord"));
-  provider.value = existing?.provider || "telegram";
+  const usedProviders = new Set((currentBots || []).map((bot) => bot.provider));
+  const availableProviders = existing
+    ? [{ value: existing.provider, label: botProviderName(existing.provider) }]
+    : [{ value: "telegram", label: "Telegram" }, { value: "discord", label: "Discord" }]
+      .filter((option) => !usedProviders.has(option.value));
+  if (!availableProviders.length) {
+    toast("Only one Telegram bot and one Discord bot can be connected", "err");
+    return;
+  }
+  const provider = el("select", {}, ...availableProviders.map((option) =>
+    el("option", { value: option.value }, option.label)));
+  provider.value = existing?.provider || availableProviders[0].value;
   const token = el("input", {
     type: "password", autocomplete: "new-password", spellcheck: "false",
     placeholder: existing ? "Leave blank to keep the current token" : "Paste the bot token",
   });
-  const destination = el("input", { value: existing?.destination_id || "", autocomplete: "off", spellcheck: "false" });
-  const destinationTitle = el("span", {});
-  const destinationHint = el("p", { class: "hint" });
+  const destination = el("input", {
+    value: existing?.provider === "discord" ? existing.destination_id || "" : "",
+    autocomplete: "off", spellcheck: "false", placeholder: "123456789012345678",
+  });
+  let connectedGroups = existing?.provider === "telegram" ? botDestinations(existing) : [];
+  const groupList = el("div", { class: "bot-group-list" });
+  const groupCount = el("span", { class: "bot-group-count" });
+  const groupInstruction = el("p", { class: "hint" });
+  const findGroupsButton = el("button", { class: "btn ghost small", type: "button" }, "Refresh");
+
+  const renderGroupChoices = () => {
+    groupList.innerHTML = "";
+    groupCount.textContent = `${connectedGroups.length}/3 connected`;
+    groupInstruction.textContent = existing
+      ? "Run /bonghos here in the Telegram topic that should receive notifications. Use /bonghos help to list commands."
+      : "Save this bot first, add it to a group as an administrator, then run /bonghos here in the destination topic.";
+    if (!connectedGroups.length) {
+      groupList.append(el("div", { class: "bot-group-empty muted" }, existing ? "No Telegram groups connected yet." : "Destinations are connected after the bot is saved."));
+      return;
+    }
+    const groups = [...connectedGroups].sort((left, right) =>
+      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+    for (const group of groups) {
+      const topicLabel = Number(group.thread_id) > 1
+        ? (group.thread_name || "Selected topic") : "General";
+      const row = el("div", { class: "bot-group-choice bot-group-connected is-selected" },
+        botGroupAvatar(group, existing),
+        el("span", { class: "bot-group-copy" },
+          el("strong", {}, group.name || group.id),
+          el("small", {}, topicLabel)));
+      groupList.append(row);
+    }
+  };
+
+  findGroupsButton.addEventListener("click", async () => {
+    if (!existing) {
+      toast("Save the Telegram bot before connecting groups", "err");
+      return;
+    }
+    findGroupsButton.disabled = true;
+    try {
+      const bots = await api("/bots");
+      const refreshed = (Array.isArray(bots) ? bots : []).find((bot) => Number(bot.id) === Number(existing.id));
+      connectedGroups = refreshed ? botDestinations(refreshed) : connectedGroups;
+      renderGroupChoices();
+      toast(connectedGroups.length ? "Connected groups refreshed" : "No Telegram groups connected yet", connectedGroups.length ? "ok" : "");
+    } catch (error) {
+      toast(error.message, "err");
+    } finally {
+      findGroupsButton.disabled = false;
+    }
+  });
+
+  const telegramDestination = el("div", { class: "field-row bot-telegram-destinations" },
+    el("div", { class: "bot-group-heading" },
+      el("span", {}, "Groups"),
+      el("div", { class: "bot-group-heading-actions" }, groupCount, findGroupsButton)),
+    groupInstruction,
+    groupList);
+  const discordDestination = el("div", { class: "field-row bot-discord-destination" },
+    el("label", {}, "Channel ID", destination));
   const enabled = el("input", { type: "checkbox" });
   enabled.checked = existing ? !!existing.enabled : true;
   const eventInputs = {};
   const renderDestination = () => {
     const telegram = provider.value === "telegram";
-    destinationTitle.textContent = telegram ? "Chat ID" : "Channel ID";
-    destination.placeholder = telegram ? "-1001234567890 or @channel" : "123456789012345678";
-    destinationHint.textContent = telegram
-      ? "Add the bot to the chat first. Private chats, groups, and channels use a numeric chat ID; public channels may use @username."
-      : "Invite the bot to the Discord server and grant Send Messages in this channel.";
+    telegramDestination.hidden = !telegram;
+    discordDestination.hidden = telegram;
   };
   provider.disabled = !!existing;
   if (!existing) provider.addEventListener("change", renderDestination);
+  renderGroupChoices();
   renderDestination();
 
   const notificationRows = existing ? [] : BOT_EVENT_FIELDS.map(([field, label, note]) => {
@@ -5636,13 +5773,11 @@ function botEditor(existing = null) {
   });
 
   modal(existing ? "Edit bot" : "Add bot", [
-    el("p", { class: "muted" }, "Tokens are encrypted on this machine and are never shown again after saving."),
     el("div", { class: "field-row" }, el("label", {}, "Name", name)),
-    el("div", { class: "field-row" }, el("label", {}, "Provider", provider),
-      existing ? el("p", { class: "hint" }, "The provider cannot be changed after a bot is added.") : null),
-    el("div", { class: "field-row" }, el("label", {}, existing ? "New bot token (optional)" : "Bot token", token),
-      existing ? el("p", { class: "hint" }, "Leave blank to keep the encrypted token already stored.") : null),
-    el("div", { class: "field-row" }, el("label", {}, destinationTitle, destination), destinationHint),
+    el("div", { class: "field-row" }, el("label", {}, "Provider", provider)),
+    el("div", { class: "field-row" }, el("label", {}, existing ? "New bot token (optional)" : "Bot token", token)),
+    telegramDestination,
+    discordDestination,
     existing ? null : el("label", { class: "check-row bot-enabled-row" }, enabled, " Bot enabled"),
     existing ? null : el("h3", { class: "bot-modal-heading" }, "Notifications"),
     existing ? null : el("div", { class: "bot-modal-events" }, notificationRows),
@@ -5654,10 +5789,12 @@ function botEditor(existing = null) {
         toast("Bot token is required", "err");
         token.focus(); return;
       }
-      if (!destination.value.trim()) { toast("Destination is required", "err"); destination.focus(); return; }
-      const body = {
-        name: name.value.trim(), destination_id: destination.value.trim(),
-      };
+      const telegram = provider.value === "telegram";
+      const body = { name: name.value.trim() };
+      if (!telegram) {
+        if (!destination.value.trim()) { toast("Discord channel ID is required", "err"); destination.focus(); return; }
+        body.destination_id = destination.value.trim();
+      }
       if (!existing) {
         body.provider = provider.value;
         body.enabled = enabled.checked;
@@ -5668,7 +5805,7 @@ function botEditor(existing = null) {
         if (existing) await api(`/bots/${existing.id}`, { method: "PATCH", json: body });
         else await api("/bots", { method: "POST", json: body });
         close();
-        toast(existing ? "Bot updated" : "Bot added", "ok");
+        toast(existing ? "Bot updated" : (telegram ? "Bot added. Run /bonghos here in a Telegram group to connect it." : "Bot added"), "ok");
         await renderPage();
       } catch (error) { toast(error.message, "err"); }
     }],
@@ -5720,15 +5857,22 @@ function settingsServiceCard(title, unit, description, rawState, systemdAvailabl
 }
 
 function botsSettingsSection(bots) {
+  const canAddBot = bots.length < 2;
   return el("section", { class: "settings-page-section", "aria-labelledby": "bots-settings-title" },
     settingsSectionHeading("bots-settings-title", "Bots", "Send server and player activity to Telegram or Discord.",
-      el("button", { class: "btn primary", onclick: () => botEditor() }, "Add bot")),
+      DEMO_DEBUG_BOTS
+        ? el("span", { class: "muted mono" }, ".env.development")
+        : canAddBot
+          ? el("button", { class: "btn primary", onclick: () => botEditor(null, bots) }, "Add bot")
+          : el("span", { class: "muted mono" }, "2/2 connected")),
     bots.length
       ? el("div", { class: "bot-grid" }, ...bots.map(botCard))
       : el("div", { class: "card bot-empty" }, solarIcon("send-square-linear"),
-        el("strong", {}, "No notification bots yet"),
-        el("p", { class: "muted" }, "Add a Telegram or Discord bot to receive server alerts."),
-        el("button", { class: "btn", onclick: () => botEditor() }, "Add bot")));
+        el("strong", {}, DEMO_DEBUG_BOTS ? "No development bots configured" : "No notification bots yet"),
+        el("p", { class: "muted" }, DEMO_DEBUG_BOTS
+          ? "Add a Telegram or Discord credential pair to .env.development, then restart the development server."
+          : "Add a Telegram or Discord bot to receive server alerts."),
+        DEMO_DEBUG_BOTS ? null : el("button", { class: "btn", onclick: () => botEditor(null, bots) }, "Add bot")));
 }
 
 async function pageSettings(main) {

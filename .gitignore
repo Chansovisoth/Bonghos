@@ -24,7 +24,7 @@
 # Local environment and diagnostic output
 .env
 .env.*
-!.env.example
+!.env.development.example
 *.log
 *.tmp
 

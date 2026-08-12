@@ -86,6 +86,22 @@ func TestBotAPIEmptyListReturnsJSONArray(t *testing.T) {
 	}
 }
 
+func TestTelegramBotCanBeCreatedBeforeHereCommand(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	client := env.newClient()
+	client.mustLogin("owner", "correct horse battery", secret)
+
+	var created bot.Config
+	status, body := client.do(http.MethodPost, "/api/bots", map[string]any{
+		"name": "Telegram commands", "provider": "telegram",
+		"token": "123456789:telegram_command_secret",
+	}, &created)
+	if status != http.StatusCreated || len(created.Destinations) != 0 || created.DestinationID != "" {
+		t.Fatalf("create destination-free Telegram bot: %d %s %+v", status, body, created)
+	}
+}
+
 func TestBotAPIRequiresOwnerSecurityPermission(t *testing.T) {
 	for _, role := range []authorization.Role{
 		authorization.RoleAdmin,
@@ -101,7 +117,104 @@ func TestBotAPIRequiresOwnerSecurityPermission(t *testing.T) {
 			if status, _ := client.do(http.MethodGet, "/api/bots", nil, nil); status != http.StatusForbidden {
 				t.Fatalf("%s GET /api/bots = %d, want 403", role, status)
 			}
+			if status, _ := client.do(http.MethodPost, "/api/bots/telegram/discover", map[string]any{"token": "not-used"}, nil); status != http.StatusForbidden {
+				t.Fatalf("%s POST /api/bots/telegram/discover = %d, want 403", role, status)
+			}
+			if status, _ := client.do(http.MethodGet, "/api/bots/1/telegram/destinations/-1001/photo", nil, nil); status != http.StatusForbidden {
+				t.Fatalf("%s GET Telegram group photo = %d, want 403", role, status)
+			}
 		})
+	}
+}
+
+func TestTelegramBotDiscoveryAndMultipleDestinations(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	client := env.newClient()
+	client.mustLogin("owner", "correct horse battery", secret)
+
+	sent := 0
+	updatesCalls := 0
+	photo := []byte("\x89PNG\r\n\x1a\nprofile")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/getMe"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"bonghos_test_bot"}}`))
+		case strings.HasSuffix(r.URL.Path, "/getUpdates"):
+			updatesCalls++
+			if updatesCalls == 1 {
+				_, _ = w.Write([]byte(`{"ok":true,"result":[
+					{"message":{"message_id":42,"message_thread_id":42,"is_topic_message":true,"chat":{"id":-1001111111111,"type":"supergroup","title":"Projects","is_forum":true},"forum_topic_created":{"name":"Alerts"}}},
+					{"message":{"message_id":43,"message_thread_id":42,"is_topic_message":true,"chat":{"id":-1001111111111,"type":"supergroup","title":"Projects","is_forum":true},"reply_to_message":{"forum_topic_created":{"name":"Alerts"}}}},
+					{"message":{"message_id":45,"message_thread_id":45,"is_topic_message":true,"chat":{"id":-1001111111111,"type":"supergroup","title":"Projects","is_forum":true},"reply_to_message":{"forum_topic_created":{"name":"Alerts"}}}},
+					{"my_chat_member":{"chat":{"id":-1002222222222,"type":"group","title":"Staff"}}}
+				]}`))
+			} else {
+				_, _ = w.Write([]byte(`{"ok":true,"result":[
+					{"message":{"message_id":44,"message_thread_id":42,"is_topic_message":true,"chat":{"id":-1001111111111,"type":"supergroup","title":"Projects","is_forum":true},"reply_to_message":{"forum_topic_created":{"name":"Alerts"}}}}
+				]}`))
+			}
+		case strings.HasSuffix(r.URL.Path, "/getChat"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"id":-1001111111111,"type":"supergroup","title":"Projects","photo":{"small_file_id":"group-photo"}}}`))
+		case strings.HasSuffix(r.URL.Path, "/getFile"):
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"file_path":"photos/group.png"}}`))
+		case strings.HasPrefix(r.URL.Path, "/file/bot"):
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(photo)
+		case strings.HasSuffix(r.URL.Path, "/sendMessage"):
+			sent++
+			_, _ = w.Write([]byte(`{"ok":true,"result":{}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	env.app.BotNotify.Sender.TelegramBaseURL = server.URL
+	env.app.BotNotify.Sender.TelegramFileBaseURL = server.URL
+
+	const token = "123456789:telegram_discovery_secret"
+	var discovery bot.TelegramDiscovery
+	status, body := client.do(http.MethodPost, "/api/bots/telegram/discover", map[string]any{"token": token}, &discovery)
+	if status != http.StatusOK || len(discovery.Groups) != 2 || strings.Contains(body, token) {
+		t.Fatalf("discover groups: %d %s %+v", status, body, discovery)
+	}
+
+	var created bot.Config
+	status, body = client.do(http.MethodPost, "/api/bots", map[string]any{
+		"name": "Telegram groups", "provider": "telegram", "token": token,
+		"destinations":            discovery.Groups[:1],
+		"discovered_destinations": discovery.Groups,
+	}, &created)
+	if status != http.StatusCreated || len(created.Destinations) != 1 || len(created.DiscoveredDestinations) != 2 || strings.Contains(body, token) {
+		t.Fatalf("create multi-group bot: %d %s %+v", status, body, created)
+	}
+	var refreshed bot.TelegramDiscovery
+	status, body = client.do(http.MethodPost, "/api/bots/"+itoa(created.ID)+"/telegram/discover", map[string]any{}, &refreshed)
+	if status != http.StatusOK || len(refreshed.Groups) != 2 {
+		t.Fatalf("persisted discovery refresh: %d %s %+v", status, body, refreshed)
+	}
+	for _, group := range refreshed.Groups {
+		if group.ID == "-1001111111111" && len(group.Topics) != 1 {
+			t.Fatalf("duplicate topic was persisted: %+v", group.Topics)
+		}
+	}
+	if created.Destinations[0].PhotoFileID == "" {
+		t.Fatalf("saved group photo metadata = %+v", created.Destinations)
+	}
+	// Older saved bots have no photo metadata. The image endpoint resolves the
+	// current group photo directly so they do not need to be re-saved first.
+	if _, err := env.app.DB.Exec(`UPDATE notification_bot_destinations SET photo_file_id='' WHERE bot_id=?`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, body = client.do(http.MethodGet, "/api/bots/"+itoa(created.ID)+"/telegram/destinations/"+created.Destinations[0].ID+"/photo", nil, nil)
+	if status != http.StatusOK || body != strings.TrimSpace(string(photo)) || strings.Contains(body, token) {
+		t.Fatalf("group photo: %d %q", status, body)
+	}
+
+	status, body = client.do(http.MethodPost, "/api/bots/"+itoa(created.ID)+"/test", map[string]any{}, nil)
+	if status != http.StatusOK || sent != 1 {
+		t.Fatalf("test multi-group bot: %d %s, sent=%d", status, body, sent)
 	}
 }
 

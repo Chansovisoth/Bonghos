@@ -144,7 +144,7 @@ jobs:
 
       - name: Required root files exist
         run: |
-          for f in setup.sh Tutorial.txt README.md LICENSE; do
+          for f in setup.sh Tutorial.txt README.md TECHNICAL.md LICENSE .env.development.example; do
             test -f "$f" || { echo "missing root file: $f"; exit 1; }
           done
           test -x setup.sh || { echo "setup.sh is not executable"; exit 1; }
@@ -154,7 +154,7 @@ jobs:
         run: |
           for p in source/go.mod source/cmd/bonghos/main.go source/internal \
                    source/migrations source/web/src source/deploy/systemd \
-                   source/docs/CHANGELOG.md source/Makefile; do
+                   source/docs/CHANGELOG.md source/Makefile scripts/dev-web.js; do
             test -e "$p" || { echo "missing: $p"; exit 1; }
           done
 
@@ -241,6 +241,9 @@ jobs:
 
       - name: Node syntax check for the frontend
         run: node --check source/web/src/app.js
+
+      - name: Test local notification development relay
+        run: node scripts/dev-web.test.js
 
       - name: Repository URL is consistent
         run: |

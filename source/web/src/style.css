@@ -570,8 +570,19 @@ tr:hover td { background: var(--surface-2); }
 .bot-power-track > span { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; background: var(--faint); transition: transform 160ms ease, background 160ms ease; }
 .bot-power.is-on { border-color: color-mix(in oklch, var(--accent) 70%, var(--border)); color: var(--accent); }
 .bot-power.is-on .bot-power-track > span { background: var(--accent); transform: translateX(14px); }
-.bot-destination { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); background: var(--inset); color: var(--muted); font-size: 0.76rem; }
-.bot-destination code { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.bot-destination { display: grid; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border); background: var(--inset); color: var(--muted); font-size: 0.76rem; }
+.bot-destination-label { color: var(--faint); font-size: 0.68rem; font-weight: 850; letter-spacing: 0.06em; text-transform: uppercase; }
+.bot-destination-values { display: grid; gap: var(--space-1); }
+.bot-destination-value { min-width: 0; display: block; }
+.bot-destination-value.has-avatar { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: var(--space-2); }
+.bot-destination-copy { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.bot-destination-name { min-width: 0; display: grid; }
+.bot-destination-name small { overflow: hidden; color: var(--muted); font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.bot-destination-value strong { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.bot-destination code { min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.bot-group-avatar { position: relative; width: 38px; height: 38px; flex: 0 0 38px; display: grid; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: 0.68rem; font-weight: 850; letter-spacing: 0.02em; }
+.bot-group-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+.bot-destination-value .bot-group-avatar { width: 32px; height: 32px; flex-basis: 32px; font-size: 0.6rem; }
 .bot-events-title { color: var(--faint); font-size: 0.68rem; font-weight: 850; letter-spacing: 0.07em; text-transform: uppercase; }
 .bot-event-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--border); }
 .bot-event-option { min-width: 0; min-height: 64px; flex-direction: row; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--inset); cursor: pointer; }
@@ -593,6 +604,22 @@ tr:hover td { background: var(--surface-2); }
 .bot-modal-event:nth-child(2n) { border-right: 0; }
 .bot-modal-event:nth-last-child(-n + 2) { border-bottom: 0; }
 .bot-modal-event > span { min-width: 0; display: grid; }
+.bot-group-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); font-weight: 800; }
+.bot-telegram-destinations[hidden], .bot-discord-destination[hidden] { display: none; }
+.bot-group-heading-actions { display: flex; align-items: center; gap: var(--space-2); }
+.bot-group-count { color: var(--muted); font-family: var(--font-mono); font-size: 0.72rem; white-space: nowrap; }
+.bot-group-list { display: grid; border: 1px solid var(--border); background: var(--inset); }
+.bot-group-empty { min-height: 58px; display: grid; place-items: center; padding: var(--space-3); font-size: 0.78rem; }
+.bot-group-choice { min-width: 0; display: grid; grid-template-columns: 18px 38px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 58px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+.bot-group-choice:last-child { border-bottom: 0; }
+.bot-group-choice:hover, .bot-group-choice.is-selected { background: var(--surface-2); }
+.bot-group-choice.is-selected { box-shadow: inset 2px 0 0 var(--accent); }
+.bot-group-choice input { width: 18px; height: 18px; min-height: 18px; margin: 0; accent-color: var(--accent); }
+.bot-group-choice.bot-group-connected { grid-template-columns: 38px minmax(0, 1fr); cursor: default; }
+.bot-group-copy { min-width: 0; display: grid; }
+.bot-group-copy strong, .bot-group-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot-group-copy small { color: var(--muted); font-size: 0.68rem; }
+.bot-group-channel { width: min(170px, 24vw); min-height: 36px; padding-block: var(--space-1); font-size: 0.76rem; }
 .configuration-action-bar { position: sticky; bottom: 0; z-index: 10; display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); padding: var(--space-4) 0; border-top: 1px solid var(--border); background: var(--bg); }
 .configuration-section-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin: var(--space-6) 0 var(--space-3); }
 .configuration-section-heading h2 { margin: 0; }
@@ -1029,6 +1056,13 @@ pre { padding: var(--space-3); overflow-x: auto; white-space: pre-wrap; }
   .bot-event-option:last-child, .bot-modal-event:last-child { border-bottom: 0; }
   .bot-card-actions { flex-wrap: wrap; }
   .bot-card-actions .spacer { display: none; }
+  .bot-group-heading { align-items: flex-start; flex-direction: column; }
+  .bot-group-heading-actions { width: 100%; justify-content: space-between; }
+  .bot-group-heading-actions .btn { min-height: 36px; }
+  .bot-group-choice { grid-template-columns: 18px 34px minmax(0, 1fr); gap: var(--space-2); }
+  .bot-group-choice.bot-group-connected { grid-template-columns: 34px minmax(0, 1fr); }
+  .bot-group-choice .bot-group-avatar { width: 34px; height: 34px; flex-basis: 34px; }
+  .bot-group-channel { grid-column: 2 / -1; width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -13,15 +13,17 @@ import (
 )
 
 type botRequest struct {
-	Name                string  `json:"name"`
-	Provider            string  `json:"provider"`
-	Token               *string `json:"token"`
-	DestinationID       string  `json:"destination_id"`
-	Enabled             *bool   `json:"enabled"`
-	NotifyServerStarted *bool   `json:"notify_server_started"`
-	NotifyServerStopped *bool   `json:"notify_server_stopped"`
-	NotifyPlayerJoined  *bool   `json:"notify_player_joined"`
-	NotifyPlayerLeft    *bool   `json:"notify_player_left"`
+	Name                   string            `json:"name"`
+	Provider               string            `json:"provider"`
+	Token                  *string           `json:"token"`
+	DestinationID          string            `json:"destination_id"`
+	Destinations           []bot.Destination `json:"destinations"`
+	DiscoveredDestinations []bot.Destination `json:"discovered_destinations"`
+	Enabled                *bool             `json:"enabled"`
+	NotifyServerStarted    *bool             `json:"notify_server_started"`
+	NotifyServerStopped    *bool             `json:"notify_server_stopped"`
+	NotifyPlayerJoined     *bool             `json:"notify_player_joined"`
+	NotifyPlayerLeft       *bool             `json:"notify_player_left"`
 }
 
 func boolDefault(value *bool, fallback bool) bool {
@@ -52,12 +54,14 @@ func (a *App) handleBotCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	config, err := a.Bots.Create(bot.CreateInput{
 		Name: request.Name, Provider: request.Provider, Token: token,
-		DestinationID:       request.DestinationID,
-		Enabled:             boolDefault(request.Enabled, true),
-		NotifyServerStarted: boolDefault(request.NotifyServerStarted, true),
-		NotifyServerStopped: boolDefault(request.NotifyServerStopped, true),
-		NotifyPlayerJoined:  boolDefault(request.NotifyPlayerJoined, true),
-		NotifyPlayerLeft:    boolDefault(request.NotifyPlayerLeft, true),
+		DestinationID:          request.DestinationID,
+		Destinations:           request.Destinations,
+		DiscoveredDestinations: request.DiscoveredDestinations,
+		Enabled:                boolDefault(request.Enabled, true),
+		NotifyServerStarted:    boolDefault(request.NotifyServerStarted, true),
+		NotifyServerStopped:    boolDefault(request.NotifyServerStopped, true),
+		NotifyPlayerJoined:     boolDefault(request.NotifyPlayerJoined, true),
+		NotifyPlayerLeft:       boolDefault(request.NotifyPlayerLeft, true),
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -83,15 +87,16 @@ func (a *App) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		Name                *string `json:"name"`
-		Provider            *string `json:"provider"`
-		Token               *string `json:"token"`
-		DestinationID       *string `json:"destination_id"`
-		Enabled             *bool   `json:"enabled"`
-		NotifyServerStarted *bool   `json:"notify_server_started"`
-		NotifyServerStopped *bool   `json:"notify_server_stopped"`
-		NotifyPlayerJoined  *bool   `json:"notify_player_joined"`
-		NotifyPlayerLeft    *bool   `json:"notify_player_left"`
+		Name                *string            `json:"name"`
+		Provider            *string            `json:"provider"`
+		Token               *string            `json:"token"`
+		DestinationID       *string            `json:"destination_id"`
+		Destinations        *[]bot.Destination `json:"destinations"`
+		Enabled             *bool              `json:"enabled"`
+		NotifyServerStarted *bool              `json:"notify_server_started"`
+		NotifyServerStopped *bool              `json:"notify_server_stopped"`
+		NotifyPlayerJoined  *bool              `json:"notify_player_joined"`
+		NotifyPlayerLeft    *bool              `json:"notify_player_left"`
 	}
 	if err := readJSON(r, &request, 1<<16); err != nil {
 		writeErr(w, http.StatusBadRequest, errors.New("invalid request"))
@@ -99,7 +104,7 @@ func (a *App) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	config, err := a.Bots.Patch(id, bot.Patch{
 		Name: request.Name, Provider: request.Provider, Token: request.Token,
-		DestinationID: request.DestinationID, Enabled: request.Enabled,
+		DestinationID: request.DestinationID, Destinations: request.Destinations, Enabled: request.Enabled,
 		NotifyServerStarted: request.NotifyServerStarted,
 		NotifyServerStopped: request.NotifyServerStopped,
 		NotifyPlayerJoined:  request.NotifyPlayerJoined,
@@ -116,6 +121,110 @@ func (a *App) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	a.audit(user.ID, user.Username, "notification_bot_updated", config.Name, config.Provider, remoteIP(r))
 	writeJSON(w, http.StatusOK, config)
+}
+
+func (a *App) telegramDiscovery(w http.ResponseWriter, r *http.Request, token string, auditTarget string, persistBotID int64) {
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	discovery, err := a.BotNotify.Sender.DiscoverTelegramGroups(ctx, token)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	if persistBotID > 0 {
+		discovery.Groups, err = a.Bots.MergeDiscovered(persistBotID, discovery.Groups)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	user := currentUser(r)
+	a.audit(user.ID, user.Username, "notification_bot_groups_discovered", auditTarget, "", remoteIP(r))
+	writeJSON(w, http.StatusOK, discovery)
+}
+
+func (a *App) handleBotTelegramDiscover(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Token string `json:"token"`
+	}
+	if err := readJSON(r, &request, 1<<16); err != nil || strings.TrimSpace(request.Token) == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("Telegram bot token is required"))
+		return
+	}
+	a.telegramDiscovery(w, r, request.Token, "new Telegram bot", 0)
+}
+
+func (a *App) handleBotTelegramDiscoverExisting(w http.ResponseWriter, r *http.Request) {
+	id, err := botID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	config, err := a.Bots.ByID(id)
+	if errors.Is(err, bot.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if config.Provider != bot.ProviderTelegram {
+		writeErr(w, http.StatusBadRequest, errors.New("group discovery is available only for Telegram bots"))
+		return
+	}
+	var request struct {
+		Token string `json:"token"`
+	}
+	if err := readJSON(r, &request, 1<<16); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid request"))
+		return
+	}
+	token := strings.TrimSpace(request.Token)
+	if token == "" {
+		target, targetErr := a.Bots.Target(id)
+		if targetErr != nil {
+			writeErr(w, http.StatusBadRequest, targetErr)
+			return
+		}
+		token = target.Token
+	}
+	a.telegramDiscovery(w, r, token, config.Name, id)
+}
+
+func (a *App) handleBotTelegramGroupPhoto(w http.ResponseWriter, r *http.Request) {
+	id, err := botID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	target, fileID, err := a.Bots.TelegramPhotoTarget(id, r.PathValue("destination"))
+	if errors.Is(err, bot.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, errors.New("Telegram group photo not found"))
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	var data []byte
+	var contentType string
+	if fileID != "" {
+		data, contentType, err = a.BotNotify.Sender.TelegramGroupPhoto(ctx, target.Token, fileID)
+	}
+	if fileID == "" || err != nil {
+		data, contentType, err = a.BotNotify.Sender.TelegramGroupPhotoForChat(ctx, target.Token, target.DestinationID)
+	}
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, errors.New("Telegram group photo is unavailable"))
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }
 
 func (a *App) handleBotDelete(w http.ResponseWriter, r *http.Request) {

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A loopback-only native Node development relay can load one Telegram bot and
+  one Discord bot from the Git-ignored `.env.development` file, allowing real
+  notification tests from `?demo&debug-bots` on Windows without exposing bot
+  tokens to browser JavaScript.
+- Telegram notification destinations are connected from Telegram itself: a
+  group administrator runs `/bonghos here` in the topic that should receive
+  broadcasts. `/bonghos where` reports the current group destination,
+  `/bonghos disconnect` removes it, and `/bonghos help` lists the commands.
+  Bonghos consumes commands once using a durable Telegram update cursor and
+  supports up to three groups without retaining stale topic-discovery lists.
+  The upgrade clears destinations saved by the former dropdown flow once; an
+  administrator reconnects each intended group topic with `/bonghos here`. Installations
+  support one Telegram and one Discord bot.
+
 ### Fixed
 
 - The generated control-plane systemd user service no longer applies
