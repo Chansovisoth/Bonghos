@@ -121,8 +121,10 @@ function gameVersionIcon() {
   return svg;
 }
 
-const LIFECYCLE_LOADING_CYCLE_MS = 2400;
+const LIFECYCLE_LOADING_CYCLE_MS = 2000;
+let lifecycleLoadingIconId = 0;
 function lifecycleLoadingIcon(onCycleEnd = null) {
+  const id = `lifecycle-loading-${++lifecycleLoadingIconId}`;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("class", "icon lifecycle-loading-icon");
   svg.setAttribute("viewBox", "0 0 24 24");
@@ -130,10 +132,23 @@ function lifecycleLoadingIcon(onCycleEnd = null) {
   svg.setAttribute("focusable", "false");
   svg.innerHTML = `
     <path d="M0 0h24v24H0z" fill="none"/>
-    <rect class="lifecycle-loading-block lifecycle-loading-block-a" width="10" height="10" x="1" y="1" fill="currentColor" rx="1"/>
-    <rect class="lifecycle-loading-block lifecycle-loading-block-b" width="10" height="10" x="1" y="13" fill="currentColor" rx="1"/>
-    <rect class="lifecycle-loading-block lifecycle-loading-block-c" width="10" height="10" x="13" y="13" fill="currentColor" rx="1"/>`;
-  if (onCycleEnd) svg.querySelector(".lifecycle-loading-block-a")?.addEventListener("animationiteration", onCycleEnd);
+    <defs>
+      <filter id="${id}-blur">
+        <feGaussianBlur in="SourceGraphic" result="y" stdDeviation="1"/>
+        <feColorMatrix in="y" result="z" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 18 -7"/>
+        <feBlend in="SourceGraphic" in2="z"/>
+      </filter>
+    </defs>
+    <g filter="url(#${id}-blur)">
+      <circle cx="5" cy="12" r="4" fill="currentColor">
+        <animate class="lifecycle-loading-cycle" attributeName="cx" calcMode="spline" dur="2s" keySplines=".36,.62,.43,.99;.79,0,.58,.57" repeatCount="indefinite" values="5;8;5"/>
+      </circle>
+      <circle cx="19" cy="12" r="4" fill="currentColor">
+        <animate attributeName="cx" calcMode="spline" dur="2s" keySplines=".36,.62,.43,.99;.79,0,.58,.57" repeatCount="indefinite" values="19;16;19"/>
+      </circle>
+      <animateTransform attributeName="transform" dur="0.75s" repeatCount="indefinite" type="rotate" values="0 12 12;360 12 12"/>
+    </g>`;
+  if (onCycleEnd) svg.querySelector(".lifecycle-loading-cycle")?.addEventListener("repeatEvent", onCycleEnd);
   return svg;
 }
 
@@ -289,20 +304,25 @@ function startConnectivityMonitor() {
 }
 
 let modalRestoreFocus = null;
+let modalOnClose = null;
 
 function closeActiveModal() {
   const host = $("#modal-host");
   if (!host || !host.firstElementChild) return false;
   host.innerHTML = "";
   const restoreFocus = modalRestoreFocus;
+  const onClose = modalOnClose;
   modalRestoreFocus = null;
+  modalOnClose = null;
   if (restoreFocus && restoreFocus.isConnected) restoreFocus.focus();
+  if (onClose) onClose();
   return true;
 }
 
-function modal(title, bodyNodes, actions) {
+function modal(title, bodyNodes, actions, onClose = null) {
   const host = $("#modal-host");
   modalRestoreFocus = document.activeElement;
+  modalOnClose = onClose;
   host.innerHTML = "";
   const close = closeActiveModal;
   const m = el("div", { class: "overlay", onclick: (e) => { if (e.target === m) close(); } },
@@ -394,7 +414,7 @@ const DEMO_PERMS = [
   "server.files.manage", "server.configuration.manage", "server.icon.manage",
   "server.import.manage", "server.backups.view", "server.backups.create",
   "server.backups.restore", "server.schedules.manage", "users.manage",
-  "security.manage", "host.manage", "portability.manage",
+  "bots.manage", "security.manage", "host.manage", "portability.manage",
 ];
 const DEMO_ME = { id: 1, username: "demo-owner", role: "owner", permissions: DEMO_PERMS };
 const DEMO_SERVERS = [
@@ -402,8 +422,8 @@ const DEMO_SERVERS = [
   { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", external_directory: false, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), demo_icon: "demo-server-creative-lab.png" },
 ];
 const DEMO_BOTS = [
-  { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, thread_id: 23, thread_name: "Server alerts" }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png" }], enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
-  { id: 2, name: "Staff channel", provider: "discord", destination_id: "123456789012345678", destinations: [{ id: "123456789012345678", name: "Staff alerts", type: "channel" }], enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
+  { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, thread_id: 23, thread_name: "Server alerts" }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png" }], discovered_destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", discovered_at: new Date(Date.now() - 21 * 86400000).toISOString() }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png", discovered_at: new Date(Date.now() - 14 * 86400000).toISOString() }, { id: "-1005555555555", name: "Build Team", type: "supergroup", discovered_at: new Date(Date.now() - 2 * 86400000).toISOString() }], enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
+  { id: 2, name: "Staff channel", provider: "discord", destination_id: "123456789012345678", destinations: [{ id: "123456789012345678", name: "bot-spam", type: "channel", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo" }], discovered_destinations: [{ id: "223456789012345678", name: "Bonghos Community", type: "guild", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo", discovered_at: new Date(Date.now() - 18 * 86400000).toISOString() }, { id: "323456789012345678", name: "Creative Server", type: "guild", guild_id: "323456789012345678", guild_name: "Creative Server", discovered_at: new Date(Date.now() - 5 * 86400000).toISOString() }], enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
 ];
 const DEMO_TELEGRAM_GROUPS = [
   { id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, topics: [{ id: 23, name: "Server alerts" }, { id: 91, name: "Admin chat" }] },
@@ -559,7 +579,13 @@ async function demoApi(path, opts = {}) {
         return { ...DEMO_BOTS[index] };
       }
     }
-    if (method === "POST" && /^\/bots\/\d+\/test$/.test(clean)) return { ok: true };
+    const demoBotTest = clean.match(/^\/bots\/(\d+)\/test$/);
+    if (method === "POST" && demoBotTest) {
+      const bot = DEMO_BOTS.find((entry) => entry.id === Number(demoBotTest[1]));
+      if (!bot) throw new Error("Notification bot not found");
+      if (!bot.enabled) throw new Error("Notification bot is disabled");
+      return { ok: true };
+    }
     const passkeyMatch = clean.match(/^\/passkeys\/(\d+)$/);
     if (passkeyMatch) {
       const index = DEMO_PASSKEYS.findIndex((passkey) => passkey.id === Number(passkeyMatch[1]));
@@ -603,6 +629,14 @@ async function demoApi(path, opts = {}) {
       return { ok: true, backup_id: "demo-pre-reset-world" };
     }
     return { ok: true };
+  }
+  const demoBotInvite = clean.match(/^\/bots\/(\d+)\/invite$/);
+  if (demoBotInvite) {
+    const bot = DEMO_BOTS.find((entry) => entry.id === Number(demoBotInvite[1]));
+    if (!bot) throw new Error("Notification bot not found");
+    return { url: bot.provider === "telegram"
+      ? "https://t.me/bonghos_demo_bot?startgroup&admin=manage_chat"
+      : "https://discord.com/oauth2/authorize?client_id=1536799744431755275&scope=bot%20applications.commands&permissions=274877910016&integration_type=0" };
   }
   switch (clean) {
     case "/auth/csrf": return { csrf: "demo-csrf-token" };
@@ -655,7 +689,7 @@ async function demoApi(path, opts = {}) {
       };
     }
     case "/players": return { players: [
-      { username: "iKlaude", online: true, op: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
+      { username: "iKlaude", uuid: "03c69a88-5438-4b03-952a-17efcbcfe6f7", online: true, op: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
       { username: "Alex", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 3922 },
       { username: "Long_Name_With_Underscores", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 18422 },
       { username: "OfflineMiner", online: false, banned: true, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 7521 },
@@ -794,6 +828,7 @@ setInterval(updateUptimeDisplay, 1000);
 let wsRetry = 1000;
 // Topics that stay subscribed for the whole session.
 const BASE_TOPICS = ["overview", "servers", "backups"];
+const OVERVIEW_INTERVAL_SECONDS = 4;
 // Heavier per-page topics, subscribed only while that page is open so Bonghos
 // does not broadcast console lines or metrics to a browser that is not showing
 // them (specification section 28).
@@ -807,6 +842,7 @@ const PAGE_TOPICS = {
 let currentPageTopic = null;
 const PERFORMANCE_INTERVAL_KEY = "bonghos.performance.interval";
 const PERFORMANCE_INTERVAL_OPTIONS = [1, 2, 3, 5, 10, 30, 60];
+let demoOverviewTimer = null;
 let demoPerformanceTimer = null;
 let performanceStorageRequest = 0;
 let navigationJumpStartTimer = null;
@@ -825,6 +861,12 @@ S.perfIntervalSeconds = savedPerformanceInterval();
 
 function performanceSubscription() {
   return { action: "subscribe", topic: "performance", interval_seconds: S.perfIntervalSeconds };
+}
+
+function baseTopicSubscription(topic) {
+  return topic === "overview"
+    ? { action: "subscribe", topic, interval_seconds: OVERVIEW_INTERVAL_SECONDS }
+    : { action: "subscribe", topic };
 }
 
 function wsSend(obj) {
@@ -862,7 +904,7 @@ function connectWS() {
     wsRetry = 1000;
     // Always-on topics: status and long-running operations must keep arriving
     // whatever page is open, so an import or backup started elsewhere is seen.
-    BASE_TOPICS.forEach((t) => wsSend({ action: "subscribe", topic: t }));
+    BASE_TOPICS.forEach((topic) => wsSend(baseTopicSubscription(topic)));
     // Server-side subscriptions were lost with the old connection, so forget
     // what we think is subscribed and re-send for the current page.
     currentPageTopic = null;
@@ -892,7 +934,14 @@ function handleEvent(m) {
     markLifecyclePendingSettled(S.status.state);
     renderStatusPill();
     if (S.page === "overview" && !S.lifecyclePending) renderPage();
-  } else if (type === "sample" && ((S.page === "performance" && topic === "performance") || (S.page === "overview" && topic === "overview"))) {
+  } else if (type === "sample" && topic === "overview") {
+    updateSidebarLiveStats(data);
+    if (S.page !== "overview") return;
+    appendPerformanceSample(data);
+    setUptimeBaseline(data);
+    updateUptimeDisplay();
+    updateLiveStats(data);
+  } else if (type === "sample" && S.page === "performance" && topic === "performance") {
     appendPerformanceSample(data);
     setUptimeBaseline(data);
     updateUptimeDisplay();
@@ -1205,6 +1254,14 @@ function setOnlinePlayerCount(players) {
   if (count) count.textContent = `· ${S.onlinePlayerCount}`;
 }
 
+function updateSidebarLiveStats(sample) {
+  const onlinePlayers = Number(sample?.online_players);
+  if (!Number.isFinite(onlinePlayers) || onlinePlayers < 0) return;
+  S.onlinePlayerCount = Math.floor(onlinePlayers);
+  const count = $("#nav-player-count");
+  if (count) count.textContent = `· ${S.onlinePlayerCount}`;
+}
+
 async function refreshPlayerCount() {
   if (!can("server.players.view")) return;
   try { setOnlinePlayerCount((await api("/players")).players || []); } catch {}
@@ -1240,7 +1297,7 @@ function navigate(page, opts = {}) {
   S.performanceTarget = next === "performance" ? (opts.performanceTarget || "") : "";
   S.serverTargetId = next === "servers" ? (opts.serverTargetId ?? null) : null;
   S.managedServerId = next === "files" || next === "configuration" ? (opts.serverId ?? null) : null;
-  S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers" || next === "configuration");
+  S.overviewReturn = !!opts.fromOverview && (next === "players" || next === "servers" || next === "configuration" || next === "performance");
   S.serverManagementReturn = !!opts.fromServers && (next === "files" || next === "configuration");
   S.consoleReturn = !!opts.fromConsole && (next === "servers" || next === "files" || next === "configuration");
   setSidebarOpen(false);
@@ -1330,10 +1387,11 @@ function updateServerNameTicker(ticker) {
   const text = ticker.querySelector(".server-name-text:not(.server-name-clone)");
   if (!text) return;
   const link = ticker.querySelector(".server-name-link");
-  const overflowing = text.getBoundingClientRect().width > ticker.clientWidth + 1;
+  const textWidth = Math.max(text.scrollWidth, text.getBoundingClientRect().width);
+  const overflowing = ticker.clientWidth > 0 && textWidth > ticker.clientWidth + 1;
   ticker.classList.toggle("is-overflowing", overflowing);
   if (overflowing) {
-    const seconds = Math.max(10, (text.getBoundingClientRect().width + 32) / 28);
+    const seconds = Math.max(10, (textWidth + 32) / 28);
     ticker.style.setProperty("--ticker-duration", `${seconds.toFixed(2)}s`);
     if (!link) ticker.tabIndex = 0;
   } else {
@@ -1343,9 +1401,13 @@ function updateServerNameTicker(ticker) {
 }
 
 let serverNameTickerResizeFrame = 0;
-window.addEventListener("resize", () => {
+let serverNameTickerObserver = null;
+function scheduleServerNameTickerUpdate(ticker = $(".server-name")) {
   cancelAnimationFrame(serverNameTickerResizeFrame);
-  serverNameTickerResizeFrame = requestAnimationFrame(() => updateServerNameTicker($(".server-name")));
+  serverNameTickerResizeFrame = requestAnimationFrame(() => updateServerNameTicker(ticker));
+}
+window.addEventListener("resize", () => {
+  scheduleServerNameTickerUpdate();
 });
 
 function renderServerPicker() {
@@ -1376,7 +1438,13 @@ function renderServerPicker() {
       el("span", { class: "server-kicker" }, "Active project"),
       renderStatusPillNode({ id: "status-pill" })),
     ticker);
-  requestAnimationFrame(() => updateServerNameTicker(ticker));
+  serverNameTickerObserver?.disconnect();
+  serverNameTickerObserver = typeof ResizeObserver === "function"
+    ? new ResizeObserver(() => scheduleServerNameTickerUpdate(ticker))
+    : null;
+  serverNameTickerObserver?.observe(ticker);
+  scheduleServerNameTickerUpdate(ticker);
+  document.fonts?.ready.then(() => scheduleServerNameTickerUpdate(ticker));
 }
 
 function renderStatusPillNode(opts = {}) {
@@ -1697,7 +1765,7 @@ function statCard(title, value, sub, valueId = "", performanceTarget = "") {
     attrs["aria-label"] = `${title}: ${value}. Open in Performance.`;
     attrs.onclick = (event) => {
       event.preventDefault();
-      navigate("performance", { performanceTarget });
+      navigate("performance", { performanceTarget, fromOverview: true });
     };
   }
   return el(performanceTarget ? "a" : "div", attrs,
@@ -2128,8 +2196,19 @@ function playerRow(p) {
     referrerpolicy: "no-referrer",
     onerror: () => handlePlayerFaceError(avatar, fallback, p.username),
   });
+  const profileURL = playerNameMCProfileURL(p.uuid);
+  const playerSkin = profileURL
+    ? el("a", {
+      class: "player-avatar-link",
+      href: profileURL,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      title: `View ${p.username} on NameMC`,
+      "aria-label": `View ${p.username} on NameMC`,
+    }, avatar)
+    : avatar;
   return el("tr", {},
-    el("td", {}, el("div", { class: "player-identity" }, avatar,
+    el("td", {}, el("div", { class: "player-identity" }, playerSkin,
       el("span", { class: "player-name-block" },
         el("span", { class: "player-name-line" },
           el("strong", {}, p.username),
@@ -2140,6 +2219,12 @@ function playerRow(p) {
     el("td", { class: "mobile-hide" }, fmtTime(p.last_seen_at)),
     el("td", { class: "mobile-hide player-observed-playtime" }, fmtDur(p.observed_playtime_seconds)),
     el("td", { class: "table-actions" }, can("server.players.manage") ? playerActions(p) : ""));
+}
+
+function playerNameMCProfileURL(uuid) {
+  const value = String(uuid || "").trim();
+  if (!/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(value)) return "";
+  return `https://namemc.com/profile/${encodeURIComponent(value)}`;
 }
 
 function getPlayerFaceUrl(username, size = 64) {
@@ -3440,7 +3525,7 @@ async function pagePerformance(main) {
             "aria-label": "Refresh",
             onclick: refreshPerformanceMetrics,
           }, solarIcon("storage-refresh")))),
-    ]),
+    ], overviewBackButton()),
 
     el("div", { class: "performance-feedbar", "aria-live": "polite" },
       el("span", { class: "performance-feed-state", id: "performance-feed-state" },
@@ -4094,35 +4179,49 @@ function relativeSampleAge(milliseconds) {
   return `${Math.floor(seconds / 60)}m ago`;
 }
 
+function demoMetricSample(seconds) {
+  const previous = latestPerformanceSample() || DEMO_METRICS[DEMO_METRICS.length - 1];
+  const tick = Date.now() / 1000;
+  return {
+    ...previous,
+    collected_at: new Date().toISOString(),
+    cpu_percent: Math.max(0, 32 + Math.sin(tick / 7) * 18 + Math.sin(tick / 2) * 5),
+    host_cpu_percent: Math.max(0, Math.min(100, 46 + Math.sin(tick / 6) * 24)),
+    cpu_temp_celsius: 57 + Math.sin(tick / 10) * 6,
+    cpu_cores: Array.from({ length: 8 }, (_, core) => ({
+      index: core,
+      usage_percent: Math.max(1, Math.min(100, 38 + Math.sin((tick + core * 2) / 5) * 30 + core * 2)),
+      temp_celsius: 52 + Math.sin((tick + core) / 10) * 6 + core * 0.5,
+    })),
+    rss_bytes: Math.max(0, Number(previous.rss_bytes) + Math.sin(tick / 11) * 6 * 1024 * 1024),
+    host_mem_avail: 18 * 1024 * 1024 * 1024 - Math.sin(tick / 9) * 1.4 * 1024 * 1024 * 1024,
+    load1: Math.max(0, 0.72 + Math.sin(tick / 8) * 0.38),
+    online_players: Math.max(0, Math.round(3 + Math.sin(tick / 20))),
+    uptime_seconds: Number(previous.uptime_seconds || 0) + seconds,
+  };
+}
+
 function syncDemoPerformanceStream() {
+  if (demoOverviewTimer) clearInterval(demoOverviewTimer);
   if (demoPerformanceTimer) clearInterval(demoPerformanceTimer);
+  demoOverviewTimer = null;
   demoPerformanceTimer = null;
-  if (!DEMO_MODE || (S.page !== "performance" && S.page !== "overview")) return;
-  const seconds = S.page === "performance" ? S.perfIntervalSeconds : 10;
-  demoPerformanceTimer = setInterval(() => {
-    const previous = latestPerformanceSample() || DEMO_METRICS[DEMO_METRICS.length - 1];
-    const tick = Date.now() / 1000;
-    const sample = {
-      ...previous,
-      collected_at: new Date().toISOString(),
-      cpu_percent: Math.max(0, 32 + Math.sin(tick / 7) * 18 + Math.sin(tick / 2) * 5),
-      host_cpu_percent: Math.max(0, Math.min(100, 46 + Math.sin(tick / 6) * 24)),
-      cpu_temp_celsius: 57 + Math.sin(tick / 10) * 6,
-      cpu_cores: Array.from({ length: 8 }, (_, core) => ({
-        index: core,
-        usage_percent: Math.max(1, Math.min(100, 38 + Math.sin((tick + core * 2) / 5) * 30 + core * 2)),
-        temp_celsius: 52 + Math.sin((tick + core) / 10) * 6 + core * 0.5,
-      })),
-      rss_bytes: Math.max(0, Number(previous.rss_bytes) + Math.sin(tick / 11) * 6 * 1024 * 1024),
-      host_mem_avail: 18 * 1024 * 1024 * 1024 - Math.sin(tick / 9) * 1.4 * 1024 * 1024 * 1024,
-      load1: Math.max(0, 0.72 + Math.sin(tick / 8) * 0.38),
-      online_players: Math.max(0, Math.round(3 + Math.sin(tick / 20))),
-      uptime_seconds: Number(previous.uptime_seconds || 0) + seconds,
-    };
+  if (!DEMO_MODE) return;
+  demoOverviewTimer = setInterval(() => {
+    const sample = demoMetricSample(OVERVIEW_INTERVAL_SECONDS);
+    updateSidebarLiveStats(sample);
+    if (S.page !== "overview") return;
     appendPerformanceSample(sample);
     setUptimeBaseline(sample);
     updateLiveStats(sample);
-  }, seconds * 1000);
+  }, OVERVIEW_INTERVAL_SECONDS * 1000);
+  if (S.page !== "performance") return;
+  demoPerformanceTimer = setInterval(() => {
+    const sample = demoMetricSample(S.perfIntervalSeconds);
+    appendPerformanceSample(sample);
+    setUptimeBaseline(sample);
+    updateLiveStats(sample);
+  }, S.perfIntervalSeconds * 1000);
 }
 
 setInterval(updatePerformanceFreshness, 1000);
@@ -5530,7 +5629,7 @@ async function pageSecurity(main) {
 
 const BOT_EVENT_FIELDS = [
   ["notify_server_started", "Server started", "After Minecraft is fully ready"],
-  ["notify_server_stopped", "Server stopped", "After the process fully exits"],
+  ["notify_server_stopped", "Server stopping", "As soon as shutdown begins"],
   ["notify_player_joined", "Player joins", "Includes player and server names"],
   ["notify_player_left", "Player leaves", "Includes player and server names"],
 ];
@@ -5589,6 +5688,11 @@ function botPowerButton(bot) {
         await patchBot(bot, { enabled: next }, button);
         button.classList.toggle("is-on", next);
         button.closest(".bot-card")?.classList.toggle("is-disabled", !next);
+        const testButton = button.closest(".bot-card")?.querySelector(".bot-test-button");
+        if (testButton) {
+          testButton.disabled = !next;
+          testButton.title = next ? "Send a test notification" : "Turn on the bot to send a test notification";
+        }
         button.setAttribute("aria-pressed", String(next));
         button.setAttribute("aria-label", `${next ? "Turn off" : "Turn on"} ${bot.name}`);
         button.querySelector(".bot-power-label").textContent = next ? "On" : "Off";
@@ -5601,10 +5705,52 @@ function botPowerButton(bot) {
 }
 
 function botDestinations(bot) {
+  let configured = [];
   if (Array.isArray(bot.destinations) && bot.destinations.length) {
-    return bot.destinations.filter((destination) => destination && destination.id);
+    configured = bot.destinations.filter((destination) => destination && destination.id);
+  } else if (bot.destination_id) {
+    configured = [{ id: bot.destination_id, name: "", type: "" }];
   }
-  return bot.destination_id ? [{ id: bot.destination_id, name: "", type: "" }] : [];
+  const discovered = Array.isArray(bot?.discovered_destinations)
+    ? bot.discovered_destinations.filter((destination) => destination && destination.id)
+    : [];
+  if (!discovered.length) return configured;
+  return configured.map((destination) => {
+    const match = bot.provider === "discord"
+      ? discovered.find((container) => String(container.guild_id || container.id) === String(destination.guild_id || ""))
+      : discovered.find((container) => String(container.id) === String(destination.id));
+    return match ? { ...match, ...destination, discovered_at: destination.discovered_at || match.discovered_at } : destination;
+  });
+}
+
+function botKnownContainers(bot) {
+  const configured = botDestinations(bot);
+  const discovered = Array.isArray(bot?.discovered_destinations)
+    ? bot.discovered_destinations.filter((destination) => destination && destination.id)
+    : [];
+  if (bot?.provider === "telegram") {
+    const byID = new Map(discovered.map((group) => [String(group.id), { ...group, configured: null }]));
+    for (const destination of configured) {
+      const key = String(destination.id);
+      const current = byID.get(key) || {};
+      byID.set(key, { ...current, ...destination, configured: destination });
+    }
+    return [...byID.values()];
+  }
+  const byGuild = new Map();
+  for (const guild of discovered) {
+    const guildID = String(guild.guild_id || guild.id);
+    byGuild.set(guildID, [{ ...guild, guild_id: guildID, configured: null }]);
+  }
+  for (const destination of configured) {
+    const guildID = String(destination.guild_id || "");
+    const existing = byGuild.get(guildID);
+    const base = existing?.[0] || {};
+    const row = { ...base, ...destination, guild_id: guildID, configured: destination };
+    if (existing?.[0]?.configured) existing.push(row);
+    else byGuild.set(guildID, [row]);
+  }
+  return [...byGuild.values()].flat();
 }
 
 function botGroupInitials(destination) {
@@ -5631,11 +5777,58 @@ function botGroupAvatar(destination, bot = null) {
   return avatar;
 }
 
+function discordServerAvatar(destination) {
+  const guildID = String(destination?.guild_id || "");
+  const icon = String(destination?.guild_icon || "");
+  const source = /^\d{10,25}$/.test(guildID) && /^[A-Za-z0-9_]+$/.test(icon)
+    ? `https://cdn.discordapp.com/icons/${guildID}/${icon}.png?size=64`
+    : "";
+  const avatar = el("span", { class: "bot-group-avatar", "aria-hidden": "true" }, botGroupInitials({ name: destination?.guild_name }));
+  if (source) avatar.append(el("img", { src: source, alt: "", loading: "lazy", onerror: (event) => event.currentTarget.remove() }));
+  return avatar;
+}
+
+async function botInviteURL(bot) {
+  const result = await api(`/bots/${bot.id}/invite`);
+  const invite = new URL(String(result?.url || ""));
+  const allowed = bot.provider === "telegram"
+    ? invite.protocol === "https:" && invite.hostname === "t.me"
+    : invite.protocol === "https:" && invite.hostname === "discord.com";
+  if (!allowed) throw new Error("The provider returned an invalid invite link");
+  return invite.href;
+}
+
+async function inviteBot(bot) {
+  const popup = window.open("about:blank", "_blank");
+  if (popup) popup.opener = null;
+  try {
+    const inviteURL = await botInviteURL(bot);
+    if (popup) popup.location.replace(inviteURL);
+    else if (!window.open(inviteURL, "_blank", "noopener,noreferrer")) {
+      throw new Error("Allow pop-ups to open the bot invite");
+    }
+  } catch (error) {
+    if (popup) popup.close();
+    toast(error.message, "err");
+  }
+}
+
+async function copyBotInvite(bot, button) {
+  button.disabled = true;
+  try {
+    await copyText(await botInviteURL(bot), "Bot invite link copied");
+  } catch (error) {
+    toast(error.message, "err");
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function botCard(bot) {
   const destinations = botDestinations(bot);
   const destinationLabel = bot.provider === "telegram"
     ? `${destinations.length} of 3 groups`
-    : "Channel";
+    : `${destinations.length} of 3 channels`;
   return el("article", { class: "card bot-card" + (bot.enabled ? "" : " is-disabled") },
     el("div", { class: "bot-card-head" },
       botProviderMark(bot.provider),
@@ -5646,28 +5839,45 @@ function botCard(bot) {
     el("div", { class: "bot-destination" },
       el("span", { class: "bot-destination-label" }, destinationLabel),
       el("div", { class: "bot-destination-values" }, destinations.length ? destinations.map((destination) =>
-        el("span", { class: "bot-destination-value" + (bot.provider === "telegram" ? " has-avatar" : "") },
-          bot.provider === "telegram" ? botGroupAvatar(destination, bot) : null,
+        el("span", { class: "bot-destination-value has-avatar" },
+          bot.provider === "telegram" ? botGroupAvatar(destination, bot) : discordServerAvatar(destination),
           el("span", { class: "bot-destination-copy" },
             el("span", { class: "bot-destination-name" },
-              destination.name ? el("strong", {}, destination.name) : null,
-              destination.thread_id ? el("small", {}, destination.thread_name || `Channel ${destination.thread_id}`) : null),
-            el("code", {}, destination.id)))) :
+              bot.provider === "discord"
+                ? el("strong", {}, destination.guild_name || "Discord server")
+                : (destination.name ? el("strong", {}, destination.name) : null),
+              bot.provider === "discord"
+                ? el("small", {}, `#${String(destination.name || destination.id).replace(/^#/, "")}`)
+                : (destination.thread_id ? el("small", {}, destination.thread_name || `Channel ${destination.thread_id}`) : null)),
+            el("span", { class: "bot-destination-added" }, `Added on ${fmtTimeToMinute(destination.discovered_at || bot.created_at)}`)))) :
         el("span", { class: "muted" }, bot.provider === "telegram" ? "Run /bonghos here in a Telegram group" : "Not configured"))),
     el("div", { class: "bot-events-title" }, "Notify when"),
     el("div", { class: "bot-event-grid" },
       ...BOT_EVENT_FIELDS.map(([field, label, note]) => botEventToggle(bot, field, label, note))),
     el("div", { class: "bot-card-actions" },
       el("button", { class: "btn ghost small", onclick: () => botEditor(bot) }, "Edit"),
-      el("button", { class: "btn ghost small", onclick: async (event) => {
+      el("button", {
+        class: "btn ghost small bot-test-button",
+        disabled: bot.enabled ? null : "",
+        title: bot.enabled ? "Send a test notification" : "Turn on the bot to send a test notification",
+        onclick: async (event) => {
         const button = event.currentTarget;
         button.disabled = true;
         try {
           await api(`/bots/${bot.id}/test`, { method: "POST", json: {} });
           toast(`Test sent through ${bot.name}`, "ok");
         } catch (error) { toast(error.message, "err"); }
-        finally { button.disabled = false; }
+        finally { button.disabled = !bot.enabled; }
       } }, "Send test"),
+      el("span", { class: "bot-invite-group" },
+        el("button", { class: "btn primary small", onclick: () => inviteBot(bot) }, "Invite Bot"),
+        el("button", {
+          class: "btn primary small bot-invite-copy",
+          type: "button",
+          title: "Copy invite link",
+          "aria-label": "Copy invite link",
+          onclick: (event) => copyBotInvite(bot, event.currentTarget),
+        }, solarIcon("copy-linear"))),
       el("div", { class: "spacer" }),
       DEMO_DEBUG_BOTS ? null : el("button", { class: "btn danger small", onclick: () => removeBot(bot) }, "Remove")));
 }
@@ -5690,74 +5900,92 @@ function botEditor(existing = null, currentBots = []) {
     type: "password", autocomplete: "new-password", spellcheck: "false",
     placeholder: existing ? "Leave blank to keep the current token" : "Paste the bot token",
   });
-  const destination = el("input", {
-    value: existing?.provider === "discord" ? existing.destination_id || "" : "",
-    autocomplete: "off", spellcheck: "false", placeholder: "123456789012345678",
-  });
-  let connectedGroups = existing?.provider === "telegram" ? botDestinations(existing) : [];
+  let configuredDestinations = existing ? botDestinations(existing) : [];
+  let knownContainers = existing ? botKnownContainers(existing) : [];
   const groupList = el("div", { class: "bot-group-list" });
   const groupCount = el("span", { class: "bot-group-count" });
   const groupInstruction = el("p", { class: "hint" });
   const findGroupsButton = el("button", { class: "btn ghost small", type: "button" }, "Refresh");
+  let refreshTimer = null;
+  let refreshInFlight = false;
+  let submitted = false;
 
   const renderGroupChoices = () => {
+    const telegram = provider.value === "telegram";
     groupList.innerHTML = "";
-    groupCount.textContent = `${connectedGroups.length}/3 connected`;
+    groupCount.textContent = `${configuredDestinations.length}/3 configured`;
     groupInstruction.textContent = existing
-      ? "Run /bonghos here in the Telegram topic that should receive notifications. Use /bonghos help to list commands."
-      : "Save this bot first, add it to a group as an administrator, then run /bonghos here in the destination topic.";
-    if (!connectedGroups.length) {
-      groupList.append(el("div", { class: "bot-group-empty muted" }, existing ? "No Telegram groups connected yet." : "Destinations are connected after the bot is saved."));
+      ? (telegram
+        ? "Run /bonghos here in the Telegram topic that should receive notifications. Use /bonghos help to list commands."
+        : "Invite the bot with bot and applications.commands scopes. Allow it to view and send messages in the target channel, then run /bonghos here. The bot does not need administrator rights.")
+      : (telegram
+        ? "Save this bot first, add it to a group as an administrator, then have a group administrator run /bonghos here in the destination topic."
+        : "Save this bot first, invite it with bot and applications.commands scopes, allow View Channel and Send Messages, then have a server administrator run /bonghos here.");
+    if (!knownContainers.length) {
+      groupList.append(el("div", { class: "bot-group-empty muted" }, existing ? `Bot has not joined any ${telegram ? "groups" : "servers"} yet.` : "Destinations are detected after the bot is saved and invited."));
       return;
     }
-    const groups = [...connectedGroups].sort((left, right) =>
-      left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+    const groups = [...knownContainers].sort((left, right) =>
+      String(telegram ? left.name : left.guild_name).localeCompare(String(telegram ? right.name : right.guild_name), undefined, { sensitivity: "base" }));
     for (const group of groups) {
-      const topicLabel = Number(group.thread_id) > 1
-        ? (group.thread_name || "Selected topic") : "General";
-      const row = el("div", { class: "bot-group-choice bot-group-connected is-selected" },
-        botGroupAvatar(group, existing),
+      const configured = group.configured;
+      const topicLabel = !configured
+        ? "Not configured"
+        : (telegram
+          ? (Number(configured.thread_id) > 1 ? (configured.thread_name || "Selected topic") : "General")
+          : `#${String(configured.name || configured.id).replace(/^#/, "")}`);
+      const row = el("div", { class: "bot-group-choice bot-group-connected" + (configured ? " is-selected" : " is-unconfigured") },
+        telegram ? botGroupAvatar(group, existing) : discordServerAvatar(group),
         el("span", { class: "bot-group-copy" },
-          el("strong", {}, group.name || group.id),
-          el("small", {}, topicLabel)));
+          el("strong", {}, telegram ? (group.name || group.id) : (group.guild_name || "Discord server")),
+          el("small", {}, topicLabel)),
+        el("small", { class: "bot-group-added" }, `Added on ${fmtTimeToMinute(group.discovered_at || existing?.created_at)}`));
       groupList.append(row);
     }
   };
 
-  findGroupsButton.addEventListener("click", async () => {
+  const refreshDestinations = async (announce = false) => {
     if (!existing) {
-      toast("Save the Telegram bot before connecting groups", "err");
+      if (announce) toast("Save the bot before connecting destinations", "err");
       return;
     }
-    findGroupsButton.disabled = true;
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    if (announce) findGroupsButton.disabled = true;
     try {
       const bots = await api("/bots");
       const refreshed = (Array.isArray(bots) ? bots : []).find((bot) => Number(bot.id) === Number(existing.id));
-      connectedGroups = refreshed ? botDestinations(refreshed) : connectedGroups;
+      if (refreshed) {
+        Object.assign(existing, refreshed);
+        configuredDestinations = botDestinations(refreshed);
+        knownContainers = botKnownContainers(refreshed);
+      }
       renderGroupChoices();
-      toast(connectedGroups.length ? "Connected groups refreshed" : "No Telegram groups connected yet", connectedGroups.length ? "ok" : "");
+      if (announce) {
+        const telegram = provider.value === "telegram";
+        toast(knownContainers.length ? `${telegram ? "Groups" : "Servers"} refreshed` : `No ${telegram ? "groups" : "servers"} detected yet`, knownContainers.length ? "ok" : "");
+      }
     } catch (error) {
-      toast(error.message, "err");
+      if (announce) toast(error.message, "err");
     } finally {
-      findGroupsButton.disabled = false;
+      refreshInFlight = false;
+      if (announce) findGroupsButton.disabled = false;
     }
-  });
+  };
+  findGroupsButton.addEventListener("click", () => refreshDestinations(true));
 
   const telegramDestination = el("div", { class: "field-row bot-telegram-destinations" },
     el("div", { class: "bot-group-heading" },
-      el("span", {}, "Groups"),
+      el("span", {}, "Destinations"),
       el("div", { class: "bot-group-heading-actions" }, groupCount, findGroupsButton)),
     groupInstruction,
     groupList);
-  const discordDestination = el("div", { class: "field-row bot-discord-destination" },
-    el("label", {}, "Channel ID", destination));
   const enabled = el("input", { type: "checkbox" });
   enabled.checked = existing ? !!existing.enabled : true;
   const eventInputs = {};
   const renderDestination = () => {
-    const telegram = provider.value === "telegram";
-    telegramDestination.hidden = !telegram;
-    discordDestination.hidden = telegram;
+    telegramDestination.hidden = false;
+    renderGroupChoices();
   };
   provider.disabled = !!existing;
   if (!existing) provider.addEventListener("change", renderDestination);
@@ -5777,7 +6005,6 @@ function botEditor(existing = null, currentBots = []) {
     el("div", { class: "field-row" }, el("label", {}, "Provider", provider)),
     el("div", { class: "field-row" }, el("label", {}, existing ? "New bot token (optional)" : "Bot token", token)),
     telegramDestination,
-    discordDestination,
     existing ? null : el("label", { class: "check-row bot-enabled-row" }, enabled, " Bot enabled"),
     existing ? null : el("h3", { class: "bot-modal-heading" }, "Notifications"),
     existing ? null : el("div", { class: "bot-modal-events" }, notificationRows),
@@ -5789,12 +6016,7 @@ function botEditor(existing = null, currentBots = []) {
         toast("Bot token is required", "err");
         token.focus(); return;
       }
-      const telegram = provider.value === "telegram";
       const body = { name: name.value.trim() };
-      if (!telegram) {
-        if (!destination.value.trim()) { toast("Discord channel ID is required", "err"); destination.focus(); return; }
-        body.destination_id = destination.value.trim();
-      }
       if (!existing) {
         body.provider = provider.value;
         body.enabled = enabled.checked;
@@ -5804,12 +6026,20 @@ function botEditor(existing = null, currentBots = []) {
       try {
         if (existing) await api(`/bots/${existing.id}`, { method: "PATCH", json: body });
         else await api("/bots", { method: "POST", json: body });
+        submitted = true;
         close();
-        toast(existing ? "Bot updated" : (telegram ? "Bot added. Run /bonghos here in a Telegram group to connect it." : "Bot added"), "ok");
+        toast(existing ? "Bot updated" : "Bot added. Run /bonghos here to connect a destination.", "ok");
         await renderPage();
       } catch (error) { toast(error.message, "err"); }
     }],
-  ]);
+  ], () => {
+    if (refreshTimer) clearInterval(refreshTimer);
+    if (existing && !submitted) void renderPage();
+  });
+  if (existing) {
+    void refreshDestinations();
+    refreshTimer = setInterval(() => void refreshDestinations(), 2000);
+  }
 }
 
 function removeBot(bot) {
@@ -5878,7 +6108,7 @@ function botsSettingsSection(bots) {
 async function pageSettings(main) {
   const [version, rawBots, host] = await Promise.all([
     api("/version").catch(() => ({ version: "unknown" })),
-    can("security.manage") ? api("/bots") : Promise.resolve([]),
+    can("bots.manage") ? api("/bots") : Promise.resolve([]),
     can("server.configuration.manage") ? api("/host").catch(() => null) : Promise.resolve(null),
   ]);
   const bots = Array.isArray(rawBots) ? rawBots : [];
@@ -5899,7 +6129,7 @@ async function pageSettings(main) {
           makeThemeButton("system", "System"),
           makeThemeButton("dark", "Dark"),
           makeThemeButton("light", "Light"))))),
-    can("security.manage") ? botsSettingsSection(bots) : null,
+    can("bots.manage") ? botsSettingsSection(bots) : null,
     el("section", { class: "settings-page-section", "aria-labelledby": "about-settings-title" },
       settingsSectionHeading("about-settings-title", "About", "Installation details and service status."),
       el("div", { class: "card" },

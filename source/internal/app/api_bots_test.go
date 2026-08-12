@@ -54,6 +54,10 @@ func TestBotAPIEncryptsTokenAndSupportsToggles(t *testing.T) {
 	if status != http.StatusOK || updated.Enabled || updated.NotifyPlayerJoined {
 		t.Fatalf("patch bot: %d %s %+v", status, body, updated)
 	}
+	status, body = client.do(http.MethodPost, "/api/bots/"+itoa(created.ID)+"/test", map[string]any{}, nil)
+	if status != http.StatusConflict || !strings.Contains(body, "disabled") {
+		t.Fatalf("test disabled bot: %d %s", status, body)
+	}
 
 	var listed []*bot.Config
 	status, body = client.do(http.MethodGet, "/api/bots", nil, &listed)
@@ -100,11 +104,65 @@ func TestTelegramBotCanBeCreatedBeforeHereCommand(t *testing.T) {
 	if status != http.StatusCreated || len(created.Destinations) != 0 || created.DestinationID != "" {
 		t.Fatalf("create destination-free Telegram bot: %d %s %+v", status, body, created)
 	}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/getMe") {
+			_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"bonghos_test_bot"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[]}`))
+	}))
+	defer provider.Close()
+	env.app.BotNotify.Sender.TelegramBaseURL = provider.URL
+	var discovery bot.TelegramDiscovery
+	status, body = client.do(http.MethodPost, "/api/bots/"+itoa(created.ID)+"/telegram/discover", map[string]any{}, &discovery)
+	if status != http.StatusOK || discovery.BotUsername != "bonghos_test_bot" {
+		t.Fatalf("discover destination-free Telegram bot: %d %s %+v", status, body, discovery)
+	}
 }
 
-func TestBotAPIRequiresOwnerSecurityPermission(t *testing.T) {
+func TestDiscordBotCanBeCreatedBeforeSlashCommand(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	client := env.newClient()
+	client.mustLogin("owner", "correct horse battery", secret)
+
+	var created bot.Config
+	status, body := client.do(http.MethodPost, "/api/bots", map[string]any{
+		"name": "Discord commands", "provider": "discord",
+		"token": "discord_bot_token_for_command_setup",
+	}, &created)
+	if status != http.StatusCreated || len(created.Destinations) != 0 || created.DestinationID != "" {
+		t.Fatalf("create destination-free Discord bot: %d %s %+v", status, body, created)
+	}
+}
+
+func TestBotInviteEndpointResolvesProviderLinkServerSide(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	client := env.newClient()
+	client.mustLogin("owner", "correct horse battery", secret)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"bonghos_test_bot"}}`))
+	}))
+	defer provider.Close()
+	env.app.BotNotify.Sender.TelegramBaseURL = provider.URL
+	const token = "123456789:telegram_invite_secret"
+	var created bot.Config
+	status, body := client.do(http.MethodPost, "/api/bots", map[string]any{
+		"name": "Invite bot", "provider": "telegram", "token": token,
+	}, &created)
+	if status != http.StatusCreated {
+		t.Fatalf("create bot: %d %s", status, body)
+	}
+	var invite map[string]string
+	status, body = client.do(http.MethodGet, "/api/bots/"+itoa(created.ID)+"/invite", nil, &invite)
+	if status != http.StatusOK || invite["url"] != "https://t.me/bonghos_test_bot?startgroup&admin=manage_chat" || strings.Contains(body, token) {
+		t.Fatalf("invite response: %d %s", status, body)
+	}
+}
+
+func TestBotAPIRejectsRolesWithoutBotPermission(t *testing.T) {
 	for _, role := range []authorization.Role{
-		authorization.RoleAdmin,
 		authorization.RoleMember,
 		authorization.RoleViewer,
 	} {
@@ -123,7 +181,45 @@ func TestBotAPIRequiresOwnerSecurityPermission(t *testing.T) {
 			if status, _ := client.do(http.MethodGet, "/api/bots/1/telegram/destinations/-1001/photo", nil, nil); status != http.StatusForbidden {
 				t.Fatalf("%s GET Telegram group photo = %d, want 403", role, status)
 			}
+			if status, _ := client.do(http.MethodGet, "/api/bots/1/invite", nil, nil); status != http.StatusForbidden {
+				t.Fatalf("%s GET bot invite = %d, want 403", role, status)
+			}
 		})
+	}
+}
+
+func TestAdminCanAddEditListAndRemoveBots(t *testing.T) {
+	env := newTestEnv(t)
+	secret := env.createUser("admin", "correct horse battery", authorization.RoleAdmin)
+	client := env.newClient()
+	client.mustLogin("admin", "correct horse battery", secret)
+
+	const token = "123456789:admin_bot_management_secret"
+	var created bot.Config
+	status, body := client.do(http.MethodPost, "/api/bots", map[string]any{
+		"name": "Admin alerts", "provider": "telegram", "token": token,
+	}, &created)
+	if status != http.StatusCreated || created.Name != "Admin alerts" || strings.Contains(body, token) {
+		t.Fatalf("admin create bot: %d %s %+v", status, body, created)
+	}
+
+	var updated bot.Config
+	status, body = client.do(http.MethodPatch, "/api/bots/"+itoa(created.ID), map[string]any{
+		"name": "Admin edited alerts", "enabled": false,
+	}, &updated)
+	if status != http.StatusOK || updated.Name != "Admin edited alerts" || updated.Enabled {
+		t.Fatalf("admin edit bot: %d %s %+v", status, body, updated)
+	}
+
+	var listed []*bot.Config
+	status, body = client.do(http.MethodGet, "/api/bots", nil, &listed)
+	if status != http.StatusOK || len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("admin list bots: %d %s %+v", status, body, listed)
+	}
+
+	status, body = client.do(http.MethodDelete, "/api/bots/"+itoa(created.ID), nil, nil)
+	if status != http.StatusOK {
+		t.Fatalf("admin remove bot: %d %s", status, body)
 	}
 }
 
@@ -189,6 +285,11 @@ func TestTelegramBotDiscoveryAndMultipleDestinations(t *testing.T) {
 	if status != http.StatusCreated || len(created.Destinations) != 1 || len(created.DiscoveredDestinations) != 2 || strings.Contains(body, token) {
 		t.Fatalf("create multi-group bot: %d %s %+v", status, body, created)
 	}
+	for _, group := range created.DiscoveredDestinations {
+		if group.DiscoveredAt == "" {
+			t.Fatalf("created discovery has no stable timestamp: %+v", created.DiscoveredDestinations)
+		}
+	}
 	var refreshed bot.TelegramDiscovery
 	status, body = client.do(http.MethodPost, "/api/bots/"+itoa(created.ID)+"/telegram/discover", map[string]any{}, &refreshed)
 	if status != http.StatusOK || len(refreshed.Groups) != 2 {
@@ -237,7 +338,7 @@ func TestBotNotificationsIncludeServerAndPlayerNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages := make(chan string, 4)
+	messages := make(chan string, 5)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
 			Text string `json:"text"`
@@ -252,6 +353,7 @@ func TestBotNotificationsIncludeServerAndPlayerNames(t *testing.T) {
 	env.app.handleConsoleLine(`[12:00:00] [Server thread/INFO]: Done (1.25s)! For help, type "help"`, true)
 	env.app.handleConsoleLine(`[12:01:00] [Server thread/INFO]: Steve joined the game`, true)
 	env.app.handleConsoleLine(`[12:02:00] [Server thread/INFO]: Steve left the game`, true)
+	env.app.observeBotLifecycle("stopping")
 	env.app.observeBotLifecycle("stopped")
 
 	var received []string
@@ -265,9 +367,14 @@ func TestBotNotificationsIncludeServerAndPlayerNames(t *testing.T) {
 		}
 	}
 	joined := strings.Join(received, "\n")
-	for _, expected := range []string{"Server started", "Named Pack", "Steve joined", "Steve left", "Server stopped"} {
+	for _, expected := range []string{"Server started", "Named Pack", "Steve joined", "Steve left", "Server stopping", "shutting down"} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("notifications missing %q: %v", expected, received)
 		}
+	}
+	select {
+	case duplicate := <-messages:
+		t.Fatalf("duplicate stop notification after process exit: %q", duplicate)
+	case <-time.After(150 * time.Millisecond):
 	}
 }

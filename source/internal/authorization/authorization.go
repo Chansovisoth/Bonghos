@@ -41,6 +41,7 @@ const (
 	PermBackupsRestore    Permission = "server.backups.restore"
 	PermSchedulesManage   Permission = "server.schedules.manage"
 	PermUsersManage       Permission = "users.manage"
+	PermBotsManage        Permission = "bots.manage"
 	PermSecurityManage    Permission = "security.manage"
 	PermHostManage        Permission = "host.manage"
 	PermPortabilityManage Permission = "portability.manage"
@@ -60,6 +61,7 @@ var rolePerms = map[Role]map[Permission]bool{
 		PermBackupsView:  true, PermBackupsCreate: true, PermBackupsRestore: true,
 		PermSchedulesManage: true,
 		PermUsersManage:     true, // limited: cannot touch Owners (enforced separately)
+		PermBotsManage:      true,
 	},
 	RoleMember: {
 		PermServerView:    true,
@@ -82,7 +84,7 @@ func allPermissions() map[Permission]bool {
 		PermServerForceStop, PermConsoleView, PermConsoleUse, PermPlayersView,
 		PermPlayersManage, PermFilesManage, PermConfigManage, PermIconManage,
 		PermImportManage, PermBackupsView, PermBackupsCreate, PermBackupsRestore,
-		PermSchedulesManage, PermUsersManage, PermSecurityManage, PermHostManage,
+		PermSchedulesManage, PermUsersManage, PermBotsManage, PermSecurityManage, PermHostManage,
 		PermPortabilityManage,
 	} {
 		m[p] = true

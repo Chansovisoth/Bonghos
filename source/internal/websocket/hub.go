@@ -237,7 +237,7 @@ func (c *client) readLoop(h *Hub, onCommand func(string)) {
 		case "subscribe":
 			if c.canUse == nil || c.canUse(msg.Topic) {
 				interval := time.Duration(0)
-				if msg.Topic == "performance" && msg.IntervalSeconds > 0 {
+				if (msg.Topic == "performance" || msg.Topic == "overview") && msg.IntervalSeconds > 0 {
 					seconds := msg.IntervalSeconds
 					if seconds < 1 {
 						seconds = 1

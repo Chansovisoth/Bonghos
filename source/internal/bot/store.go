@@ -30,6 +30,7 @@ var (
 	telegramDestinationRE = regexp.MustCompile(`^(?:-?\d+|@[A-Za-z0-9_]{5,})$`)
 	discordDestinationRE  = regexp.MustCompile(`^\d{10,25}$`)
 	ErrNotFound           = errors.New("notification bot not found")
+	ErrDisabled           = errors.New("notification bot is disabled")
 )
 
 type Config struct {
@@ -59,6 +60,10 @@ type Destination struct {
 	ThreadID     int64   `json:"thread_id,omitempty"`
 	ThreadName   string  `json:"thread_name,omitempty"`
 	Topics       []Topic `json:"topics,omitempty"`
+	GuildID      string  `json:"guild_id,omitempty"`
+	GuildName    string  `json:"guild_name,omitempty"`
+	GuildIcon    string  `json:"guild_icon,omitempty"`
+	DiscoveredAt string  `json:"discovered_at,omitempty"`
 }
 
 type Topic struct {
@@ -102,12 +107,39 @@ type Target struct {
 	ThreadID      int64
 }
 
+// Credential returns one provider credential without requiring a configured
+// destination. It is intended for backend-only provider setup operations.
+func (s *Store) Credential(id int64) (Target, error) {
+	var target Target
+	var encrypted []byte
+	err := s.DB.QueryRow(`SELECT id, name, provider, token_enc FROM notification_bots WHERE id=?`, id).
+		Scan(&target.ID, &target.Name, &target.Provider, &encrypted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Target{}, ErrNotFound
+	}
+	if err != nil {
+		return Target{}, err
+	}
+	token, err := security.Decrypt(s.SecretKey, encrypted)
+	if err != nil {
+		return Target{}, fmt.Errorf("decrypting %s bot credentials: %w", target.Provider, err)
+	}
+	target.Token = string(token)
+	return target, nil
+}
+
 type TelegramCommandState struct {
 	BotID        int64
 	BotName      string
 	Token        string
 	LastUpdateID int64
 	Initialized  bool
+}
+
+type DiscordCommandState struct {
+	BotID   int64
+	BotName string
+	Token   string
 }
 
 type Store struct {
@@ -145,10 +177,10 @@ func normalizeDestinations(provider string, values []Destination, legacy string)
 		values = []Destination{{ID: legacy}}
 	}
 	limit := 1
-	if provider == ProviderTelegram {
+	if provider == ProviderTelegram || provider == ProviderDiscord {
 		limit = 3
 	}
-	if len(values) == 0 && provider == ProviderTelegram {
+	if len(values) == 0 && (provider == ProviderTelegram || provider == ProviderDiscord) {
 		return []Destination{}, nil
 	}
 	if len(values) == 0 {
@@ -166,6 +198,9 @@ func normalizeDestinations(provider string, values []Destination, legacy string)
 		value.PhotoFileID = strings.TrimSpace(value.PhotoFileID)
 		value.PhotoDataURL = ""
 		value.ThreadName = strings.TrimSpace(value.ThreadName)
+		value.GuildID = strings.TrimSpace(value.GuildID)
+		value.GuildName = strings.TrimSpace(value.GuildName)
+		value.GuildIcon = strings.TrimSpace(value.GuildIcon)
 		value.Topics = nil
 		if seen[value.ID] {
 			return nil, errors.New("notification destinations must be unique")
@@ -185,7 +220,14 @@ func normalizeDestinations(provider string, values []Destination, legacy string)
 			value.ThreadID = 0
 			value.ThreadName = ""
 		}
-		if len([]rune(value.Name)) > 120 || len(value.Type) > 30 || len(value.PhotoFileID) > 512 || len([]rune(value.ThreadName)) > 128 {
+		if provider != ProviderDiscord {
+			value.GuildID = ""
+			value.GuildName = ""
+			value.GuildIcon = ""
+		} else if value.GuildID != "" && !discordDestinationRE.MatchString(value.GuildID) {
+			return nil, errors.New("Discord server ID must be a numeric snowflake")
+		}
+		if len([]rune(value.Name)) > 120 || len(value.Type) > 30 || len(value.PhotoFileID) > 512 || len([]rune(value.ThreadName)) > 128 || len([]rune(value.GuildName)) > 120 || len(value.GuildIcon) > 128 {
 			return nil, errors.New("notification destination metadata is too long")
 		}
 		normalized = append(normalized, value)
@@ -236,9 +278,9 @@ func cleanTopicName(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-func normalizeDiscovered(values []Destination) ([]Destination, error) {
+func normalizeDiscovered(provider string, values []Destination) ([]Destination, error) {
 	if len(values) > 100 {
-		return nil, errors.New("too many discovered Telegram groups")
+		return nil, errors.New("too many discovered notification containers")
 	}
 	byID := make(map[string]Destination, len(values))
 	for _, value := range values {
@@ -249,11 +291,30 @@ func normalizeDiscovered(values []Destination) ([]Destination, error) {
 		value.PhotoDataURL = ""
 		value.ThreadID = 0
 		value.ThreadName = ""
-		if !telegramDestinationRE.MatchString(value.ID) {
+		value.GuildID = strings.TrimSpace(value.GuildID)
+		value.GuildName = strings.TrimSpace(value.GuildName)
+		value.GuildIcon = strings.TrimSpace(value.GuildIcon)
+		if provider == ProviderTelegram && !telegramDestinationRE.MatchString(value.ID) {
 			return nil, errors.New("Telegram chat ID must be a numeric ID or @channel username")
 		}
-		if len([]rune(value.Name)) > 120 || len(value.Type) > 30 || len(value.PhotoFileID) > 512 {
-			return nil, errors.New("discovered Telegram group metadata is too long")
+		if provider == ProviderDiscord && !discordDestinationRE.MatchString(value.ID) {
+			return nil, errors.New("Discord server ID must be a numeric snowflake")
+		}
+		if len([]rune(value.Name)) > 120 || len(value.Type) > 30 || len(value.PhotoFileID) > 512 ||
+			len([]rune(value.GuildName)) > 120 || len(value.GuildIcon) > 128 {
+			return nil, errors.New("discovered notification container metadata is too long")
+		}
+		if provider == ProviderDiscord {
+			value.GuildID = value.ID
+			if value.GuildName == "" {
+				value.GuildName = value.Name
+			}
+			value.Topics = nil
+			value.Forum = false
+		} else {
+			value.GuildID = ""
+			value.GuildName = ""
+			value.GuildIcon = ""
 		}
 		topics := make([]Topic, 0, len(value.Topics))
 		for _, topic := range value.Topics {
@@ -279,6 +340,12 @@ func normalizeDiscovered(values []Destination) ([]Destination, error) {
 			if value.PhotoFileID == "" {
 				value.PhotoFileID = existing.PhotoFileID
 			}
+			if value.GuildName == "" {
+				value.GuildName = existing.GuildName
+			}
+			if value.GuildIcon == "" {
+				value.GuildIcon = existing.GuildIcon
+			}
 		}
 		byID[value.ID] = value
 	}
@@ -296,9 +363,10 @@ func normalizeDiscovered(values []Destination) ([]Destination, error) {
 func insertDestinations(tx *sql.Tx, botID int64, destinations []Destination) error {
 	for position, destination := range destinations {
 		if _, err := tx.Exec(`INSERT INTO notification_bot_destinations
-			(bot_id, destination_id, display_name, destination_type, photo_file_id, thread_id, thread_name, position)
-			VALUES (?,?,?,?,?,?,?,?)`, botID, destination.ID, destination.Name, destination.Type,
-			destination.PhotoFileID, destination.ThreadID, destination.ThreadName, position); err != nil {
+			(bot_id, destination_id, display_name, destination_type, photo_file_id, thread_id, thread_name, position, guild_id, guild_name, guild_icon)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?)`, botID, destination.ID, destination.Name, destination.Type,
+			destination.PhotoFileID, destination.ThreadID, destination.ThreadName, position,
+			destination.GuildID, destination.GuildName, destination.GuildIcon); err != nil {
 			return err
 		}
 	}
@@ -306,7 +374,7 @@ func insertDestinations(tx *sql.Tx, botID int64, destinations []Destination) err
 }
 
 func (s *Store) destinations(botID int64) ([]Destination, error) {
-	rows, err := s.DB.Query(`SELECT destination_id, display_name, destination_type, photo_file_id, thread_id, thread_name
+	rows, err := s.DB.Query(`SELECT destination_id, display_name, destination_type, photo_file_id, thread_id, thread_name, guild_id, guild_name, guild_icon
 		FROM notification_bot_destinations WHERE bot_id=? ORDER BY position, destination_id`, botID)
 	if err != nil {
 		return nil, err
@@ -316,7 +384,7 @@ func (s *Store) destinations(botID int64) ([]Destination, error) {
 	for rows.Next() {
 		var destination Destination
 		if err := rows.Scan(&destination.ID, &destination.Name, &destination.Type, &destination.PhotoFileID,
-			&destination.ThreadID, &destination.ThreadName); err != nil {
+			&destination.ThreadID, &destination.ThreadName, &destination.GuildID, &destination.GuildName, &destination.GuildIcon); err != nil {
 			return nil, err
 		}
 		values = append(values, destination)
@@ -350,15 +418,20 @@ func mergeDiscoveredTx(tx *sql.Tx, botID int64, values []Destination) error {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO notification_bot_discoveries
-			(bot_id, destination_id, display_name, destination_type, photo_file_id, is_forum, topics_json, last_seen_at)
-			VALUES (?,?,?,?,?,?,?,?)
+			(bot_id, destination_id, display_name, destination_type, photo_file_id, is_forum, topics_json, last_seen_at,
+			 guild_id, guild_name, guild_icon, discovered_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
 			ON CONFLICT(bot_id, destination_id) DO UPDATE SET
 			display_name=CASE WHEN excluded.display_name<>'' THEN excluded.display_name ELSE display_name END,
 			destination_type=CASE WHEN excluded.destination_type<>'' THEN excluded.destination_type ELSE destination_type END,
 			photo_file_id=CASE WHEN excluded.photo_file_id<>'' THEN excluded.photo_file_id ELSE photo_file_id END,
 			is_forum=MAX(is_forum, excluded.is_forum), topics_json=excluded.topics_json,
+			guild_id=CASE WHEN excluded.guild_id<>'' THEN excluded.guild_id ELSE guild_id END,
+			guild_name=CASE WHEN excluded.guild_name<>'' THEN excluded.guild_name ELSE guild_name END,
+			guild_icon=CASE WHEN excluded.guild_icon<>'' THEN excluded.guild_icon ELSE guild_icon END,
 			last_seen_at=excluded.last_seen_at`,
-			botID, value.ID, value.Name, value.Type, value.PhotoFileID, boolInt(value.Forum), string(encoded), now()); err != nil {
+			botID, value.ID, value.Name, value.Type, value.PhotoFileID, boolInt(value.Forum), string(encoded), now(),
+			value.GuildID, value.GuildName, value.GuildIcon, now()); err != nil {
 			return err
 		}
 	}
@@ -367,7 +440,7 @@ func mergeDiscoveredTx(tx *sql.Tx, botID int64, values []Destination) error {
 
 func (s *Store) discovered(botID int64) ([]Destination, error) {
 	rows, err := s.DB.Query(`SELECT destination_id, display_name, destination_type, photo_file_id,
-		is_forum, topics_json FROM notification_bot_discoveries
+		is_forum, topics_json, guild_id, guild_name, guild_icon, discovered_at FROM notification_bot_discoveries
 		WHERE bot_id=? ORDER BY display_name COLLATE NOCASE, destination_id`, botID)
 	if err != nil {
 		return nil, err
@@ -378,7 +451,8 @@ func (s *Store) discovered(botID int64) ([]Destination, error) {
 		var value Destination
 		var forum int
 		var raw string
-		if err := rows.Scan(&value.ID, &value.Name, &value.Type, &value.PhotoFileID, &forum, &raw); err != nil {
+		if err := rows.Scan(&value.ID, &value.Name, &value.Type, &value.PhotoFileID, &forum, &raw,
+			&value.GuildID, &value.GuildName, &value.GuildIcon, &value.DiscoveredAt); err != nil {
 			return nil, err
 		}
 		value.Forum = forum != 0
@@ -395,10 +469,7 @@ func (s *Store) MergeDiscovered(botID int64, values []Destination) ([]Destinatio
 	} else if err != nil {
 		return nil, err
 	}
-	if provider != ProviderTelegram {
-		return nil, errors.New("group discovery is available only for Telegram bots")
-	}
-	normalized, err := normalizeDiscovered(values)
+	normalized, err := normalizeDiscovered(provider, values)
 	if err != nil {
 		return nil, err
 	}
@@ -416,6 +487,46 @@ func (s *Store) MergeDiscovered(botID int64, values []Destination) ([]Destinatio
 	return s.discovered(botID)
 }
 
+// ForgetDiscovered removes a provider container after the bot leaves it. Any
+// configured targets inside that container are no longer reachable and are
+// removed in the same transaction so the UI and broadcaster cannot retain a
+// stale destination.
+func (s *Store) ForgetDiscovered(botID int64, destinationID string) error {
+	destinationID = strings.TrimSpace(destinationID)
+	if destinationID == "" {
+		return errors.New("notification container is required")
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var provider string
+	if err := tx.QueryRow(`SELECT provider FROM notification_bots WHERE id=?`, botID).Scan(&provider); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM notification_bot_discoveries WHERE bot_id=? AND destination_id=?`,
+		botID, destinationID); err != nil {
+		return err
+	}
+	if provider == ProviderTelegram {
+		_, err = tx.Exec(`DELETE FROM notification_bot_destinations WHERE bot_id=? AND destination_id=?`, botID, destinationID)
+	} else {
+		_, err = tx.Exec(`DELETE FROM notification_bot_destinations WHERE bot_id=? AND guild_id=?`, botID, destinationID)
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE notification_bots SET destination_id=COALESCE((SELECT destination_id
+		FROM notification_bot_destinations WHERE bot_id=? ORDER BY position LIMIT 1), ''), updated_at=? WHERE id=?`,
+		botID, now(), botID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) attachDestinations(config *Config) error {
 	destinations, err := s.destinations(config.ID)
 	if err != nil {
@@ -425,13 +536,11 @@ func (s *Store) attachDestinations(config *Config) error {
 	if len(destinations) > 0 {
 		config.DestinationID = destinations[0].ID
 	}
-	if config.Provider == ProviderTelegram {
-		discovered, err := s.discovered(config.ID)
-		if err != nil {
-			return err
-		}
-		config.DiscoveredDestinations = discovered
+	discovered, err := s.discovered(config.ID)
+	if err != nil {
+		return err
 	}
+	config.DiscoveredDestinations = discovered
 	return nil
 }
 
@@ -494,13 +603,13 @@ func (s *Store) Create(input CreateInput) (*Config, error) {
 		if _, err := tx.Exec(`INSERT INTO notification_bot_telegram_state (bot_id, last_update_id) VALUES (?, 0)`, id); err != nil {
 			return nil, err
 		}
-		discovered, err := normalizeDiscovered(append(input.DiscoveredDestinations, destinations...))
-		if err != nil {
-			return nil, err
-		}
-		if err := mergeDiscoveredTx(tx, id, discovered); err != nil {
-			return nil, err
-		}
+	}
+	discovered, err := normalizeDiscovered(input.Provider, append(input.DiscoveredDestinations, destinations...))
+	if err != nil {
+		return nil, err
+	}
+	if err := mergeDiscoveredTx(tx, id, discovered); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -678,14 +787,17 @@ func (s *Store) Patch(id int64, patch Patch) (*Config, error) {
 			return nil, err
 		}
 	}
-	if current.Provider == ProviderTelegram {
-		discovered, err := normalizeDiscovered(destinations)
-		if err != nil {
+	if newToken != "" {
+		if _, err := tx.Exec(`DELETE FROM notification_bot_discoveries WHERE bot_id=?`, id); err != nil {
 			return nil, err
 		}
-		if err := mergeDiscoveredTx(tx, id, discovered); err != nil {
-			return nil, err
-		}
+	}
+	discovered, err := normalizeDiscovered(current.Provider, destinations)
+	if err != nil {
+		return nil, err
+	}
+	if err := mergeDiscoveredTx(tx, id, discovered); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -766,7 +878,15 @@ func (s *Store) InitializeTelegramUpdates(botID, updateID int64) error {
 // SetTelegramDestination connects or replaces the one broadcast topic for a
 // group. A Telegram bot may be connected to at most three groups.
 func (s *Store) SetTelegramDestination(botID int64, destination Destination) error {
-	values, err := normalizeDestinations(ProviderTelegram, []Destination{destination}, "")
+	return s.setProviderDestination(botID, ProviderTelegram, "Telegram", "groups", destination)
+}
+
+func (s *Store) SetDiscordDestination(botID int64, destination Destination) error {
+	return s.setProviderDestination(botID, ProviderDiscord, "Discord", "channels", destination)
+}
+
+func (s *Store) setProviderDestination(botID int64, provider, label, destinationLabel string, destination Destination) error {
+	values, err := normalizeDestinations(provider, []Destination{destination}, "")
 	if err != nil {
 		return err
 	}
@@ -776,14 +896,14 @@ func (s *Store) SetTelegramDestination(botID int64, destination Destination) err
 		return err
 	}
 	defer tx.Rollback()
-	var provider string
-	if err := tx.QueryRow(`SELECT provider FROM notification_bots WHERE id=?`, botID).Scan(&provider); errors.Is(err, sql.ErrNoRows) {
+	var actualProvider string
+	if err := tx.QueryRow(`SELECT provider FROM notification_bots WHERE id=?`, botID).Scan(&actualProvider); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
 	}
-	if provider != ProviderTelegram {
-		return errors.New("destination commands are available only for Telegram bots")
+	if actualProvider != provider {
+		return fmt.Errorf("destination commands are available only for %s bots", label)
 	}
 	var count int
 	if err := tx.QueryRow(`SELECT COUNT(*) FROM notification_bot_destinations
@@ -791,23 +911,43 @@ func (s *Store) SetTelegramDestination(botID int64, destination Destination) err
 		return err
 	}
 	if count >= 3 {
-		return errors.New("Telegram already has three connected groups")
+		return fmt.Errorf("%s already has three connected %s", label, destinationLabel)
 	}
 	var position int
-	_ = tx.QueryRow(`SELECT position FROM notification_bot_destinations
+	err = tx.QueryRow(`SELECT position FROM notification_bot_destinations
 		WHERE bot_id=? AND destination_id=?`, botID, destination.ID).Scan(&position)
-	if position == 0 {
-		_ = tx.QueryRow(`SELECT COALESCE(MAX(position), -1)+1 FROM notification_bot_destinations
-			WHERE bot_id=?`, botID).Scan(&position)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRow(`SELECT COALESCE(MAX(position), -1)+1 FROM notification_bot_destinations
+			WHERE bot_id=?`, botID).Scan(&position); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO notification_bot_destinations
-		(bot_id, destination_id, display_name, destination_type, photo_file_id, thread_id, thread_name, position)
-		VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(bot_id, destination_id) DO UPDATE SET
+		(bot_id, destination_id, display_name, destination_type, photo_file_id, thread_id, thread_name, position, guild_id, guild_name, guild_icon)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(bot_id, destination_id) DO UPDATE SET
 		display_name=excluded.display_name, destination_type=excluded.destination_type,
 		photo_file_id=CASE WHEN excluded.photo_file_id<>'' THEN excluded.photo_file_id ELSE photo_file_id END,
-		thread_id=excluded.thread_id, thread_name=excluded.thread_name`, botID, destination.ID,
-		destination.Name, destination.Type, destination.PhotoFileID, destination.ThreadID, destination.ThreadName, position); err != nil {
+		thread_id=excluded.thread_id, thread_name=excluded.thread_name,
+		guild_id=excluded.guild_id, guild_name=excluded.guild_name, guild_icon=excluded.guild_icon`, botID, destination.ID,
+		destination.Name, destination.Type, destination.PhotoFileID, destination.ThreadID, destination.ThreadName, position,
+		destination.GuildID, destination.GuildName, destination.GuildIcon); err != nil {
 		return err
+	}
+	container := destination
+	if provider == ProviderDiscord {
+		container = Destination{ID: destination.GuildID, Name: destination.GuildName, Type: "guild",
+			GuildID: destination.GuildID, GuildName: destination.GuildName, GuildIcon: destination.GuildIcon}
+	}
+	if strings.TrimSpace(container.ID) != "" {
+		discovered, err := normalizeDiscovered(provider, []Destination{container})
+		if err != nil {
+			return err
+		}
+		if err := mergeDiscoveredTx(tx, botID, discovered); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.Exec(`UPDATE notification_bots SET destination_id=(SELECT destination_id
 		FROM notification_bot_destinations WHERE bot_id=? ORDER BY position LIMIT 1), updated_at=? WHERE id=?`,
@@ -818,13 +958,22 @@ func (s *Store) SetTelegramDestination(botID int64, destination Destination) err
 }
 
 func (s *Store) DisconnectTelegramDestination(botID int64, destinationID string) error {
+	return s.disconnectProviderDestination(botID, ProviderTelegram, destinationID)
+}
+
+func (s *Store) DisconnectDiscordDestination(botID int64, destinationID string) error {
+	return s.disconnectProviderDestination(botID, ProviderDiscord, destinationID)
+}
+
+func (s *Store) disconnectProviderDestination(botID int64, provider, destinationID string) error {
 	destinationID = strings.TrimSpace(destinationID)
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM notification_bot_destinations WHERE bot_id=? AND destination_id=?`, botID, destinationID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM notification_bot_destinations WHERE bot_id=? AND destination_id=?
+		AND EXISTS (SELECT 1 FROM notification_bots WHERE id=? AND provider=?)`, botID, destinationID, botID, provider); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`UPDATE notification_bots SET destination_id=COALESCE((SELECT destination_id
@@ -836,15 +985,50 @@ func (s *Store) DisconnectTelegramDestination(botID int64, destinationID string)
 }
 
 func (s *Store) TelegramDestination(botID int64, destinationID string) (*Destination, error) {
+	return s.providerDestination(botID, ProviderTelegram, destinationID)
+}
+
+func (s *Store) DiscordDestination(botID int64, destinationID string) (*Destination, error) {
+	return s.providerDestination(botID, ProviderDiscord, destinationID)
+}
+
+func (s *Store) providerDestination(botID int64, provider, destinationID string) (*Destination, error) {
 	var destination Destination
-	err := s.DB.QueryRow(`SELECT destination_id, display_name, destination_type, photo_file_id,
-		thread_id, thread_name FROM notification_bot_destinations WHERE bot_id=? AND destination_id=?`,
-		botID, strings.TrimSpace(destinationID)).Scan(&destination.ID, &destination.Name, &destination.Type,
-		&destination.PhotoFileID, &destination.ThreadID, &destination.ThreadName)
+	err := s.DB.QueryRow(`SELECT d.destination_id, d.display_name, d.destination_type, d.photo_file_id,
+		d.thread_id, d.thread_name, d.guild_id, d.guild_name, d.guild_icon FROM notification_bot_destinations d
+		JOIN notification_bots b ON b.id=d.bot_id
+		WHERE d.bot_id=? AND d.destination_id=? AND b.provider=?`,
+		botID, strings.TrimSpace(destinationID), provider).Scan(&destination.ID, &destination.Name, &destination.Type,
+		&destination.PhotoFileID, &destination.ThreadID, &destination.ThreadName,
+		&destination.GuildID, &destination.GuildName, &destination.GuildIcon)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return &destination, err
+}
+
+func (s *Store) DiscordCommandBots() ([]DiscordCommandState, error) {
+	rows, err := s.DB.Query(`SELECT id, name, token_enc FROM notification_bots
+		WHERE provider=? ORDER BY id`, ProviderDiscord)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	states := make([]DiscordCommandState, 0, 1)
+	for rows.Next() {
+		var state DiscordCommandState
+		var encrypted []byte
+		if err := rows.Scan(&state.BotID, &state.BotName, &encrypted); err != nil {
+			return nil, err
+		}
+		token, err := security.Decrypt(s.SecretKey, encrypted)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting Discord bot credentials: %w", err)
+		}
+		state.Token = string(token)
+		states = append(states, state)
+	}
+	return states, rows.Err()
 }
 
 func (s *Store) Targets(id int64) ([]Target, error) {

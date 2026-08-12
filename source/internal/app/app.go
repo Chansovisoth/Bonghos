@@ -161,6 +161,7 @@ func (a *App) Serve(ctx context.Context) error {
 	go a.metricsLoop(ctx)
 	go a.playerPollLoop(ctx)
 	go a.BotNotify.RunTelegramCommands(ctx)
+	go a.BotNotify.RunDiscordCommands(ctx)
 	go a.bootAutostart(ctx)
 	go a.Runner.attachConsole()
 
@@ -250,12 +251,18 @@ func (a *App) metricsLoop(ctx context.Context) {
 		case <-pruneT.C:
 			monitoring.Prune(a.DB, time.Duration(a.Cfg.MetricsRetentionDays)*24*time.Hour)
 		case now := <-pulse.C:
-			// Temporarily collect faster when an open Performance view asks for a
-			// more responsive feed. Persisted history stays on the configured
-			// cadence so a live dashboard does not multiply database writes.
+			// Temporarily collect faster when a live Overview/sidebar or open
+			// Performance view asks for a more responsive feed. Persisted history
+			// stays on the configured cadence so live dashboards do not multiply
+			// database writes.
 			effective := historyInterval
-			if a.Hub.SubscriberCount("performance") > 0 {
-				effective = a.Hub.MinimumInterval("performance", historyInterval)
+			for _, topic := range []string{"overview", "performance"} {
+				if a.Hub.SubscriberCount(topic) == 0 {
+					continue
+				}
+				if requested := a.Hub.MinimumInterval(topic, historyInterval); requested < effective {
+					effective = requested
+				}
 			}
 			if !lastSampleAt.IsZero() && now.Sub(lastSampleAt)+250*time.Millisecond < effective {
 				continue

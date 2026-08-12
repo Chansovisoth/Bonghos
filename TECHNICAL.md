@@ -155,6 +155,7 @@ There is no public registration. Setup creates the first Owner; an Owner or Admi
 | Edit files, configuration, and JVM settings | Yes | Yes | No | No |
 | Import, upload, and download projects | Yes | Yes | No | No |
 | Create backups, restore, and manage schedules | Yes | Yes | No | No |
+| Manage notification bots | Yes | Yes | No | No |
 | Manage users | Yes | Limited | No | No |
 | Manage host, security, and portability settings | Yes | No | No | No |
 
@@ -244,12 +245,14 @@ Or prepare and verify the development environment from the repository root:
 The frontend has no JavaScript build tool. Edit `source/web/src/`, then run `make web` before Go builds so the generated embedded assets are current.
 
 For Windows-only notification debugging, copy `.env.development.example` to the ignored
-`.env.development`, configure at most one Telegram and one Discord credential
-pair, then run
+`.env.development`, configure at most one Telegram bot token and one Discord bot
+token, then run
 `node scripts/dev-web.js`. The loopback-only relay keeps provider
 tokens server-side while `http://127.0.0.1:8000/?demo&debug-bots` uses the normal
-mock UI for everything else. Telegram destinations are connected with `/bonghos here`
-inside the target group topic. See [source/web/README.md](source/web/README.md).
+mock UI for everything else. Telegram and Discord destinations are connected
+with `/bonghos here` inside the target topic or channel. Discord interactions
+arrive through an outbound Gateway WebSocket, so development does not require a
+public callback URL. See [source/web/README.md](source/web/README.md).
 
 The SQLite driver uses cgo. A `CGO_ENABLED=0` binary may link successfully but cannot open the database, so production builds must keep cgo enabled. Cross-building ARM64 from x86 additionally requires an ARM64 C compiler such as `gcc-aarch64-linux-gnu`.
 

@@ -111,6 +111,83 @@ func TestTelegramHereRejectsNonAdministrator(t *testing.T) {
 	}
 }
 
+func TestTelegramMembershipAppearsBeforeDestinationIsConfigured(t *testing.T) {
+	store := testStore(t)
+	config, err := store.Create(CreateInput{
+		Name: "Telegram membership", Provider: ProviderTelegram,
+		Token: "123456789:telegram_membership_secret", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatesCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			http.NotFound(w, r)
+			return
+		}
+		if !strings.Contains(r.URL.Query().Get("allowed_updates"), "my_chat_member") {
+			t.Errorf("allowed_updates = %q", r.URL.Query().Get("allowed_updates"))
+		}
+		updatesCalls++
+		if updatesCalls == 1 {
+			_, _ = w.Write([]byte(`{"ok":true,"result":[{"update_id":21,"my_chat_member":{"chat":{"id":-100444,"type":"supergroup","title":"Operators"},"new_chat_member":{"status":"administrator"}}}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[{"update_id":22,"my_chat_member":{"chat":{"id":-100444,"type":"supergroup","title":"Operators"},"new_chat_member":{"status":"restricted","is_member":false}}}]}`))
+	}))
+	defer server.Close()
+	sender := NewSender()
+	sender.TelegramBaseURL = server.URL
+	dispatcher := &Dispatcher{Store: store, Sender: sender}
+	dispatcher.pollTelegramCommands(context.Background())
+
+	observed, err := store.ByID(config.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observed.Destinations) != 0 || len(observed.DiscoveredDestinations) != 1 || observed.DiscoveredDestinations[0].Name != "Operators" {
+		t.Fatalf("membership discovery = %+v, configured = %+v", observed.DiscoveredDestinations, observed.Destinations)
+	}
+	if err := store.SetTelegramDestination(config.ID, Destination{ID: "-100444", Name: "Operators", Type: "supergroup"}); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatcher.pollTelegramCommands(context.Background())
+	observed, err = store.ByID(config.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observed.DiscoveredDestinations) != 0 || len(observed.Destinations) != 0 {
+		t.Fatalf("departed group remains configured or discovered: configured=%+v discovered=%+v", observed.Destinations, observed.DiscoveredDestinations)
+	}
+}
+
+func TestTelegramVisibleGroupMessageIsDiscoveredWithoutBonghosCommand(t *testing.T) {
+	store := testStore(t)
+	config, err := store.Create(CreateInput{
+		Name: "Telegram visible message", Provider: ProviderTelegram,
+		Token: "123456789:telegram_visible_message_secret", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := &Dispatcher{Store: store, Sender: NewSender()}
+	dispatcher.handleTelegramCommand(context.Background(), TelegramCommandState{
+		BotID: config.ID, BotName: config.Name, Token: "123456789:telegram_visible_message_secret",
+	}, &telegramMessage{Text: "ordinary visible update", Chat: telegramChat{
+		ID: -100555, Type: "supergroup", Title: "Builders",
+	}})
+
+	observed, err := store.ByID(config.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observed.Destinations) != 0 || len(observed.DiscoveredDestinations) != 1 || observed.DiscoveredDestinations[0].Name != "Builders" {
+		t.Fatalf("visible message discovery = %+v, configured = %+v", observed.DiscoveredDestinations, observed.Destinations)
+	}
+}
+
 func TestTelegramCommandParsing(t *testing.T) {
 	for input, want := range map[string]string{
 		"/bonghos here": "here", "/BONGHOS@Bonghos_Bot HERE": "here",

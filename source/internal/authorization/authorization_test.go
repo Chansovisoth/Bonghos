@@ -13,7 +13,7 @@ func TestMemberExactPermissions(t *testing.T) {
 		PermServerForceStop, PermConsoleView, PermConsoleUse, PermPlayersManage,
 		PermFilesManage, PermConfigManage, PermIconManage, PermImportManage,
 		PermBackupsView, PermBackupsCreate, PermBackupsRestore, PermSchedulesManage,
-		PermUsersManage, PermSecurityManage, PermHostManage, PermPortabilityManage,
+		PermUsersManage, PermBotsManage, PermSecurityManage, PermHostManage, PermPortabilityManage,
 	}
 	for _, p := range denied {
 		if Has(RoleMember, p) {
@@ -35,10 +35,19 @@ func TestViewerReadOnly(t *testing.T) {
 }
 
 func TestOwnerHasEverything(t *testing.T) {
-	for _, p := range []Permission{PermServerForceStop, PermUsersManage, PermSecurityManage, PermPortabilityManage} {
+	for _, p := range []Permission{PermServerForceStop, PermUsersManage, PermBotsManage, PermSecurityManage, PermPortabilityManage} {
 		if !Has(RoleOwner, p) {
 			t.Errorf("Owner missing %s", p)
 		}
+	}
+}
+
+func TestAdminCanManageBotsWithoutOwnerSecurityPermission(t *testing.T) {
+	if !Has(RoleAdmin, PermBotsManage) {
+		t.Fatal("Admin should manage notification bots")
+	}
+	if Has(RoleAdmin, PermSecurityManage) {
+		t.Fatal("Admin must not inherit Owner account-security management")
 	}
 }
 

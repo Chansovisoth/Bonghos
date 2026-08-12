@@ -2,6 +2,7 @@ package bot
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -216,9 +217,17 @@ func TestStoreRetainsDiscoveredTelegramGroupsAndDeduplicatesTopics(t *testing.T)
 		t.Fatalf("deduplicated discoveries = %+v", config.DiscoveredDestinations)
 	}
 	for _, destination := range config.DiscoveredDestinations {
+		if destination.DiscoveredAt == "" {
+			t.Fatalf("discovery timestamp was not returned: %+v", config.DiscoveredDestinations)
+		}
 		if len(destination.Topics) == 1 && destination.Topics[0].ID != 43 {
 			t.Fatalf("newest same-named topic was not retained: %+v", destination.Topics)
 		}
+	}
+	const originalDiscovery = "2026-08-01T02:03:00Z"
+	if _, err := store.DB.Exec(`UPDATE notification_bot_discoveries SET discovered_at=?
+		WHERE bot_id=? AND destination_id=?`, originalDiscovery, config.ID, "-1001111111111"); err != nil {
+		t.Fatal(err)
 	}
 	merged, err := store.MergeDiscovered(config.ID, []Destination{
 		{ID: "-1001111111111", Name: "Selected", Forum: true, Topics: []Topic{{ID: 42, Name: "Alerts"}}},
@@ -229,6 +238,11 @@ func TestStoreRetainsDiscoveredTelegramGroupsAndDeduplicatesTopics(t *testing.T)
 	}
 	if len(merged) != 3 {
 		t.Fatalf("merged discoveries = %+v", merged)
+	}
+	for _, destination := range merged {
+		if destination.ID == "-1001111111111" && destination.DiscoveredAt != originalDiscovery {
+			t.Fatalf("first discovery timestamp changed: %+v", destination)
+		}
 	}
 }
 
@@ -260,17 +274,50 @@ func TestStoreLimitsBotsToOnePerProviderAndTwoTotal(t *testing.T) {
 	}
 }
 
-func TestStoreDiscordStillAllowsOneDestination(t *testing.T) {
+func TestStoreDiscordSupportsTokenFirstAndThreeCommandDestinations(t *testing.T) {
 	store := testStore(t)
-	_, err := store.Create(CreateInput{
+	config, err := store.Create(CreateInput{
 		Name: "Discord", Provider: ProviderDiscord,
 		Token: "discord_bot_token_that_is_long_enough",
-		Destinations: []Destination{
-			{ID: "123456789012345678", Name: "One"},
-			{ID: "223456789012345678", Name: "Two"},
-		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "at most 1") {
-		t.Fatalf("two-destination Discord create error = %v", err)
+	if err != nil || len(config.Destinations) != 0 {
+		t.Fatalf("token-first Discord create = %+v, %v", config, err)
+	}
+	for index, id := range []string{"123456789012345678", "223456789012345678", "323456789012345678"} {
+		if err := store.SetDiscordDestination(config.ID, Destination{
+			ID: id, Name: fmt.Sprintf("Channel %d", index+1), Type: "channel",
+			GuildID: "523456789012345678", GuildName: "Bonghos Lab", GuildIcon: "guild-icon-hash",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SetDiscordDestination(config.ID, Destination{
+		ID: "123456789012345678", Name: "Updated first channel", Type: "channel",
+		GuildID: "523456789012345678", GuildName: "Bonghos Lab", GuildIcon: "guild-icon-hash",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetDiscordDestination(config.ID, Destination{ID: "423456789012345678", Name: "Fourth"}); err == nil || !strings.Contains(err.Error(), "three") {
+		t.Fatalf("fourth Discord destination error = %v", err)
+	}
+	updated, err := store.ByID(config.ID)
+	if err != nil || len(updated.Destinations) != 3 {
+		t.Fatalf("Discord destinations = %+v, %v", updated.Destinations, err)
+	}
+	if updated.Destinations[0].ID != "123456789012345678" || updated.Destinations[0].Name != "Updated first channel" {
+		t.Fatalf("updated first destination changed order: %+v", updated.Destinations)
+	}
+	if updated.Destinations[0].GuildName != "Bonghos Lab" || updated.Destinations[0].GuildIcon != "guild-icon-hash" {
+		t.Fatalf("Discord server metadata = %+v", updated.Destinations[0])
+	}
+	if err := store.DisconnectDiscordDestination(config.ID, "223456789012345678"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ForgetDiscovered(config.ID, "523456789012345678"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err = store.ByID(config.ID)
+	if err != nil || len(updated.Destinations) != 0 || len(updated.DiscoveredDestinations) != 0 || updated.DestinationID != "" {
+		t.Fatalf("departed Discord server remains configured or discovered: %+v, %v", updated, err)
 	}
 }

@@ -50,40 +50,24 @@ function configuredBots(env) {
       provider: "telegram",
       name: env.BONGHOS_DEV_TELEGRAM_NAME || "Telegram development",
       token: String(env.BONGHOS_DEV_TELEGRAM_TOKEN || "").trim(),
-      destination: String(env.BONGHOS_DEV_TELEGRAM_CHAT_ID || "").trim(),
     },
     {
       id: 2,
       provider: "discord",
       name: env.BONGHOS_DEV_DISCORD_NAME || "Discord development",
       token: String(env.BONGHOS_DEV_DISCORD_TOKEN || "").trim(),
-      destination: String(env.BONGHOS_DEV_DISCORD_CHANNEL_ID || "").trim(),
     },
   ];
 
   const configured = [];
   for (const definition of definitions) {
-    if (!definition.token && !definition.destination) continue;
-	if (!definition.token || (definition.provider === "discord" && !definition.destination)) {
-      throw new Error(`${definition.provider} requires both its token and destination ID`);
-    }
+    if (!definition.token) continue;
     if (/\s/.test(definition.token)) {
       throw new Error(`${definition.provider} token contains whitespace`);
     }
-    // Telegram destinations must be established by an administrator using
-    // /bonghos here. Never seed the flow from a legacy environment chat ID.
-    const destinationIDs = definition.provider === "telegram" ? [] : [definition.destination];
-    if (new Set(destinationIDs).size !== destinationIDs.length) {
-      throw new Error(`${definition.provider} destination IDs must be unique`);
-    }
-    for (const destinationID of destinationIDs) {
-      if (definition.provider === "telegram" && !/^(?:-?\d+|@[A-Za-z0-9_]{5,})$/.test(destinationID)) {
-        throw new Error("Telegram chat IDs must be numeric or public @channel usernames");
-      }
-      if (definition.provider === "discord" && !/^\d{10,25}$/.test(destinationID)) {
-        throw new Error("Discord channel ID must be numeric");
-      }
-    }
+    // Provider destinations must be established by an administrator using
+    // /bonghos here. Never seed the flow from a legacy environment ID.
+    const destinationIDs = [];
     const destinations = destinationIDs.map((destinationID) => ({
       id: destinationID, name: destinationID, type: definition.provider === "telegram" ? "group" : "channel",
     }));
@@ -91,12 +75,14 @@ function configuredBots(env) {
       ...definition,
       destination: destinationIDs[0] || "",
       destinations,
+      discoveredGroups: new Map(),
       public: {
         id: definition.id,
         name: definition.name,
         provider: definition.provider,
         destination_id: destinationIDs[0] || "",
         destinations: destinations.map((destination) => ({ ...destination })),
+        discovered_destinations: [],
         enabled: true,
         notify_server_started: true,
         notify_server_stopped: true,
@@ -132,13 +118,62 @@ function telegramCommandName(text) {
   return ["here", "disconnect", "where", "help"].includes(subcommand) ? subcommand : "help";
 }
 
+// Fetch a group's small profile photo and return it as a data URL, or "" when
+// the group has no photo or it cannot be downloaded. A raw fetchImpl is passed
+// so it works from both discovery and the /bonghos here command flow.
+async function fetchTelegramGroupPhoto(bot, chatID, fetchImpl = fetch) {
+  const api = async (method) => {
+    const response = await fetchImpl(`https://api.telegram.org/bot${bot.token}/${method}`);
+    let payload = {};
+    try { payload = JSON.parse(await response.text()); } catch { /* handled below */ }
+    if (!response.ok || !payload.ok) throw new Error(`telegram returned HTTP ${response.status}`);
+    return payload.result;
+  };
+  const fullChat = await api(`getChat?chat_id=${encodeURIComponent(chatID)}`);
+  const fileID = String(fullChat?.photo?.small_file_id || "").trim();
+  if (!fileID) return "";
+  const file = await api(`getFile?file_id=${encodeURIComponent(fileID)}`);
+  const filePath = String(file?.file_path || "").replace(/^\/+/, "");
+  if (!filePath || filePath.split("/").some((part) => !part || part === "." || part === "..")) return "";
+  const photoResponse = await fetchImpl(`https://api.telegram.org/file/bot${bot.token}/${filePath}`);
+  if (!photoResponse.ok || typeof photoResponse.arrayBuffer !== "function") return "";
+  const data = Buffer.from(await photoResponse.arrayBuffer());
+  if (!data.length || data.length > 512 * 1024) return "";
+  const declaredType = String(photoResponse.headers?.get?.("content-type") || "").split(";", 1)[0].toLowerCase();
+  const contentType = ["image/jpeg", "image/png", "image/webp"].includes(declaredType)
+    ? declaredType
+    : (/\.png$/i.test(filePath) ? "image/png" : /\.webp$/i.test(filePath) ? "image/webp" : "image/jpeg");
+  return `data:${contentType};base64,${data.toString("base64")}`;
+}
+
+function escapeTelegramHTML(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Resolve a human-readable forum topic name for the message's thread. Telegram
+// includes the topic-creation service message on replies inside a topic, and
+// prior discovery may already know the name; fall back to a numbered label.
+function resolveTelegramTopicName(bot, message, chatID, threadID) {
+  if (!threadID) return "General";
+  const events = [
+    message.forum_topic_created, message.forum_topic_edited,
+    message.reply_to_message?.forum_topic_created, message.reply_to_message?.forum_topic_edited,
+  ].filter(Boolean);
+  const named = events.map((event) => String(event.name || "").trim()).filter(Boolean).at(-1);
+  if (named) return named;
+  const discovered = bot.discoveredGroups?.get(chatID)?.topics?.find((topic) => Number(topic.id) === threadID);
+  if (discovered?.name) return discovered.name;
+  return `Channel ${threadID}`;
+}
+
 async function pollDevelopmentTelegramCommands(bot, fetchImpl = fetch) {
   const updates = await telegramAPI(bot, "getUpdates", {
-    allowed_updates: JSON.stringify(["message"]), limit: "100", timeout: "0",
+    allowed_updates: JSON.stringify(["message", "my_chat_member"]), limit: "100", timeout: "0",
     offset: String((Number(bot.lastUpdateID) || 0) + 1),
   }, fetchImpl);
 	if (!bot.commandInitialized) {
 	  for (const update of Array.isArray(updates) ? updates : []) {
+		await rememberDevelopmentTelegramMembership(bot, update, fetchImpl);
 		bot.lastUpdateID = Math.max(Number(bot.lastUpdateID) || 0, Number(update.update_id) || 0);
 	  }
 	  if (updates.length) bot.commandEmptyPolls = 0;
@@ -150,7 +185,11 @@ async function pollDevelopmentTelegramCommands(bot, fetchImpl = fetch) {
 	}
   for (const update of Array.isArray(updates) ? updates : []) {
     bot.lastUpdateID = Math.max(Number(bot.lastUpdateID) || 0, Number(update.update_id) || 0);
+    await rememberDevelopmentTelegramMembership(bot, update, fetchImpl);
     const message = update.message;
+    if (["group", "supergroup"].includes(message?.chat?.type)) {
+      await rememberDevelopmentTelegramGroup(bot, message.chat, fetchImpl);
+    }
     const command = telegramCommandName(message?.text);
     if (!command || !["group", "supergroup"].includes(message?.chat?.type)) continue;
     const chatID = String(message.chat.id);
@@ -160,9 +199,8 @@ async function pollDevelopmentTelegramCommands(bot, fetchImpl = fetch) {
       const member = await telegramAPI(bot, "getChatMember", { chat_id: chatID, user_id: String(message.from.id) }, fetchImpl);
       administrator = ["creator", "administrator"].includes(member?.status);
     }
-    const reply = (text) => providerRequest(bot, text, fetchImpl, chatID, threadID);
+    const reply = (text) => providerRequest(bot, text, fetchImpl, chatID, threadID, { html: true });
     if (command === "help") {
-      // await reply("Bonghos commands:\n`/bonghos here` : Send notifications to this topic\n`/bonghos where` : Check this group's destination\n`/bonghos disconnect`: Stop notifications to this group\n\nOnly group administrators can change destinations.");
       await reply("Bonghos commands:\n<code>/bonghos here</code> : Send notifications to this topic\n<code>/bonghos where</code> : Check this group's destination\n<code>/bonghos disconnect</code>: Stop notifications to this group\n\nOnly group administrators can change destinations.");
       continue;
     }
@@ -179,8 +217,15 @@ async function pollDevelopmentTelegramCommands(bot, fetchImpl = fetch) {
       const destination = {
         id: chatID, name: String(message.chat.title || chatID), type: message.chat.type,
         forum: !!(message.chat.is_forum || threadID), thread_id: threadID,
-        thread_name: threadID ? "Selected topic" : "General",
+        thread_name: resolveTelegramTopicName(bot, message, chatID, threadID),
+        photo_data_url: String(bot.discoveredGroups?.get(chatID)?.photo_data_url || ""),
       };
+      // Fetch the group photo so command-connected groups show an avatar in the
+      // Web UI even when discovery was never run. A missing photo is not fatal.
+      if (!destination.photo_data_url) {
+        try { destination.photo_data_url = await fetchTelegramGroupPhoto(bot, chatID, fetchImpl); }
+        catch { /* keep the initials fallback */ }
+      }
       if (existingIndex >= 0) bot.destinations[existingIndex] = destination;
       else bot.destinations.push(destination);
       bot.destination = bot.destinations[0]?.id || "";
@@ -195,13 +240,59 @@ async function pollDevelopmentTelegramCommands(bot, fetchImpl = fetch) {
       await reply("Bonghos notifications are disconnected from this group.");
     } else {
       const destination = bot.destinations.find((value) => value.id === chatID);
-      await reply(!destination
-        ? "This group is not connected. Run /bonghos here in the topic that should receive notifications."
-        : Number(destination.thread_id) === threadID
-          ? "Bonghos notifications are configured for this topic."
-          : "Bonghos notifications are configured for another topic in this group.");
+      if (!destination) {
+        await reply("This group is not connected. Run /bonghos here in the topic that should receive notifications.");
+      } else {
+        const topicName = escapeTelegramHTML(destination.thread_name
+          || (Number(destination.thread_id) ? `Channel ${destination.thread_id}` : "General"));
+        await reply(Number(destination.thread_id) === threadID
+          ? `Bonghos notifications are configured for topic "${topicName}".`
+          : `Bonghos notifications are configured for topic "${topicName}" in this group.`);
+      }
     }
   }
+}
+
+function syncDevelopmentDiscoveries(bot) {
+  bot.public.discovered_destinations = Array.from(bot.discoveredGroups?.values?.() || [])
+    .map((value) => ({ ...value }))
+    .sort((left, right) => String(left.name || left.guild_name || "").localeCompare(String(right.name || right.guild_name || "")));
+}
+
+async function rememberDevelopmentTelegramGroup(bot, chat, fetchImpl = fetch) {
+  if (!["group", "supergroup"].includes(chat?.type)) return;
+  if (!bot.discoveredGroups) bot.discoveredGroups = new Map();
+  const id = String(chat.id);
+  const previous = bot.discoveredGroups.get(id) || {};
+  const group = {
+    ...previous, id, name: String(chat.title || previous.name || id), type: chat.type,
+    forum: !!(chat.is_forum || previous.forum), topics: previous.topics || [],
+    discovered_at: previous.discovered_at || new Date().toISOString(),
+  };
+  if (!group.photo_data_url) {
+    try { group.photo_data_url = await fetchTelegramGroupPhoto(bot, id, fetchImpl); }
+    catch { /* initials remain available when Telegram has no group photo */ }
+  }
+  bot.discoveredGroups.set(id, group);
+  syncDevelopmentDiscoveries(bot);
+}
+
+async function rememberDevelopmentTelegramMembership(bot, update, fetchImpl = fetch) {
+  const membership = update?.my_chat_member;
+  if (!membership || !["group", "supergroup"].includes(membership.chat?.type)) return;
+  const id = String(membership.chat.id);
+  const status = String(membership.new_chat_member?.status || "").toLowerCase();
+  if (["left", "kicked"].includes(status) ||
+    (status === "restricted" && membership.new_chat_member?.is_member === false)) {
+    bot.discoveredGroups?.delete(id);
+    bot.destinations = bot.destinations.filter((destination) => String(destination.id) !== id);
+    bot.destination = bot.destinations[0]?.id || "";
+    bot.public.destination_id = bot.destination;
+    bot.public.destinations = bot.destinations.map((destination) => ({ ...destination }));
+    syncDevelopmentDiscoveries(bot);
+    return;
+  }
+  await rememberDevelopmentTelegramGroup(bot, membership.chat, fetchImpl);
 }
 
 function startDevelopmentTelegramCommands(bots, fetchImpl = fetch) {
@@ -220,7 +311,7 @@ function startDevelopmentTelegramCommands(bots, fetchImpl = fetch) {
   return () => clearInterval(timer);
 }
 
-async function providerRequest(bot, message, fetchImpl = fetch, destination = bot.destination, threadID = 0) {
+async function providerRequest(bot, message, fetchImpl = fetch, destination = bot.destination, threadID = 0, options = {}) {
   let response;
   try {
     if (bot.provider === "telegram") {
@@ -230,6 +321,7 @@ async function providerRequest(bot, message, fetchImpl = fetch, destination = bo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chat_id: destination, text: message,
+          ...(options.html ? { parse_mode: "HTML" } : {}),
           ...(Number(threadID) > 0 ? { message_thread_id: Number(threadID) } : {}),
         }),
       });
@@ -337,7 +429,9 @@ async function discoverTelegramGroups(bot, fetchImpl = fetch) {
     addMessage(update.channel_post);
     addMessage(update.edited_channel_post);
     const membership = update.my_chat_member;
-    if (["left", "kicked"].includes(membership?.new_chat_member?.status)) {
+    const status = String(membership?.new_chat_member?.status || "").toLowerCase();
+    if (["left", "kicked"].includes(status) ||
+      (status === "restricted" && membership?.new_chat_member?.is_member === false)) {
       byID.delete(String(membership.chat?.id));
     } else {
       add(membership?.chat);
@@ -371,6 +465,426 @@ async function discoverTelegramGroups(bot, fetchImpl = fetch) {
     }
   }
   return { bot_username: me?.username || "", groups };
+}
+
+// ---------------------------------------------------------------------------
+// Discord slash commands
+//
+// Unlike Telegram (HTTP long-poll of getUpdates), Discord delivers slash-command
+// interactions only over a gateway websocket or a public HTTPS endpoint. This
+// block resolves the application ID, registers /bonghos, handles interactions,
+// and maintains the outbound Gateway connection used by local development.
+// ---------------------------------------------------------------------------
+
+const DISCORD_API = "https://discord.com/api/v10";
+
+// Resolve a Discord bot's application ID and username from its token. For a bot
+// user, GET /users/@me returns id === application_id, so the user never has to
+// paste the application ID separately. Doubles as token validation.
+async function resolveDiscordApplication(token, fetchImpl = fetch) {
+  token = String(token || "").trim();
+  if (!/^[A-Za-z0-9._-]{20,}$/.test(token)) throw new Error("Discord bot token is invalid");
+  let response;
+  try {
+    response = await fetchImpl(`${DISCORD_API}/users/@me`, {
+      headers: { "Authorization": `Bot ${token}`, "User-Agent": "Bonghos/notification-bot" },
+    });
+  } catch {
+    throw new Error("Discord request failed");
+  }
+  let payload = {};
+  try { payload = JSON.parse(await response.text()); } catch { /* handled below */ }
+  if (!response.ok) throw new Error(`Discord returned HTTP ${response.status}`);
+  const applicationID = String(payload.id || "").trim();
+  if (!/^\d{10,25}$/.test(applicationID)) throw new Error("Discord did not return an application ID");
+  if (!payload.bot) throw new Error("Discord token does not belong to a bot application");
+  const username = String(payload.username || "").trim();
+  return { applicationID, username, bot: !!payload.bot };
+}
+
+async function botInviteURL(bot, fetchImpl = fetch) {
+  if (bot.provider === "telegram") {
+    const me = await telegramAPI(bot, "getMe", {}, fetchImpl);
+    const username = String(me?.username || "").replace(/^@/, "").trim();
+    if (!/^[A-Za-z0-9_]{5,}$/.test(username)) throw new Error("Telegram bot username is unavailable");
+    return `https://t.me/${username}?startgroup&admin=manage_chat`;
+  }
+  if (bot.provider === "discord") {
+    const application = await resolveDiscordApplication(bot.token, fetchImpl);
+    const query = new URLSearchParams({
+      client_id: application.applicationID,
+      scope: "bot applications.commands",
+      permissions: "274877910016",
+      integration_type: "0",
+    });
+    return `https://discord.com/oauth2/authorize?${query}`;
+  }
+  throw new Error("unsupported notification provider");
+}
+
+// The /bonghos command definition, mirroring the Telegram subcommands.
+// Manage Server is the default command permission. The handler repeats the
+// check server-side and also accepts Discord administrators.
+function discordCommandDefinition() {
+  return {
+    name: "bonghos",
+    description: "Configure Bonghos notifications for this channel",
+    type: 1, // CHAT_INPUT
+    dm_permission: false,
+    default_member_permissions: "32",
+    options: [
+      { type: 1, name: "here", description: "Send Bonghos notifications to this channel" },
+      { type: 1, name: "where", description: "Check this channel's Bonghos notification status" },
+      { type: 1, name: "disconnect", description: "Stop Bonghos notifications in this channel" },
+      { type: 1, name: "help", description: "Show Bonghos notification commands" },
+    ],
+  };
+}
+
+// Register /bonghos. Guild-scoped registration is instant and ideal for
+// development; global registration (no guildID) can take up to an hour to
+// propagate. Requires the bot to have been invited with applications.commands.
+async function registerDiscordCommands(token, applicationID, guildID, fetchImpl = fetch) {
+  applicationID = String(applicationID || "").trim();
+  if (!/^\d{10,25}$/.test(applicationID)) throw new Error("Discord application ID is invalid");
+  const scope = guildID
+    ? `applications/${applicationID}/guilds/${encodeURIComponent(String(guildID))}/commands`
+    : `applications/${applicationID}/commands`;
+  let response;
+  try {
+    response = await fetchImpl(`${DISCORD_API}/${scope}`, {
+      method: "PUT",
+      headers: {
+        "Authorization": `Bot ${token}`,
+        "Content-Type": "application/json",
+        "User-Agent": "Bonghos/notification-bot",
+      },
+      body: JSON.stringify([discordCommandDefinition()]),
+    });
+  } catch {
+    throw new Error("Discord command registration failed");
+  }
+  const text = await response.text();
+  if (!response.ok) {
+    let detail = "";
+    try { detail = String(JSON.parse(text)?.message || "").slice(0, 200); } catch { /* ignore */ }
+    throw new Error(`Discord command registration returned HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
+  try { return JSON.parse(text); } catch { return []; }
+}
+
+// True when the interaction member has the Administrator or Manage Guild bit.
+// Discord sends member.permissions as a decimal string bitfield.
+function discordMemberIsAdministrator(interaction) {
+  let bits;
+  try { bits = BigInt(String(interaction?.member?.permissions || "0") || "0"); }
+  catch { return false; }
+  const ADMINISTRATOR = 1n << 3n;
+  const MANAGE_GUILD = 1n << 5n;
+  return (bits & ADMINISTRATOR) === ADMINISTRATOR || (bits & MANAGE_GUILD) === MANAGE_GUILD;
+}
+
+function discordSubcommand(interaction) {
+  const option = (interaction?.data?.options || []).find((entry) => entry?.type === 1);
+  const name = String(option?.name || "").toLowerCase();
+  return ["here", "where", "disconnect"].includes(name) ? name : "help";
+}
+
+// Pure handler: takes a bot record and a Discord INTERACTION_CREATE payload,
+// mutates the bot's destinations, and returns the reply content string. The
+// caller is responsible for delivering the reply over whatever transport it has.
+// Ephemeral replies (flags 64) keep configuration chatter private to the admin.
+function handleDiscordInteraction(bot, interaction) {
+  // type 1 == PING (gateway/endpoint liveness), type 2 == APPLICATION_COMMAND.
+  if (interaction?.type !== 2 || interaction?.data?.name !== "bonghos") return null;
+  if (!interaction.guild_id || !interaction.channel_id) {
+    return { content: "Bonghos notifications can only be configured inside a server channel.", flags: 64 };
+  }
+  const guildID = String(interaction.guild_id);
+  if (interaction.guild && guildID) {
+    const previous = bot.discoveredGroups.get(guildID) || {};
+    bot.discoveredGroups.set(guildID, {
+      ...previous,
+      id: guildID, name: String(interaction.guild.name || guildID), type: "guild",
+      guild_id: guildID, guild_name: String(interaction.guild.name || guildID),
+      guild_icon: String(interaction.guild.icon || ""),
+      discovered_at: previous.discovered_at || new Date().toISOString(),
+    });
+    syncDevelopmentDiscoveries(bot);
+  }
+  const channelID = String(interaction.channel_id);
+  const command = discordSubcommand(interaction);
+  if (!discordMemberIsAdministrator(interaction)) {
+    return { content: "Only a server administrator can use Bonghos configuration commands.", flags: 64 };
+  }
+  if (command === "help") {
+    return { content: "Bonghos commands:\n`/bonghos here`: Send notifications to this channel\n`/bonghos where`: Check this channel's status\n`/bonghos disconnect`: Stop notifications here", flags: 64 };
+  }
+  const existingIndex = bot.destinations.findIndex((destination) => destination.id === channelID);
+  if (command === "here") {
+    if (existingIndex < 0 && bot.destinations.length >= 3) {
+      return { content: "Bonghos could not connect this channel: Discord already has three connected channels.", flags: 64 };
+    }
+    const channelName = String(interaction.channel?.name || "").trim();
+    const destination = {
+      id: channelID, name: channelName || `Channel ${channelID}`, type: "channel",
+      guild_id: String(interaction.guild_id),
+      guild_name: String(interaction.guild?.name || "").trim(),
+      guild_icon: String(interaction.guild?.icon || "").trim(),
+    };
+    if (existingIndex >= 0) bot.destinations[existingIndex] = destination;
+    else bot.destinations.push(destination);
+    bot.destination = bot.destinations[0]?.id || "";
+    bot.public.destination_id = bot.destination;
+    bot.public.destinations = bot.destinations.map((value) => ({ ...value }));
+    return { content: "Bonghos notifications will be sent to this channel.", flags: 64 };
+  }
+  if (command === "disconnect") {
+    bot.destinations = bot.destinations.filter((destination) => destination.id !== channelID);
+    bot.destination = bot.destinations[0]?.id || "";
+    bot.public.destination_id = bot.destination;
+    bot.public.destinations = bot.destinations.map((value) => ({ ...value }));
+    return { content: "Bonghos notifications are disconnected from this channel.", flags: 64 };
+  }
+  // where
+  const destination = bot.destinations.find((value) => value.id === channelID);
+  return {
+    content: destination
+      ? "Bonghos notifications are configured for this channel."
+      : "This channel is not connected. Run /bonghos here in the channel that should receive notifications.",
+    flags: 64,
+  };
+}
+
+async function respondDiscordInteraction(interaction, reply, fetchImpl = fetch) {
+  const interactionID = String(interaction?.id || "");
+  const interactionToken = String(interaction?.token || "");
+  if (!/^\d{10,25}$/.test(interactionID) || !interactionToken) {
+    throw new Error("Discord interaction response is invalid");
+  }
+  let response;
+  try {
+    response = await fetchImpl(`${DISCORD_API}/interactions/${encodeURIComponent(interactionID)}/${encodeURIComponent(interactionToken)}/callback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": "Bonghos/notification-bot" },
+      body: JSON.stringify({ type: 4, data: reply }),
+    });
+  } catch {
+    throw new Error("Discord interaction response failed");
+  }
+  if (!response.ok) {
+    try { await response.text(); } catch { /* discard provider response */ }
+    throw new Error(`Discord interaction response returned HTTP ${response.status}`);
+  }
+}
+
+// Connect to Discord's outbound Gateway so loopback-only development can
+// receive slash-command interactions without exposing a public HTTPS endpoint.
+// The returned stop function closes the socket and cancels reconnects.
+function startDevelopmentDiscordCommands(bots, options = {}) {
+  const bot = bots.find((candidate) => candidate.provider === "discord");
+  if (!bot) return () => {};
+  const fetchImpl = options.fetchImpl || fetch;
+  const WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket;
+  const log = options.log || ((message) => console.warn(message));
+  const setTimer = options.setTimeoutImpl || setTimeout;
+  const clearTimer = options.clearTimeoutImpl || clearTimeout;
+  const random = options.random || Math.random;
+  if (typeof WebSocketImpl !== "function") {
+    log("Discord gateway unavailable: this Node version has no WebSocket client");
+    return () => {};
+  }
+
+  let socket = null;
+  let stopped = false;
+  let reconnectTimer = null;
+  let heartbeatTimer = null;
+  let heartbeatInterval = 0;
+  let heartbeatAcknowledged = true;
+  let sequence = null;
+  let sessionID = "";
+  let resumeGatewayURL = "";
+  let applicationID = "";
+  let reconnectAttempt = 0;
+  const registeredGuilds = new Set();
+  const guilds = new Map();
+
+  const clearTimers = () => {
+    if (reconnectTimer) clearTimer(reconnectTimer);
+    if (heartbeatTimer) clearTimer(heartbeatTimer);
+    reconnectTimer = null;
+    heartbeatTimer = null;
+  };
+  const send = (payload) => {
+    if (socket?.readyState === WebSocketImpl.OPEN || socket?.readyState === 1) {
+      socket.send(JSON.stringify(payload));
+    }
+  };
+  const heartbeat = () => {
+    if (stopped || !socket) return;
+    if (!heartbeatAcknowledged) {
+      try { socket.close(4000, "heartbeat timeout"); } catch { /* reconnect on close */ }
+      return;
+    }
+    heartbeatAcknowledged = false;
+    send({ op: 1, d: sequence });
+    heartbeatTimer = setTimer(heartbeat, heartbeatInterval);
+  };
+  const startHeartbeat = (interval) => {
+    heartbeatInterval = Math.max(1000, Number(interval) || 45000);
+    heartbeatAcknowledged = true;
+    if (heartbeatTimer) clearTimer(heartbeatTimer);
+    heartbeatTimer = setTimer(heartbeat, Math.floor(random() * heartbeatInterval));
+  };
+  const registerGuild = async (guildID) => {
+    guildID = String(guildID || "");
+    if (!/^\d{10,25}$/.test(guildID) || registeredGuilds.has(guildID)) return;
+    try {
+      await registerDiscordCommands(bot.token, applicationID, guildID, fetchImpl);
+      registeredGuilds.add(guildID);
+      bot.public.registered_guild_count = registeredGuilds.size;
+    } catch (error) {
+      log(`Discord command registration for guild failed: ${error.message}`);
+    }
+  };
+  const scheduleReconnect = () => {
+    if (stopped || reconnectTimer) return;
+    const delay = Math.min(30000, 1000 * (2 ** Math.min(reconnectAttempt, 5)));
+    reconnectAttempt += 1;
+    reconnectTimer = setTimer(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
+  };
+  const connect = () => {
+    if (stopped) return;
+    const gateway = (resumeGatewayURL || "wss://gateway.discord.gg").replace(/\/+$/, "");
+    try {
+      socket = new WebSocketImpl(`${gateway}/?v=10&encoding=json`);
+    } catch {
+      log("Discord gateway connection failed");
+      scheduleReconnect();
+      return;
+    }
+    socket.addEventListener("message", (event) => {
+      let packet;
+      try { packet = JSON.parse(String(event.data)); } catch { return; }
+      if (Number.isInteger(packet.s)) sequence = packet.s;
+      if (packet.op === 10) {
+        startHeartbeat(packet.d?.heartbeat_interval);
+        if (sessionID && sequence !== null) {
+          send({ op: 6, d: { token: bot.token, session_id: sessionID, seq: sequence } });
+        } else {
+          send({ op: 2, d: {
+            token: bot.token,
+            intents: 1,
+            properties: { os: process.platform, browser: "bonghos", device: "bonghos" },
+          } });
+        }
+        return;
+      }
+      if (packet.op === 1) {
+        send({ op: 1, d: sequence });
+        return;
+      }
+      if (packet.op === 11) {
+        heartbeatAcknowledged = true;
+        return;
+      }
+      if (packet.op === 7) {
+        try { socket.close(4000, "server reconnect"); } catch { scheduleReconnect(); }
+        return;
+      }
+      if (packet.op === 9) {
+        if (!packet.d) {
+          sessionID = "";
+          sequence = null;
+          resumeGatewayURL = "";
+        }
+        try { socket.close(4000, "invalid session"); } catch { scheduleReconnect(); }
+        return;
+      }
+      if (packet.op !== 0) return;
+      if (packet.t === "READY") {
+        reconnectAttempt = 0;
+        bot.public.gateway_connected = true;
+        sessionID = String(packet.d?.session_id || "");
+        resumeGatewayURL = String(packet.d?.resume_gateway_url || "");
+        const readyApplicationID = String(packet.d?.application?.id || packet.d?.user?.id || "");
+        if (/^\d{10,25}$/.test(readyApplicationID)) applicationID = readyApplicationID;
+        for (const guild of Array.isArray(packet.d?.guilds) ? packet.d.guilds : []) void registerGuild(guild.id);
+      } else if (packet.t === "GUILD_CREATE") {
+        const guildID = String(packet.d?.id || "");
+        if (guildID) {
+          const guild = {
+            id: guildID,
+            name: String(packet.d?.name || ""),
+            icon: String(packet.d?.icon || ""),
+          };
+          guilds.set(guildID, guild);
+          const previous = bot.discoveredGroups.get(guildID) || {};
+          bot.discoveredGroups.set(guildID, {
+            ...previous,
+            id: guildID, name: guild.name, type: "guild",
+            guild_id: guildID, guild_name: guild.name, guild_icon: guild.icon,
+            discovered_at: previous.discovered_at || new Date().toISOString(),
+          });
+          syncDevelopmentDiscoveries(bot);
+        }
+        void registerGuild(packet.d?.id);
+      } else if (packet.t === "GUILD_DELETE" && !packet.d?.unavailable) {
+        const guildID = String(packet.d?.id || "");
+        guilds.delete(guildID);
+        bot.discoveredGroups.delete(guildID);
+        bot.destinations = bot.destinations.filter((destination) => String(destination.guild_id || "") !== guildID);
+        bot.destination = bot.destinations[0]?.id || "";
+        bot.public.destination_id = bot.destination;
+        bot.public.destinations = bot.destinations.map((destination) => ({ ...destination }));
+        syncDevelopmentDiscoveries(bot);
+      } else if (packet.t === "INTERACTION_CREATE") {
+        const guild = guilds.get(String(packet.d?.guild_id || ""));
+        if (guild) packet.d.guild = guild;
+        const reply = handleDiscordInteraction(bot, packet.d);
+        if (reply) void respondDiscordInteraction(packet.d, reply, fetchImpl)
+          .catch((error) => log(`Discord interaction reply failed: ${error.message}`));
+      }
+    });
+    socket.addEventListener("close", () => {
+      bot.public.gateway_connected = false;
+      if (heartbeatTimer) clearTimer(heartbeatTimer);
+      heartbeatTimer = null;
+      socket = null;
+      scheduleReconnect();
+    });
+    socket.addEventListener("error", () => {
+      // The close event owns retry scheduling. Never stringify the event;
+      // provider errors may contain the credential-bearing gateway state.
+    });
+  };
+
+  void resolveDiscordApplication(bot.token, fetchImpl).then((application) => {
+    if (stopped) return;
+    applicationID = application.applicationID;
+    bot.public.provider_username = application.username;
+    bot.public.gateway_connected = false;
+    bot.public.registered_guild_count = 0;
+    connect();
+    void registerDiscordCommands(bot.token, applicationID, "", fetchImpl).then(() => {
+      bot.public.global_command_registered = true;
+    }).catch((error) => {
+      bot.public.global_command_registered = false;
+      log(`Discord global command registration failed: ${error.message}`);
+    });
+  }).catch((error) => log(`Discord setup failed: ${error.message}`));
+
+  return () => {
+    stopped = true;
+    clearTimers();
+    if (socket) {
+      try { socket.close(1000, "development relay stopped"); } catch { /* already closed */ }
+    }
+    socket = null;
+  };
 }
 
 function jsonResponse(response, status, payload) {
@@ -457,11 +971,13 @@ function createDevServer(options = {}) {
               photo_file_id: group.photo_file_id || previous.photo_file_id || "",
               photo_data_url: group.photo_data_url || previous.photo_data_url || "",
               forum: !!(group.forum || previous.forum || topics.length),
+              discovered_at: previous.discovered_at || new Date().toISOString(),
               topics,
             });
           }
           discovery.groups = Array.from(bot.discoveredGroups.values())
             .sort((left, right) => left.name.localeCompare(right.name));
+          syncDevelopmentDiscoveries(bot);
           bot.public.destinations = bot.public.destinations.map((destination) => ({
             ...destination,
             ...(bot.discoveredGroups.get(destination.id) || {}),
@@ -473,11 +989,19 @@ function createDevServer(options = {}) {
         if (request.method === "POST" && testMatch) {
           const bot = botByID.get(Number(testMatch[1]));
           if (!bot) throw new Error("development bot is not configured");
+          if (!bot.public.enabled) throw new Error("notification bot is disabled");
           await readJSON(request);
           for (const destination of bot.destinations) {
             await providerRequest(bot, `Bonghos local development test\n${bot.name} is connected.`, fetchImpl, destination.id, destination.thread_id);
           }
           jsonResponse(response, 200, { ok: true });
+          return;
+        }
+        const inviteMatch = requestURL.pathname.match(/^\/__dev\/bots\/(\d+)\/invite$/);
+        if (request.method === "GET" && inviteMatch) {
+          const bot = botByID.get(Number(inviteMatch[1]));
+          if (!bot) throw new Error("development bot is not configured");
+          jsonResponse(response, 200, { url: await botInviteURL(bot, fetchImpl) });
           return;
         }
         const patchMatch = requestURL.pathname.match(/^\/__dev\/bots\/(\d+)$/);
@@ -581,9 +1105,14 @@ if (require.main === module) {
     const bots = configuredBots(env);
     const server = createDevServer({ env, bots });
     let stopTelegramCommands = () => {};
-    server.on("close", () => stopTelegramCommands());
+    let stopDiscordCommands = () => {};
+    server.on("close", () => {
+      stopTelegramCommands();
+      stopDiscordCommands();
+    });
     server.on("error", (error) => {
-	  stopTelegramCommands();
+      stopTelegramCommands();
+      stopDiscordCommands();
       if (error.code === "EADDRINUSE") {
         console.error(`Development server failed: port ${port} is already in use. Stop the existing server or set BONGHOS_DEV_PORT to another port.`);
       } else {
@@ -592,7 +1121,8 @@ if (require.main === module) {
       process.exitCode = 1;
     });
     server.listen(port, "127.0.0.1", () => {
-	  stopTelegramCommands = startDevelopmentTelegramCommands(bots);
+      stopTelegramCommands = startDevelopmentTelegramCommands(bots);
+      stopDiscordCommands = startDevelopmentDiscordCommands(bots);
       const providers = bots.map((bot) => bot.provider).join(" and ") || "no providers";
       console.log(`Bonghos development Web UI: http://127.0.0.1:${port}/?demo&debug-bots`);
       console.log(`Configured from .env.development: ${providers}`);
@@ -604,4 +1134,9 @@ if (require.main === module) {
   }
 }
 
-module.exports = { parseEnv, configuredBots, providerRequest, discoverTelegramGroups, pollDevelopmentTelegramCommands, createDevServer };
+module.exports = {
+  parseEnv, configuredBots, providerRequest, discoverTelegramGroups,
+  pollDevelopmentTelegramCommands, createDevServer,
+  resolveDiscordApplication, discordCommandDefinition, registerDiscordCommands,
+  handleDiscordInteraction, respondDiscordInteraction, startDevelopmentDiscordCommands, botInviteURL,
+};

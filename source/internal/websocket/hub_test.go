@@ -18,10 +18,13 @@ func TestMinimumIntervalUsesFastestSubscriber(t *testing.T) {
 	h := NewHub()
 	h.clients[testClient("performance", 5*time.Second)] = true
 	h.clients[testClient("performance", time.Second)] = true
-	h.clients[testClient("overview", 500*time.Millisecond)] = true
+	h.clients[testClient("overview", 4*time.Second)] = true
 
 	if got := h.MinimumInterval("performance", 10*time.Second); got != time.Second {
 		t.Fatalf("MinimumInterval() = %v, want 1s", got)
+	}
+	if got := h.MinimumInterval("overview", 10*time.Second); got != 4*time.Second {
+		t.Fatalf("MinimumInterval(overview) = %v, want 4s", got)
 	}
 }
 

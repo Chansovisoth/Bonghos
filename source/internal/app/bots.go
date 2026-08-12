@@ -182,7 +182,7 @@ func (a *App) handleBotTelegramDiscoverExisting(w http.ResponseWriter, r *http.R
 	}
 	token := strings.TrimSpace(request.Token)
 	if token == "" {
-		target, targetErr := a.Bots.Target(id)
+		target, targetErr := a.Bots.Credential(id)
 		if targetErr != nil {
 			writeErr(w, http.StatusBadRequest, targetErr)
 			return
@@ -263,6 +263,8 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadGateway
 		if errors.Is(err, bot.ErrNotFound) {
 			status = http.StatusNotFound
+		} else if errors.Is(err, bot.ErrDisabled) {
+			status = http.StatusConflict
 		}
 		writeErr(w, status, err)
 		return
@@ -277,7 +279,32 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (a *App) notifyBotEvent(event string, instanceID int64, player string) {
+func (a *App) handleBotInvite(w http.ResponseWriter, r *http.Request) {
+	id, err := botID(r)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	credential, err := a.Bots.Credential(id)
+	if errors.Is(err, bot.ErrNotFound) {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	inviteURL, err := a.BotNotify.Sender.InviteURL(ctx, credential.Provider, credential.Token)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"url": inviteURL})
+}
+
+func (a *App) notifyBotEvent(event string, instanceID int64, subject string) {
 	if a.BotNotify == nil || instanceID == 0 {
 		return
 	}
@@ -294,11 +321,18 @@ func (a *App) notifyBotEvent(event string, instanceID int64, player string) {
 	case bot.EventServerStarted:
 		message = fmt.Sprintf("✅ Server started\n%s is fully started and accepting players.", name)
 	case bot.EventServerStopped:
-		message = fmt.Sprintf("⏹ Server stopped\n%s has fully stopped.", name)
+		switch subject {
+		case "stopping", "restarting":
+			message = fmt.Sprintf("⏹ Server stopping\n%s is shutting down.", name)
+		case "crashed":
+			message = fmt.Sprintf("⚠️ Server stopped unexpectedly\n%s is no longer running.", name)
+		default:
+			message = fmt.Sprintf("⏹ Server stopped\n%s is no longer running.", name)
+		}
 	case bot.EventPlayerJoined:
-		message = fmt.Sprintf("➡ Player joined\n%s joined %s.", player, name)
+		message = fmt.Sprintf("➡ Player joined\n%s joined %s.", subject, name)
 	case bot.EventPlayerLeft:
-		message = fmt.Sprintf("⬅ Player left\n%s left %s.", player, name)
+		message = fmt.Sprintf("⬅ Player left\n%s left %s.", subject, name)
 	default:
 		return
 	}
@@ -321,23 +355,32 @@ func (a *App) markBotReady(instanceID int64) {
 func (a *App) observeBotLifecycle(state string) {
 	instanceID := a.activeInstanceIDQuiet()
 	notifyStopped := false
+	stopState := ""
 	a.botLifecycleMu.Lock()
 	switch state {
-	case "starting", "running", "stopping", "restarting":
+	case "starting", "running":
 		if !a.botSawOnline {
 			a.botReadySent = false
 			a.botStoppedSent = false
 		}
 		a.botSawOnline = true
+	case "stopping", "restarting":
+		if a.botSawOnline && !a.botStoppedSent {
+			a.botStoppedSent = true
+			notifyStopped = true
+			stopState = state
+		}
+		a.botSawOnline = false
 	case "stopped", "crashed":
 		if a.botSawOnline && !a.botStoppedSent {
 			a.botStoppedSent = true
 			notifyStopped = true
+			stopState = state
 		}
 		a.botSawOnline = false
 	}
 	a.botLifecycleMu.Unlock()
 	if notifyStopped {
-		a.notifyBotEvent(bot.EventServerStopped, instanceID, "")
+		a.notifyBotEvent(bot.EventServerStopped, instanceID, stopState)
 	}
 }

@@ -74,7 +74,7 @@ func (a *App) secureHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(self), publickey-credentials-get=(self)")
 		h.Set("Content-Security-Policy",
-			"default-src 'self'; img-src 'self' data: https://minotar.net; style-src 'self' 'unsafe-inline'; "+
+			"default-src 'self'; img-src 'self' data: https://minotar.net https://cdn.discordapp.com; style-src 'self' 'unsafe-inline'; "+
 				"script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})

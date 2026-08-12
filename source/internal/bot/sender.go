@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ type Sender struct {
 	TelegramBaseURL     string
 	TelegramFileBaseURL string
 	DiscordBaseURL      string
+	DiscordGatewayURL   string
 }
 
 type TelegramDiscovery struct {
@@ -72,7 +74,8 @@ type telegramUpdate struct {
 	MyChatMember      *struct {
 		Chat          telegramChat `json:"chat"`
 		NewChatMember struct {
-			Status string `json:"status"`
+			Status   string `json:"status"`
+			IsMember *bool  `json:"is_member,omitempty"`
 		} `json:"new_chat_member"`
 	} `json:"my_chat_member"`
 }
@@ -195,7 +198,8 @@ func (s *Sender) TelegramGroupPhotoForChat(ctx context.Context, token, chatID st
 }
 
 // DiscoverTelegramGroups returns groups visible in the bot's pending updates.
-// Discovery never enables a group; the owner must explicitly save selections.
+// Discovery never enables a group; a group administrator must explicitly run
+// /bonghos here in the intended destination topic.
 func (s *Sender) DiscoverTelegramGroups(ctx context.Context, token string) (TelegramDiscovery, error) {
 	token = strings.TrimSpace(token)
 	if len(token) < 20 || strings.ContainsAny(token, " \t\r\n") {
@@ -293,7 +297,8 @@ func (s *Sender) DiscoverTelegramGroups(ctx context.Context, token string) (Tele
 		addMessage(update.EditedChannelPost)
 		if update.MyChatMember != nil {
 			status := update.MyChatMember.NewChatMember.Status
-			if status == "left" || status == "kicked" {
+			if status == "left" || status == "kicked" ||
+				(status == "restricted" && update.MyChatMember.NewChatMember.IsMember != nil && !*update.MyChatMember.NewChatMember.IsMember) {
 				delete(byID, strconv.FormatInt(update.MyChatMember.Chat.ID, 10))
 			} else {
 				add(update.MyChatMember.Chat)
@@ -351,16 +356,64 @@ func NewSender() *Sender {
 		TelegramBaseURL:     "https://api.telegram.org",
 		TelegramFileBaseURL: "https://api.telegram.org",
 		DiscordBaseURL:      "https://discord.com/api/v10",
+		DiscordGatewayURL:   "wss://gateway.discord.gg",
 	}
 }
 
+// InviteURL resolves a provider identity from the encrypted server-side token
+// and returns the provider's standard group/server installation URL.
+func (s *Sender) InviteURL(ctx context.Context, provider, token string) (string, error) {
+	switch provider {
+	case ProviderTelegram:
+		var me struct {
+			Username string `json:"username"`
+		}
+		if err := s.telegramGet(ctx, token, "getMe", "", &me); err != nil {
+			return "", err
+		}
+		username := strings.TrimPrefix(strings.TrimSpace(me.Username), "@")
+		if !regexp.MustCompile(`^[A-Za-z0-9_]{5,}$`).MatchString(username) {
+			return "", errors.New("Telegram bot username is unavailable")
+		}
+		return "https://t.me/" + username + "?startgroup&admin=manage_chat", nil
+	case ProviderDiscord:
+		application, err := s.resolveDiscordApplication(ctx, token)
+		if err != nil {
+			return "", err
+		}
+		query := url.Values{}
+		query.Set("client_id", application.ID)
+		query.Set("scope", "bot applications.commands")
+		// View Channel, Send Messages, and Send Messages in Threads.
+		query.Set("permissions", "274877910016")
+		query.Set("integration_type", "0")
+		return "https://discord.com/oauth2/authorize?" + query.Encode(), nil
+	default:
+		return "", errors.New("unsupported notification provider")
+	}
+}
+
+// Send delivers a plain-text message. The provider renders it literally, so it
+// is safe for dynamic content such as player names and error strings.
 func (s *Sender) Send(ctx context.Context, target Target, message string) error {
+	return s.send(ctx, target, message, "")
+}
+
+// SendHTML delivers a message using Telegram HTML parse mode so <code> spans
+// render as tappable monospace. Callers must HTML-escape any dynamic content
+// (html.EscapeString) or Telegram rejects the request. Non-Telegram providers
+// fall back to plain delivery.
+func (s *Sender) SendHTML(ctx context.Context, target Target, message string) error {
+	return s.send(ctx, target, message, "HTML")
+}
+
+func (s *Sender) send(ctx context.Context, target Target, message, telegramParseMode string) error {
 	if strings.TrimSpace(message) == "" {
 		return errors.New("notification message is empty")
 	}
 	switch target.Provider {
 	case ProviderTelegram:
-		return s.sendTelegram(ctx, target, message)
+		return s.sendTelegram(ctx, target, message, telegramParseMode)
 	case ProviderDiscord:
 		return s.sendDiscord(ctx, target, message)
 	default:
@@ -368,10 +421,13 @@ func (s *Sender) Send(ctx context.Context, target Target, message string) error 
 	}
 }
 
-func (s *Sender) sendTelegram(ctx context.Context, target Target, message string) error {
+func (s *Sender) sendTelegram(ctx context.Context, target Target, message, parseMode string) error {
 	body := map[string]any{
 		"chat_id": target.DestinationID,
 		"text":    message,
+	}
+	if parseMode != "" {
+		body["parse_mode"] = parseMode
 	}
 	if target.ThreadID > 0 {
 		body["message_thread_id"] = target.ThreadID
@@ -450,6 +506,13 @@ func (d *Dispatcher) Notify(event, message string) {
 }
 
 func (d *Dispatcher) Test(ctx context.Context, id int64) error {
+	config, err := d.Store.ByID(id)
+	if err != nil {
+		return err
+	}
+	if !config.Enabled {
+		return ErrDisabled
+	}
 	targets, err := d.Store.Targets(id)
 	if err != nil {
 		return err

@@ -3,11 +3,38 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestSenderInviteURLs(t *testing.T) {
+	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"username":"bonghos_test_bot"}}`))
+	}))
+	defer telegram.Close()
+	sender := NewSender()
+	sender.TelegramBaseURL = telegram.URL
+	telegramURL, err := sender.InviteURL(context.Background(), ProviderTelegram, "123456789:telegram_invite_secret")
+	if err != nil || telegramURL != "https://t.me/bonghos_test_bot?startgroup&admin=manage_chat" {
+		t.Fatalf("Telegram invite = %q, %v", telegramURL, err)
+	}
+
+	discord := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"1536799744431755275","username":"Bonghos","bot":true}`))
+	}))
+	defer discord.Close()
+	sender.DiscordBaseURL = discord.URL
+	discordURL, err := sender.InviteURL(context.Background(), ProviderDiscord, "discord_bot_token_for_invite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(discordURL, "client_id=1536799744431755275") || !strings.Contains(discordURL, "permissions=274877910016") || !strings.Contains(discordURL, "scope=bot+applications.commands") {
+		t.Fatalf("Discord invite = %q", discordURL)
+	}
+}
 
 func TestSenderTelegram(t *testing.T) {
 	var received map[string]any
@@ -185,7 +212,8 @@ func TestDispatcherTestSendsToEveryTelegramDestination(t *testing.T) {
 	store := testStore(t)
 	config, err := store.Create(CreateInput{
 		Name: "Telegram groups", Provider: ProviderTelegram,
-		Token: "123456789:telegram_multi_send_secret",
+		Token:   "123456789:telegram_multi_send_secret",
+		Enabled: true,
 		Destinations: []Destination{
 			{ID: "-1001111111111", Name: "Projects"},
 			{ID: "-1002222222222", Name: "Staff"},
@@ -214,6 +242,23 @@ func TestDispatcherTestSendsToEveryTelegramDestination(t *testing.T) {
 	}
 	if len(chatIDs) != 2 || chatIDs[0] != "-1001111111111" || chatIDs[1] != "-1002222222222" {
 		t.Fatalf("test notification chat IDs = %v", chatIDs)
+	}
+}
+
+func TestDispatcherTestRejectsDisabledBot(t *testing.T) {
+	store := testStore(t)
+	config, err := store.Create(CreateInput{
+		Name: "Disabled Telegram", Provider: ProviderTelegram,
+		Token:        "123456789:telegram_disabled_test_secret",
+		Destinations: []Destination{{ID: "-1001111111111", Name: "Projects"}},
+		Enabled:      false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := &Dispatcher{Store: store, Sender: NewSender()}
+	if err := dispatcher.Test(context.Background(), config.ID); !errors.Is(err, ErrDisabled) {
+		t.Fatalf("disabled bot test error = %v, want %v", err, ErrDisabled)
 	}
 }
 

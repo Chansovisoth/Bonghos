@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Administrators can view, add, edit, test, invite, enable, and remove
+  notification bots through a dedicated bot-management permission without
+  receiving Owner-only account-security access.
+- Bot invite actions use a joined accent button with a separate one-click
+  control for copying the validated Telegram or Discord invite URL.
+- Performance shows a Back to Overview button when it was opened from an
+  Overview metric card.
+- Bot destination cards and edit dialogs show when each Telegram group or
+  Discord server was first detected. The timestamp remains stable across
+  subsequent provider refreshes.
+- Player skins link to the matching NameMC profile when Minecraft supplied a
+  valid account UUID.
+- Telegram and Discord bot cards now provide an **Invite Bot** action using the
+  providers' standard group/server installation links. Discord destinations
+  retain and display the server name, server icon, and selected `#channel`.
+- Bot edit dialogs refresh command-connected destinations automatically and
+  reload Settings when closed, so a destination added with `/bonghos here`
+  remains visible without saving unrelated form fields.
+- Bot edit dialogs now show Telegram groups and Discord servers as soon as the
+  bot joins them. They remain marked **Not configured** until an administrator
+  runs `/bonghos here` in the intended topic or channel.
+- Discord notification bots now accept a token without a preconfigured channel
+  ID. Bonghos registers `/bonghos` slash commands and maintains an outbound
+  Gateway connection, so server administrators can connect up to three channels
+  with `/bonghos here`, inspect one with `/bonghos where`, disconnect one with
+  `/bonghos disconnect`, and see command help with `/bonghos help`. Replies are
+  private to the administrator and permissions are verified server-side.
+- The loopback development relay now accepts a Discord bot token without a
+  preconfigured channel ID, derives and validates its application identity,
+  registers `/bonghos` slash commands, and receives interactions through an
+  outbound Discord Gateway connection. Server administrators can connect up to
+  three channels with `/bonghos here`, inspect them with `/bonghos where`, and
+  remove them with `/bonghos disconnect`; replies are ephemeral and permissions
+  are enforced again by the relay.
 - A loopback-only native Node development relay can load one Telegram bot and
   one Discord bot from the Git-ignored `.env.development` file, allowing real
   notification tests from `?demo&debug-bots` on Windows without exposing bot
@@ -23,7 +57,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   administrator reconnects each intended group topic with `/bonghos here`. Installations
   support one Telegram and one Discord bot.
 
+### Changed
+
+- Overview metrics and the sidebar's live player count now refresh every four
+  seconds. Disk usage remains a cached snapshot measured only when Performance
+  is opened or its storage Refresh button is used.
+
 ### Fixed
+
+- Start, stop, and restart actions use a continuously animated two-orb loading
+  indicator with isolated SVG filter identifiers, while still completing the
+  current animation cycle before displaying the final action icon.
+- Disabled notification bots cannot send test messages; the Web UI disables
+  the action and the API independently rejects direct requests.
+- Server-stop bot notifications are sent as soon as graceful shutdown begins,
+  while fully-started notifications remain tied to Minecraft's ready signal.
+  The later process exit does not send a duplicate notification, and an
+  unexpected crash still produces a stop alert.
+- Discord automatic server detection now requests the standard `GUILDS`
+  Gateway intent required for initial `GUILD_CREATE` backfill. Telegram also
+  remembers a group from any group update the bot can receive, without
+  requiring `/bonghos here` to configure it first.
+- Destination refreshes preserve their display order and first-discovered
+  timestamp, Telegram discovery works before any destination is configured,
+  and provider command failures no longer expose backend details in group chat.
+- Removing the bot from a Telegram group or Discord server now also removes
+  unreachable broadcast targets from that container instead of leaving stale
+  destinations enabled.
 
 - The generated control-plane systemd user service no longer applies
   capability-derived kernel and control-group hardening that restricted hosts

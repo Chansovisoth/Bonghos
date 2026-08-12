@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -205,10 +206,18 @@ func (r *Runner) stopLocked(ctx context.Context) error {
 	}
 	if c, err := console.Dial(r.app.Home); err == nil {
 		defer c.Close()
-		_ = c.Control("stop")
+		if err := c.Control("stop"); err != nil {
+			return fmt.Errorf("requesting graceful stop: %w", err)
+		}
+		r.app.observeBotLifecycle("stopping")
 	} else if systemd.Available() {
 		// systemd stop → SIGTERM → supervisor graceful stop
-		_ = systemd.Stop(systemd.ServiceMinecraft)
+		r.app.observeBotLifecycle("stopping")
+		if err := systemd.Stop(systemd.ServiceMinecraft); err != nil {
+			return fmt.Errorf("stopping %s: %w", systemd.ServiceMinecraft, err)
+		}
+	} else {
+		return errors.New("server supervisor is not available")
 	}
 	// Wait for exit.
 	timeout := time.Duration(r.app.Cfg.GracefulStopSeconds+30) * time.Second
@@ -262,6 +271,9 @@ func (r *Runner) ForceStop() error {
 		return err
 	}
 	defer release()
+	if r.Online() {
+		r.app.observeBotLifecycle("stopping")
+	}
 
 	if c, err := console.Dial(r.app.Home); err == nil {
 		_ = c.Control("force-stop")
@@ -309,6 +321,7 @@ func (r *Runner) SendCommand(cmd string) error {
 	r.mu.Unlock()
 	if c != nil {
 		if err := c.Send(cmd); err == nil {
+			r.noteStopCommand(cmd)
 			return nil
 		}
 	}
@@ -317,7 +330,17 @@ func (r *Runner) SendCommand(cmd string) error {
 		return errors.New("server console is not available (is the server running?)")
 	}
 	defer nc.Close()
-	return nc.Send(cmd)
+	err = nc.Send(cmd)
+	if err == nil {
+		r.noteStopCommand(cmd)
+	}
+	return err
+}
+
+func (r *Runner) noteStopCommand(cmd string) {
+	if strings.EqualFold(strings.TrimSpace(cmd), "stop") {
+		r.app.observeBotLifecycle("stopping")
+	}
 }
 
 // attachConsole maintains a persistent console client that fans supervisor

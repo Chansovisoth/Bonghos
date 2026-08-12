@@ -60,14 +60,15 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/users/{id}", a.requirePerm(authorization.PermUsersManage, a.handleUserDelete))
 
 	// --- notification bots -------------------------------------------------
-	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotList))
-	mux.HandleFunc("POST /api/bots", a.requirePerm(authorization.PermSecurityManage, a.handleBotCreate))
-	mux.HandleFunc("POST /api/bots/telegram/discover", a.requirePerm(authorization.PermSecurityManage, a.handleBotTelegramDiscover))
-	mux.HandleFunc("PATCH /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotUpdate))
-	mux.HandleFunc("DELETE /api/bots/{id}", a.requirePerm(authorization.PermSecurityManage, a.handleBotDelete))
-	mux.HandleFunc("POST /api/bots/{id}/test", a.requirePerm(authorization.PermSecurityManage, a.handleBotTest))
-	mux.HandleFunc("POST /api/bots/{id}/telegram/discover", a.requirePerm(authorization.PermSecurityManage, a.handleBotTelegramDiscoverExisting))
-	mux.HandleFunc("GET /api/bots/{id}/telegram/destinations/{destination}/photo", a.requirePerm(authorization.PermSecurityManage, a.handleBotTelegramGroupPhoto))
+	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermBotsManage, a.handleBotList))
+	mux.HandleFunc("POST /api/bots", a.requirePerm(authorization.PermBotsManage, a.handleBotCreate))
+	mux.HandleFunc("POST /api/bots/telegram/discover", a.requirePerm(authorization.PermBotsManage, a.handleBotTelegramDiscover))
+	mux.HandleFunc("PATCH /api/bots/{id}", a.requirePerm(authorization.PermBotsManage, a.handleBotUpdate))
+	mux.HandleFunc("DELETE /api/bots/{id}", a.requirePerm(authorization.PermBotsManage, a.handleBotDelete))
+	mux.HandleFunc("POST /api/bots/{id}/test", a.requirePerm(authorization.PermBotsManage, a.handleBotTest))
+	mux.HandleFunc("GET /api/bots/{id}/invite", a.requirePerm(authorization.PermBotsManage, a.handleBotInvite))
+	mux.HandleFunc("POST /api/bots/{id}/telegram/discover", a.requirePerm(authorization.PermBotsManage, a.handleBotTelegramDiscoverExisting))
+	mux.HandleFunc("GET /api/bots/{id}/telegram/destinations/{destination}/photo", a.requirePerm(authorization.PermBotsManage, a.handleBotTelegramGroupPhoto))
 
 	// --- servers ------------------------------------------------------------
 	mux.HandleFunc("GET /api/servers", a.requirePerm(authorization.PermServerView, a.handleServerList))

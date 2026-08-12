@@ -91,8 +91,8 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if version, err := Version(upgraded); err != nil || version != 10 {
-		t.Fatalf("upgraded schema version = %d, %v; want 10", version, err)
+	if version, err := Version(upgraded); err != nil || version != 13 {
+		t.Fatalf("upgraded schema version = %d, %v; want 13", version, err)
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='passkeys'`).Scan(&table); err != nil {
 		t.Fatalf("passkeys migration was not applied: %v", err)

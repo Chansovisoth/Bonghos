@@ -1,0 +1,5 @@
+# Historical false positives from the development-only Discord destination
+# fixture removed after 5f0ded0. Keep these exact fingerprints instead of
+# weakening the Discord rules or excluding the affected source files.
+5f0ded01158ed8e4bc5a63afc6a7c269e8758c97:.env.development.example:discord-client-secret:10
+5f0ded01158ed8e4bc5a63afc6a7c269e8758c97:scripts/dev-web.test.js:discord-client-id:28
