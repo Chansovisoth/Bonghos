@@ -104,6 +104,47 @@ func TestVariablesFileDetectedWithoutGeneratedArgFile(t *testing.T) {
 	}
 }
 
+// Mentioning variables.txt near a warning about a different generated file
+// must not make the variables file itself read-only. Some packs create the
+// generated argument file only at launch, so it may not exist during setup.
+func TestGeneratedNoticeForDifferentFileDoesNotMarkVariablesReadOnly(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "start.sh"), []byte(`#!/bin/bash
+# This script reads variables.txt. Do not edit user_jvm_args.txt directly:
+# user_jvm_args.txt is regenerated on every run.
+source ./variables.txt
+java ${JAVA_ARGS} -jar server.jar nogui
+`), 0o755)
+	os.WriteFile(filepath.Join(root, "variables.txt"), []byte(
+		"JAVA_ARGS=\"-Xms2G -Xmx6G\"\n"), 0o644)
+
+	cfg, err := DetectJVMConfig(root, "start.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SourceFile != "variables.txt" || !cfg.Editable {
+		t.Fatalf("config=%+v, want editable variables.txt", cfg)
+	}
+}
+
+func TestGeneratedFileCommentStillMarksThatFileReadOnly(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "start.sh"), []byte(`#!/bin/bash
+# user_jvm_args.txt is regenerated on every run by the pack launcher.
+java @user_jvm_args.txt -jar server.jar nogui
+`), 0o755)
+	os.WriteFile(filepath.Join(root, "user_jvm_args.txt"), []byte(
+		"-Xms2G\n-Xmx6G\n"), 0o644)
+
+	cfg, err := DetectJVMConfig(root, "start.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SourceFile != "user_jvm_args.txt" || cfg.Editable {
+		t.Fatalf("config=%+v, want read-only generated argument file", cfg)
+	}
+}
+
 // Saving must change variables.txt, and the value must survive the pack
 // regenerating user_jvm_args.txt from it.
 func TestSavingEditsVariablesAndSurvivesRegeneration(t *testing.T) {

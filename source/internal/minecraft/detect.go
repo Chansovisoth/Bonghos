@@ -340,6 +340,26 @@ func detectOwningVariable(root, startupRel string) *JVMConfig {
 var generatedArgFile = regexp.MustCompile(
 	`(?mi)(?:>>?|\btee\b)\s*"?[^"\n]*?(user_jvm_args\.txt|jvm[_-]args\.txt|jvm\.args|java[_-]args\.txt|java\.args|args\.txt|flags\.txt)`)
 
+// generatedFileNotice matches comments that explicitly describe one file as
+// generated. Keep the filename tied to the warning phrase: a script commonly
+// says it reads variables.txt near a separate warning that user_jvm_args.txt
+// is regenerated, and treating those unrelated mentions as one statement
+// incorrectly makes the authoritative variables file read-only.
+func generatedFileNotice(body, base string) bool {
+	name := regexp.QuoteMeta(strings.ToLower(base))
+	patterns := []string{
+		`(?im)(?:do not|don't)\s+edit\s+["']?` + name,
+		`(?im)(?:regenerat\w*|overwrit\w*|replac\w*)\s+["']?` + name,
+		`(?im)["']?` + name + `["']?\s+(?:is|gets?|will(?:\s+be)?|is\s+being)\s+(?:regenerat\w*|overwrit\w*|replac\w*)`,
+	}
+	for _, pattern := range patterns {
+		if regexp.MustCompile(pattern).MatchString(body) {
+			return true
+		}
+	}
+	return false
+}
+
 // argFileIsGenerated reports whether the startup script (or a script it
 // sources) rewrites the given argument file at launch.
 func argFileIsGenerated(root, startupRel, argFile string) bool {
@@ -359,11 +379,7 @@ func argFileIsGenerated(root, startupRel, argFile string) bool {
 			}
 		}
 		// Some packs say so in a comment rather than in obvious redirection.
-		lower := strings.ToLower(body)
-		if strings.Contains(lower, strings.ToLower(base)) &&
-			(strings.Contains(lower, "regenerat") || strings.Contains(lower, "overwrit") ||
-				strings.Contains(lower, "do not edit") || strings.Contains(lower, "don't edit") ||
-				strings.Contains(lower, "will be replaced")) {
+		if generatedFileNotice(body, base) {
 			return true
 		}
 	}

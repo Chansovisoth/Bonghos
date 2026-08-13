@@ -33,7 +33,7 @@ web:
 	@mkdir -p $(WEB_DIST)
 	@find $(WEB_DIST) -mindepth 1 -maxdepth 1 ! -name .gitkeep -delete
 	@cp $(WEB_SRC)/* $(WEB_DIST)/
-	@for asset in index.html app.js style.css theme-init.js Telegram.png Discord.png; do \
+	@for asset in index.html app.js style.css theme-init.js Telegram.png Discord.png server-placeholder.png; do \
 		test -f $(WEB_DIST)/$$asset || { echo "frontend build produced no $$asset"; exit 1; }; \
 	done
 	@echo "Web UI prepared for embedding"

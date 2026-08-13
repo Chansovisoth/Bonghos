@@ -2231,7 +2231,7 @@ function playerRow(p) {
     referrerpolicy: "no-referrer",
     onerror: () => handlePlayerFaceError(avatar, fallback, p.username),
   });
-  const profileURL = playerNameMCProfileURL(p.uuid);
+  const profileURL = playerNameMCProfileURL(p.uuid, p.username);
   const playerSkin = profileURL
     ? el("a", {
       class: "player-avatar-link",
@@ -2256,10 +2256,14 @@ function playerRow(p) {
     el("td", { class: "table-actions" }, can("server.players.manage") ? playerActions(p) : ""));
 }
 
-function playerNameMCProfileURL(uuid) {
+function playerNameMCProfileURL(uuid, username = "") {
   const value = String(uuid || "").trim();
-  if (!/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(value)) return "";
-  return `https://namemc.com/profile/${encodeURIComponent(value)}`;
+  if (/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.test(value)) {
+    return `https://namemc.com/profile/${encodeURIComponent(value)}`;
+  }
+  const name = String(username || "").trim();
+  if (!/^[A-Za-z0-9_]{1,16}$/.test(name)) return "";
+  return `https://namemc.com/profile/${encodeURIComponent(name)}`;
 }
 
 function getPlayerFaceUrl(username, size = 64) {
@@ -2486,6 +2490,11 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
   let selectAllInput;
   let nameHeader;
   let fileList;
+  let selectionAnchorPath = "";
+  let selectionDrag = null;
+  let suppressSelectionClick = false;
+  let selectionAutoScrollFrame = 0;
+  const renderedFileRows = new Map();
   const crumbs = el("div", { class: "breadcrumb" },
     el("span", { onclick: () => pageFiles(main, "", fileBrowseRoot) },
       fileBrowseRoot === "servers" ? "servers" : projectFolderName(currentFileProject())));
@@ -2511,27 +2520,150 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
     } catch (e) { toast(e.message, "err"); }
   });
   const entryPath = (entry) => (path ? path + "/" : "") + entry.name;
-  const fileRow = (entry) => {
+  const syncRenderedSelection = (rel) => {
+    const row = renderedFileRows.get(rel);
+    if (!row) return;
+    const selected = selectedPaths.has(rel);
+    row.classList.toggle("is-selected", selected);
+    const checkbox = row.querySelector(".file-selection-checkbox");
+    if (checkbox) checkbox.checked = selected;
+  };
+  const setEntrySelected = (entry, selected) => {
+    const rel = entryPath(entry);
+    if (selected) selectedPaths.set(rel, entry);
+    else selectedPaths.delete(rel);
+    syncRenderedSelection(rel);
+  };
+  const visibleIndex = (rel) => lastVisibleEntries.findIndex((entry) => entryPath(entry) === rel);
+  const selectVisibleRange = (fromIndex, toIndex, selected = true) => {
+    const first = Math.max(0, Math.min(fromIndex, toIndex));
+    const last = Math.min(lastVisibleEntries.length - 1, Math.max(fromIndex, toIndex));
+    for (let index = first; index <= last; index += 1) {
+      setEntrySelected(lastVisibleEntries[index], selected);
+    }
+    updateSelectionUI();
+  };
+  const selectFromAnchor = (entry) => {
+    const rel = entryPath(entry);
+    const currentIndex = visibleIndex(rel);
+    const anchorIndex = visibleIndex(selectionAnchorPath);
+    if (anchorIndex < 0 || currentIndex < 0) {
+      setEntrySelected(entry, true);
+      selectionAnchorPath = rel;
+      updateSelectionUI();
+      return;
+    }
+    selectVisibleRange(anchorIndex, currentIndex, true);
+  };
+  const applySelectionDragAtPoint = (clientX, clientY) => {
+    if (!selectionDrag) return;
+    const row = document.elementFromPoint(clientX, clientY)?.closest?.("tr[data-file-index]");
+    if (!row || !fileList?.contains(row)) return;
+    const nextIndex = Number(row.dataset.fileIndex);
+    if (!Number.isInteger(nextIndex) || nextIndex === selectionDrag.lastIndex) return;
+    selectVisibleRange(selectionDrag.lastIndex, nextIndex, selectionDrag.selected);
+    selectionDrag.lastIndex = nextIndex;
+  };
+  const runSelectionAutoScroll = () => {
+    if (!selectionDrag) return;
+    const edge = 72;
+    const y = selectionDrag.clientY;
+    let delta = 0;
+    if (y < edge) delta = -Math.ceil((edge - y) / 5);
+    else if (y > window.innerHeight - edge) delta = Math.ceil((y - (window.innerHeight - edge)) / 5);
+    if (delta) {
+      window.scrollBy(0, delta);
+      applySelectionDragAtPoint(selectionDrag.clientX, selectionDrag.clientY);
+    }
+    selectionAutoScrollFrame = requestAnimationFrame(runSelectionAutoScroll);
+  };
+  const handleSelectionPointerMove = (event) => {
+    if (!selectionDrag) return;
+    if ((event.buttons & 1) === 0) {
+      stopSelectionDrag();
+      return;
+    }
+    selectionDrag.clientX = event.clientX;
+    selectionDrag.clientY = event.clientY;
+    applySelectionDragAtPoint(event.clientX, event.clientY);
+  };
+  const stopSelectionDrag = () => {
+    if (!selectionDrag) return;
+    selectionDrag = null;
+    document.body.classList.remove("file-selection-dragging");
+    document.removeEventListener("pointermove", handleSelectionPointerMove);
+    document.removeEventListener("pointerup", stopSelectionDrag);
+    document.removeEventListener("pointercancel", stopSelectionDrag);
+    window.removeEventListener("blur", stopSelectionDrag);
+    if (selectionAutoScrollFrame) cancelAnimationFrame(selectionAutoScrollFrame);
+    selectionAutoScrollFrame = 0;
+    setTimeout(() => { suppressSelectionClick = false; }, 0);
+  };
+  const releaseSuppressedSelectionClick = () => {
+    document.removeEventListener("pointerup", releaseSuppressedSelectionClick);
+    document.removeEventListener("pointercancel", releaseSuppressedSelectionClick);
+    window.removeEventListener("blur", releaseSuppressedSelectionClick);
+    setTimeout(() => { suppressSelectionClick = false; }, 0);
+  };
+  const beginSelectionDrag = (event, entry, index) => {
+    if (!selectionMode || event.pointerType !== "mouse" || event.button !== 0
+      || event.target.closest?.("a, button, input")) return;
+    event.preventDefault();
+    suppressSelectionClick = true;
+    if (event.shiftKey) {
+      selectFromAnchor(entry);
+      document.addEventListener("pointerup", releaseSuppressedSelectionClick);
+      document.addEventListener("pointercancel", releaseSuppressedSelectionClick);
+      window.addEventListener("blur", releaseSuppressedSelectionClick);
+      return;
+    }
+    const rel = entryPath(entry);
+    const selected = !selectedPaths.has(rel);
+    selectionAnchorPath = rel;
+    setEntrySelected(entry, selected);
+    updateSelectionUI();
+    selectionDrag = { selected, lastIndex: index, clientX: event.clientX, clientY: event.clientY };
+    document.body.classList.add("file-selection-dragging");
+    document.addEventListener("pointermove", handleSelectionPointerMove);
+    document.addEventListener("pointerup", stopSelectionDrag);
+    document.addEventListener("pointercancel", stopSelectionDrag);
+    window.addEventListener("blur", stopSelectionDrag);
+    selectionAutoScrollFrame = requestAnimationFrame(runSelectionAutoScroll);
+  };
+  const fileRow = (entry, index) => {
     const rel = entryPath(entry);
     const checkbox = el("input", {
       class: "file-selection-checkbox", type: "checkbox",
       "aria-label": `Select ${entry.name}`,
       checked: selectedPaths.has(rel) ? "checked" : null,
-      onclick: (event) => event.stopPropagation(),
+      onclick: (event) => {
+        event.stopPropagation();
+        if (event.shiftKey && selectionAnchorPath) {
+          event.preventDefault();
+          selectFromAnchor(entry);
+        } else {
+          selectionAnchorPath = rel;
+        }
+      },
       onchange: (event) => {
-        if (event.currentTarget.checked) selectedPaths.set(rel, entry);
-        else selectedPaths.delete(rel);
+        setEntrySelected(entry, event.currentTarget.checked);
         updateSelectionUI();
-        draw(search.value.trim().toLowerCase());
       },
     });
-    return el("tr", { class: selectedPaths.has(rel) ? "is-selected" : "" },
-      el("td", { class: "mono", style: "cursor:pointer", onclick: () => {
+    const row = el("tr", {
+      class: selectedPaths.has(rel) ? "is-selected" : "",
+      "data-file-index": String(index),
+      onpointerdown: (event) => beginSelectionDrag(event, entry, index),
+    },
+      el("td", { class: "mono", style: "cursor:pointer", onclick: (event) => {
         if (selectionMode) {
-          if (selectedPaths.has(rel)) selectedPaths.delete(rel);
-          else selectedPaths.set(rel, entry);
+          if (suppressSelectionClick) return;
+          if (event.shiftKey && selectionAnchorPath) selectFromAnchor(entry);
+          else {
+            selectionAnchorPath = rel;
+            setEntrySelected(entry, !selectedPaths.has(rel));
+          }
           updateSelectionUI();
-          draw(search.value.trim().toLowerCase());
         } else if (entry.is_dir) pageFiles(main, rel, fileBrowseRoot);
         else openFile(main, rel);
       } }, el("span", { class: "file-selectable-identity" },
@@ -2541,11 +2673,17 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
       el("td", { class: "mobile-hide" }, fmtTime(entry.mod_time || entry.modified)),
       el("td", { class: "table-actions file-actions-cell" },
         fileActions(main, path, entry, directoryRequest.scope.writable)));
+    renderedFileRows.set(rel, row);
+    return row;
   };
   const parentRow = () => el("tr", { class: "file-parent-row" },
     el("td", {
-      class: "mono", colspan: "4", style: "cursor:pointer", title: "Parent directory",
-      onclick: () => pageFiles(main, parentLocation.path, parentLocation.root),
+      class: "mono", colspan: "4",
+      style: selectionMode ? "cursor:default" : "cursor:pointer",
+      title: selectionMode ? "Parent directory cannot be selected" : "Parent directory",
+      onclick: () => {
+        if (!selectionMode) pageFiles(main, parentLocation.path, parentLocation.root);
+      },
     }, el("span", { class: "file-selectable-identity" },
       selectionMode ? el("input", {
         class: "file-selection-checkbox", type: "checkbox", disabled: "disabled",
@@ -2584,8 +2722,12 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
     }
   };
   const setSelectionMode = (enabled) => {
+    stopSelectionDrag();
     selectionMode = enabled;
-    if (!enabled) selectedPaths.clear();
+    if (!enabled) {
+      selectedPaths.clear();
+      selectionAnchorPath = "";
+    }
     updateSelectionUI();
     draw(search.value.trim().toLowerCase());
   };
@@ -2605,8 +2747,9 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
       return byName(a, b);
     });
     lastVisibleEntries = visible;
+    renderedFileRows.clear();
     const rows = visible.length
-      ? visible.map(fileRow)
+      ? visible.map((entry, index) => fileRow(entry, index))
       : [el("tr", { class: "file-empty-row" }, el("td", { colspan: "4", class: "muted file-empty-cell" }, (entries || []).length ? "No matching files." : "Empty directory"))];
     if (parentLocation) rows.unshift(parentRow());
     tbody.replaceChildren(...rows);
@@ -2637,11 +2780,9 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
     "aria-label": "Select all visible files",
     onchange: (event) => {
       for (const entry of lastVisibleEntries) {
-        const rel = entryPath(entry);
-        if (event.currentTarget.checked) selectedPaths.set(rel, entry);
-        else selectedPaths.delete(rel);
+        setEntrySelected(entry, event.currentTarget.checked);
       }
-      draw(search.value.trim().toLowerCase());
+      updateSelectionUI();
     },
   });
   nameHeader = el("th", {}, el("span", { class: "file-name-heading" }, selectAllInput, "Name"));
@@ -3227,8 +3368,13 @@ async function pageConfiguration(main) {
   const inst = d.instance;
   main.innerHTML = "";
 
-  const xms = el("input", { value: (d.jvm && d.jvm.xms) || inst.jvm_xms || "" , placeholder: "e.g. 2G" });
-  const xmx = el("input", { value: (d.jvm && d.jvm.xmx) || inst.jvm_xmx || "" , placeholder: "e.g. 6G" });
+  const jvmEditable = !!(d.jvm && d.jvm.editable);
+  const memoryInputAttrs = {
+    disabled: jvmEditable ? null : "disabled",
+    title: jvmEditable ? "" : "Open the detected JVM source to change this value",
+  };
+  const xms = el("input", { ...memoryInputAttrs, value: (d.jvm && d.jvm.xms) || inst.jvm_xms || "", placeholder: "e.g. 2G" });
+  const xmx = el("input", { ...memoryInputAttrs, value: (d.jvm && d.jvm.xmx) || inst.jvm_xmx || "", placeholder: "e.g. 6G" });
   const scriptSel = el("select", {},
     ...(d.scripts || []).map((s) => el("option", { value: s.path, selected: s.path === inst.startup_script ? "" : null },
       `${s.path} (${s.modloader || "unknown"}, score ${s.score})`)));
@@ -4788,8 +4934,15 @@ function overviewSparklineNode(title, points, fmt, options = {}) {
 
 // ----- servers (projects + import) ------------------------------------------
 function serverCardIcon(server) {
-  const fallback = el("div", { class: "server-card-icon server-card-icon-fallback", "aria-hidden": "true" },
-    solarIcon("server-square-linear"));
+  const fallback = el("img", {
+    class: "server-card-icon",
+    src: "/server-placeholder.png",
+    alt: "",
+    width: 64,
+    height: 64,
+    loading: "lazy",
+    decoding: "async",
+  });
   const revision = encodeURIComponent(server.icon_revision || 0);
   const icon = el("img", {
     class: "server-card-icon",
