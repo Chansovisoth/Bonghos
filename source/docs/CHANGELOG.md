@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Telegram and Discord bot settings include an optional resolver IP for
+  networks where the host DNS cannot resolve the provider. It applies only to
+  that bot's connections, uses port 53, and is never activated automatically.
 - Administrators can view, add, edit, test, invite, enable, and remove
   notification bots through a dedicated bot-management permission without
   receiving Owner-only account-security access.
@@ -54,17 +57,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Bonghos consumes commands once using a durable Telegram update cursor and
   supports up to three groups without retaining stale topic-discovery lists.
   The upgrade clears destinations saved by the former dropdown flow once; an
-  administrator reconnects each intended group topic with `/bonghos here`. Installations
-  support one Telegram and one Discord bot.
+  administrator reconnects each intended group topic with `/bonghos here`.
 
 ### Changed
 
+- Installations now support up to two Telegram and two Discord notification
+  bots, with four bots total and up to three destinations per bot. Optional
+  replacement-token and DNS fields are collapsed under Show more when
+  editing a bot.
+- Telegram invite links add bots to groups without requesting administrator
+  permissions; only the user running configuration commands must be a group
+  administrator.
 - Overview metrics and the sidebar's live player count now refresh every four
   seconds. Disk usage remains a cached snapshot measured only when Performance
   is opened or its storage Refresh button is used.
 
 ### Fixed
 
+- The strict script CSP no longer blocks theme initialization, and an optional
+  Discord REST fallback uses the legacy API hostname only after safe transport
+  failures, without retrying ambiguous message POSTs that could cause
+  duplicates. Safe DNS and timeout details are retained without exposing bot
+  credentials, and REST and Gateway endpoints can be overridden for restricted
+  networks. Testing a bot before connecting a destination now returns a
+  conflict instead of misreporting local setup as an upstream gateway failure.
 - Start, stop, and restart actions use a continuously animated two-orb loading
   indicator with isolated SVG filter identifiers, while still completing the
   current animation cycle before displaying the final action icon.

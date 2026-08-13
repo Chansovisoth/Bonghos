@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Chansovisoth/Bonghos/internal/backup"
+	"github.com/Chansovisoth/Bonghos/internal/config"
 	"github.com/Chansovisoth/Bonghos/internal/files"
 	"github.com/Chansovisoth/Bonghos/internal/instance"
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
@@ -52,17 +53,43 @@ func (a *App) requestInstance(r *http.Request) (*instance.Instance, error) {
 }
 
 // requestFiles returns a path-jailed file manager for the requested project.
+// The servers root is exposed as an explicit read-only browsing scope so the
+// file browser can navigate upward without ever gaining access to BONGHOS_HOME.
 func (a *App) requestFiles(r *http.Request) (*files.Manager, *instance.Instance, error) {
+	switch strings.TrimSpace(r.URL.Query().Get("root")) {
+	case "servers":
+		return &files.Manager{
+			Root:         filepath.Join(a.Home, config.DirServers),
+			MaxEditBytes: maxTextEditBytes,
+		}, nil, nil
+	case "":
+		// Continue below with the selected project root.
+	default:
+		return nil, nil, errors.New("invalid files root")
+	}
+
 	inst, err := a.requestInstance(r)
 	if err != nil {
 		return nil, nil, err
 	}
+	return a.filesForInstance(inst), inst, nil
+}
+
+func (a *App) filesForInstance(inst *instance.Instance) *files.Manager {
 	// MaxEditBytes keeps the text editor away from huge or binary files;
 	// browsing, download and upload are unaffected.
 	return &files.Manager{
 		Root:         inst.AbsoluteDir(a.Home),
 		MaxEditBytes: maxTextEditBytes,
-	}, inst, nil
+	}
+}
+
+func rejectServersRootMutation(w http.ResponseWriter, r *http.Request) bool {
+	if strings.TrimSpace(r.URL.Query().Get("root")) != "servers" {
+		return false
+	}
+	writeErr(w, http.StatusBadRequest, errors.New("the servers root is read-only; open a managed project to change its files"))
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +134,9 @@ func (a *App) handleFileRead(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleFileWrite(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
 	u := currentUser(r)
 	fm, inst, err := a.requestFiles(r)
 	if err != nil {
@@ -129,7 +159,35 @@ func (a *App) handleFileWrite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+func (a *App) handleFileCreate(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
+	u := currentUser(r)
+	fm, inst, err := a.requestFiles(r)
+	if err != nil {
+		writeErr(w, 409, err)
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := readJSON(r, &req, 1<<14); err != nil {
+		writeErr(w, 400, errors.New("invalid request"))
+		return
+	}
+	if err := fm.CreateFile(req.Path); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	a.audit(u.ID, u.Username, "file_created", inst.Slug, req.Path, remoteIP(r))
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 func (a *App) handleFileMkdir(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
 	fm, _, err := a.requestFiles(r)
 	if err != nil {
 		writeErr(w, 409, err)
@@ -150,6 +208,9 @@ func (a *App) handleFileMkdir(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleFileRename(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
 	u := currentUser(r)
 	fm, inst, err := a.requestFiles(r)
 	if err != nil {
@@ -172,7 +233,135 @@ func (a *App) handleFileRename(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
+func fileBatchRequest(r *http.Request) ([]string, string, int64, error) {
+	var req struct {
+		Paths               []string `json:"paths"`
+		Destination         string   `json:"destination"`
+		DestinationServerID int64    `json:"destination_server_id"`
+	}
+	if err := readJSON(r, &req, 1<<20); err != nil {
+		return nil, "", 0, errors.New("invalid request")
+	}
+	if len(req.Paths) == 0 || len(req.Paths) > 200 {
+		return nil, "", 0, errors.New("select between 1 and 200 files")
+	}
+	if req.DestinationServerID < 0 {
+		return nil, "", 0, errors.New("invalid destination project")
+	}
+	seen := make(map[string]bool, len(req.Paths))
+	paths := make([]string, 0, len(req.Paths))
+	for _, item := range req.Paths {
+		item = strings.TrimSpace(item)
+		if item == "" || item == "." || item == "/" {
+			return nil, "", 0, errors.New("invalid selected path")
+		}
+		if !seen[item] {
+			seen[item] = true
+			paths = append(paths, item)
+		}
+	}
+	return paths, strings.TrimSpace(req.Destination), req.DestinationServerID, nil
+}
+
+func (a *App) fileBatchDestination(source *instance.Instance, sourceFiles *files.Manager, destinationID int64) (*files.Manager, *instance.Instance, error) {
+	if destinationID == 0 || destinationID == source.ID {
+		return sourceFiles, source, nil
+	}
+	destination, err := a.Instances.ByID(destinationID)
+	if err != nil {
+		return nil, nil, errors.New("destination project not found")
+	}
+	return a.filesForInstance(destination), destination, nil
+}
+
+func (a *App) handleFileCopy(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
+	u := currentUser(r)
+	fm, inst, err := a.requestFiles(r)
+	if err != nil {
+		writeErr(w, 409, err)
+		return
+	}
+	paths, destination, destinationID, err := fileBatchRequest(r)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	destinationFiles, destinationProject, err := a.fileBatchDestination(inst, fm, destinationID)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	var copied []string
+	for _, source := range paths {
+		target := filepath.ToSlash(filepath.Join(destination, filepath.Base(source)))
+		if err := fm.CopyTo(source, destinationFiles, target); err != nil {
+			for i := len(copied) - 1; i >= 0; i-- {
+				_ = destinationFiles.Delete(copied[i])
+			}
+			writeErr(w, 400, fmt.Errorf("copying %s: %w", source, err))
+			return
+		}
+		copied = append(copied, target)
+	}
+	a.audit(u.ID, u.Username, "files_copied", inst.Slug, strings.Join(paths, ", ")+" -> "+destinationProject.Slug+":"+destination, remoteIP(r))
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
+func (a *App) handleFileMove(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
+	u := currentUser(r)
+	fm, inst, err := a.requestFiles(r)
+	if err != nil {
+		writeErr(w, 409, err)
+		return
+	}
+	paths, destination, destinationID, err := fileBatchRequest(r)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	destinationFiles, destinationProject, err := a.fileBatchDestination(inst, fm, destinationID)
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	crossProject := destinationProject.ID != inst.ID
+	type movedPath struct{ from, to string }
+	var moved []movedPath
+	for _, source := range paths {
+		target := filepath.ToSlash(filepath.Join(destination, filepath.Base(source)))
+		var moveErr error
+		if crossProject {
+			moveErr = fm.MoveTo(source, destinationFiles, target)
+		} else {
+			moveErr = fm.Rename(source, target)
+		}
+		if moveErr != nil {
+			for i := len(moved) - 1; i >= 0; i-- {
+				if crossProject {
+					_ = destinationFiles.MoveTo(moved[i].to, fm, moved[i].from)
+				} else {
+					_ = fm.Rename(moved[i].to, moved[i].from)
+				}
+			}
+			writeErr(w, 400, fmt.Errorf("moving %s: %w", source, moveErr))
+			return
+		}
+		moved = append(moved, movedPath{from: source, to: target})
+	}
+	a.audit(u.ID, u.Username, "files_moved", inst.Slug, strings.Join(paths, ", ")+" -> "+destinationProject.Slug+":"+destination, remoteIP(r))
+	writeJSON(w, 200, map[string]bool{"ok": true})
+}
+
 func (a *App) handleFileDelete(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
 	u := currentUser(r)
 	fm, inst, err := a.requestFiles(r)
 	if err != nil {
@@ -196,6 +385,9 @@ func (a *App) handleFileDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleFileUpload(w http.ResponseWriter, r *http.Request) {
+	if rejectServersRootMutation(w, r) {
+		return
+	}
 	u := currentUser(r)
 	fm, inst, err := a.requestFiles(r)
 	if err != nil {

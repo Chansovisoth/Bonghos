@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -18,11 +19,13 @@ import (
 )
 
 type Sender struct {
-	Client              *http.Client
-	TelegramBaseURL     string
-	TelegramFileBaseURL string
-	DiscordBaseURL      string
-	DiscordGatewayURL   string
+	Client                 *http.Client
+	TelegramBaseURL        string
+	TelegramFileBaseURL    string
+	DiscordBaseURL         string
+	DiscordFallbackBaseURL string
+	DiscordGatewayURL      string
+	DNSServer              string
 }
 
 type TelegramDiscovery struct {
@@ -90,7 +93,11 @@ func (s *Sender) telegramGet(ctx context.Context, token, method, query string, o
 		return err
 	}
 	request.Header.Set("User-Agent", "Bonghos/notification-bot")
-	response, err := s.Client.Do(request)
+	client := s.httpClient()
+	if s.DNSServer != "" {
+		defer client.CloseIdleConnections()
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return errors.New("Telegram request failed")
 	}
@@ -156,7 +163,11 @@ func (s *Sender) TelegramGroupPhoto(ctx context.Context, token, fileID string) (
 		return nil, "", err
 	}
 	request.Header.Set("User-Agent", "Bonghos/notification-bot")
-	response, err := s.Client.Do(request)
+	client := s.httpClient()
+	if s.DNSServer != "" {
+		defer client.CloseIdleConnections()
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		return nil, "", errors.New("Telegram group photo request failed")
 	}
@@ -352,32 +363,42 @@ func (s *Sender) DiscoverTelegramGroups(ctx context.Context, token string) (Tele
 
 func NewSender() *Sender {
 	return &Sender{
-		Client:              &http.Client{Timeout: 12 * time.Second},
-		TelegramBaseURL:     "https://api.telegram.org",
-		TelegramFileBaseURL: "https://api.telegram.org",
-		DiscordBaseURL:      "https://discord.com/api/v10",
-		DiscordGatewayURL:   "wss://gateway.discord.gg",
+		Client:                 &http.Client{Timeout: 12 * time.Second},
+		TelegramBaseURL:        "https://api.telegram.org",
+		TelegramFileBaseURL:    "https://api.telegram.org",
+		DiscordBaseURL:         envURL("BONGHOS_DISCORD_BASE_URL", "https://discord.com/api/v10"),
+		DiscordFallbackBaseURL: envURL("BONGHOS_DISCORD_FALLBACK_BASE_URL", ""),
+		DiscordGatewayURL:      envURL("BONGHOS_DISCORD_GATEWAY_URL", "wss://gateway.discord.gg"),
 	}
+}
+
+func envURL(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 // InviteURL resolves a provider identity from the encrypted server-side token
 // and returns the provider's standard group/server installation URL.
-func (s *Sender) InviteURL(ctx context.Context, provider, token string) (string, error) {
+
+func (s *Sender) InviteURL(ctx context.Context, provider, token, dnsServer string) (string, error) {
+	providerSender := s.WithDNS(dnsServer)
 	switch provider {
 	case ProviderTelegram:
 		var me struct {
 			Username string `json:"username"`
 		}
-		if err := s.telegramGet(ctx, token, "getMe", "", &me); err != nil {
+		if err := providerSender.telegramGet(ctx, token, "getMe", "", &me); err != nil {
 			return "", err
 		}
 		username := strings.TrimPrefix(strings.TrimSpace(me.Username), "@")
 		if !regexp.MustCompile(`^[A-Za-z0-9_]{5,}$`).MatchString(username) {
 			return "", errors.New("Telegram bot username is unavailable")
 		}
-		return "https://t.me/" + username + "?startgroup&admin=manage_chat", nil
+		return "https://t.me/" + username + "?startgroup", nil
 	case ProviderDiscord:
-		application, err := s.resolveDiscordApplication(ctx, token)
+		application, err := providerSender.resolveDiscordApplication(ctx, token)
 		if err != nil {
 			return "", err
 		}
@@ -413,7 +434,7 @@ func (s *Sender) send(ctx context.Context, target Target, message, telegramParse
 	}
 	switch target.Provider {
 	case ProviderTelegram:
-		return s.sendTelegram(ctx, target, message, telegramParseMode)
+		return s.WithDNS(target.DNSServer).sendTelegram(ctx, target, message, telegramParseMode)
 	case ProviderDiscord:
 		return s.sendDiscord(ctx, target, message)
 	default:
@@ -443,8 +464,8 @@ func (s *Sender) sendDiscord(ctx context.Context, target Target, message string)
 			"parse": []string{},
 		},
 	}
-	endpoint := strings.TrimRight(s.DiscordBaseURL, "/") + "/channels/" + url.PathEscape(target.DestinationID) + "/messages"
-	return s.postJSON(ctx, endpoint, "Bot "+target.Token, body, ProviderDiscord)
+	path := "channels/" + url.PathEscape(target.DestinationID) + "/messages"
+	return s.WithDNS(target.DNSServer).discordJSON(ctx, http.MethodPost, path, target.Token, body, nil)
 }
 
 func (s *Sender) postJSON(ctx context.Context, endpoint, authorization string, payload any, provider string) error {
@@ -461,7 +482,11 @@ func (s *Sender) postJSON(ctx context.Context, endpoint, authorization string, p
 	if authorization != "" {
 		request.Header.Set("Authorization", authorization)
 	}
-	response, err := s.Client.Do(request)
+	client := s.httpClient()
+	if s.DNSServer != "" {
+		defer client.CloseIdleConnections()
+	}
+	response, err := client.Do(request)
 	if err != nil {
 		// A Telegram token is part of the request URL. Do not wrap url.Error here,
 		// because its formatted value can expose that URL (and therefore the token)
@@ -518,7 +543,7 @@ func (d *Dispatcher) Test(ctx context.Context, id int64) error {
 		return err
 	}
 	if len(targets) == 0 {
-		return errors.New("notification bot has no destinations")
+		return ErrNoDestinations
 	}
 	for _, target := range targets {
 		if err := d.Sender.Send(ctx, target, "✅ Bonghos test notification\nYour "+target.Name+" bot is connected."); err != nil {

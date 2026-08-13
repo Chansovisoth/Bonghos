@@ -340,7 +340,7 @@ build_frontend() {
   find "$WEBDIST" -mindepth 1 -maxdepth 1 ! -name .gitkeep -delete
   cp "$SOURCE_DIR/web/src"/* "$WEBDIST"/
   local asset
-  for asset in index.html app.js style.css Telegram.png Discord.png; do
+  for asset in index.html app.js style.css theme-init.js Telegram.png Discord.png; do
     [ -f "$WEBDIST/$asset" ] || die "frontend build produced no $asset"
   done
   ok "Web UI prepared for embedding ($(find "$WEBDIST" -type f | wc -l) files)"

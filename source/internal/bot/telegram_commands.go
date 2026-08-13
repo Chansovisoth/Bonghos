@@ -38,7 +38,7 @@ func (d *Dispatcher) pollTelegramCommands(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		updates, err := d.Sender.telegramCommandUpdates(ctx, state.Token, state.LastUpdateID+1)
+		updates, err := d.Sender.WithDNS(state.DNSServer).telegramCommandUpdates(ctx, state.Token, state.LastUpdateID+1)
 		if err != nil {
 			d.logCommand("Telegram command polling for %s failed: %v", state.BotName, err)
 			continue
@@ -135,7 +135,7 @@ func telegramCommand(text string) string {
 	}
 }
 
-func (d *Dispatcher) telegramAdmin(ctx context.Context, token string, message *telegramMessage) bool {
+func (d *Dispatcher) telegramAdmin(ctx context.Context, state TelegramCommandState, message *telegramMessage) bool {
 	if message.SenderChat != nil && message.SenderChat.ID == message.Chat.ID {
 		return true // Anonymous group administrator.
 	}
@@ -148,7 +148,7 @@ func (d *Dispatcher) telegramAdmin(ctx context.Context, token string, message *t
 	query := url.Values{}
 	query.Set("chat_id", strconv.FormatInt(message.Chat.ID, 10))
 	query.Set("user_id", strconv.FormatInt(message.From.ID, 10))
-	if err := d.Sender.telegramGet(ctx, token, "getChatMember", query.Encode(), &member); err != nil {
+	if err := d.Sender.WithDNS(state.DNSServer).telegramGet(ctx, state.Token, "getChatMember", query.Encode(), &member); err != nil {
 		d.logCommand("checking Telegram group administrator: %v", err)
 		return false
 	}
@@ -168,7 +168,7 @@ func (d *Dispatcher) handleTelegramCommand(ctx context.Context, state TelegramCo
 	if command == "" {
 		return
 	}
-	target := Target{Provider: ProviderTelegram, Token: state.Token,
+	target := Target{Provider: ProviderTelegram, Token: state.Token, DNSServer: state.DNSServer,
 		DestinationID: strconv.FormatInt(message.Chat.ID, 10)}
 	if message.MessageThreadID > 1 {
 		target.ThreadID = message.MessageThreadID
@@ -185,7 +185,7 @@ func (d *Dispatcher) handleTelegramCommand(ctx context.Context, state TelegramCo
 		reply("Bonghos commands:\n<code>/bonghos here</code> : Send notifications to this topic\n<code>/bonghos where</code> : Check this group's destination\n<code>/bonghos disconnect</code> : Stop notifications to this group\n\nOnly group administrators can change destinations.")
 		return
 	}
-	if !d.telegramAdmin(ctx, state.Token, message) {
+	if !d.telegramAdmin(ctx, state, message) {
 		reply("Only a group administrator can configure Bonghos notifications.")
 		return
 	}
@@ -202,7 +202,7 @@ func (d *Dispatcher) handleTelegramCommand(ctx context.Context, state TelegramCo
 		var fullChat telegramChat
 		query := url.Values{}
 		query.Set("chat_id", chatID)
-		if d.Sender.telegramGet(ctx, state.Token, "getChat", query.Encode(), &fullChat) == nil {
+		if d.Sender.WithDNS(state.DNSServer).telegramGet(ctx, state.Token, "getChat", query.Encode(), &fullChat) == nil {
 			if strings.TrimSpace(fullChat.Title) != "" {
 				destination.Name = strings.TrimSpace(fullChat.Title)
 			}

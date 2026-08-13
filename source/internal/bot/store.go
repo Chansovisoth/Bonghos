@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"sort"
 	"strconv"
@@ -31,6 +32,7 @@ var (
 	discordDestinationRE  = regexp.MustCompile(`^\d{10,25}$`)
 	ErrNotFound           = errors.New("notification bot not found")
 	ErrDisabled           = errors.New("notification bot is disabled")
+	ErrNoDestinations     = errors.New("notification bot has no destinations")
 )
 
 type Config struct {
@@ -46,6 +48,7 @@ type Config struct {
 	NotifyPlayerJoined     bool          `json:"notify_player_joined"`
 	NotifyPlayerLeft       bool          `json:"notify_player_left"`
 	TokenConfigured        bool          `json:"token_configured"`
+	DNSServer              string        `json:"dns_server"`
 	CreatedAt              string        `json:"created_at"`
 	UpdatedAt              string        `json:"updated_at"`
 }
@@ -75,6 +78,7 @@ type CreateInput struct {
 	Name                   string
 	Provider               string
 	Token                  string
+	DNSServer              string
 	DestinationID          string
 	Destinations           []Destination
 	DiscoveredDestinations []Destination
@@ -89,6 +93,7 @@ type Patch struct {
 	Name                *string
 	Provider            *string
 	Token               *string
+	DNSServer           *string
 	DestinationID       *string
 	Destinations        *[]Destination
 	Enabled             *bool
@@ -103,6 +108,7 @@ type Target struct {
 	Name          string
 	Provider      string
 	Token         string
+	DNSServer     string
 	DestinationID string
 	ThreadID      int64
 }
@@ -112,8 +118,8 @@ type Target struct {
 func (s *Store) Credential(id int64) (Target, error) {
 	var target Target
 	var encrypted []byte
-	err := s.DB.QueryRow(`SELECT id, name, provider, token_enc FROM notification_bots WHERE id=?`, id).
-		Scan(&target.ID, &target.Name, &target.Provider, &encrypted)
+	err := s.DB.QueryRow(`SELECT id, name, provider, token_enc, dns_server FROM notification_bots WHERE id=?`, id).
+		Scan(&target.ID, &target.Name, &target.Provider, &encrypted, &target.DNSServer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Target{}, ErrNotFound
 	}
@@ -132,14 +138,16 @@ type TelegramCommandState struct {
 	BotID        int64
 	BotName      string
 	Token        string
+	DNSServer    string
 	LastUpdateID int64
 	Initialized  bool
 }
 
 type DiscordCommandState struct {
-	BotID   int64
-	BotName string
-	Token   string
+	BotID     int64
+	BotName   string
+	Token     string
+	DNSServer string
 }
 
 type Store struct {
@@ -151,6 +159,25 @@ func now() string { return time.Now().UTC().Format(time.RFC3339) }
 
 func normalizeProvider(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func normalizeDNSServer(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	host := value
+	port := "53"
+	if parsedHost, parsedPort, err := net.SplitHostPort(value); err == nil {
+		host, port = parsedHost, parsedPort
+	} else if strings.Contains(value, ":") && net.ParseIP(value) == nil {
+		return "", errors.New("DNS server must be an IP address with optional port 53")
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil || port != "53" {
+		return "", errors.New("DNS server must be an IP address with optional port 53")
+	}
+	return ip.String(), nil
 }
 
 func validate(name, provider, token string, requireToken bool) error {
@@ -548,6 +575,11 @@ func (s *Store) Create(input CreateInput) (*Config, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	input.Provider = normalizeProvider(input.Provider)
 	input.Token = strings.TrimSpace(input.Token)
+	dnsServer, err := normalizeDNSServer(input.DNSServer)
+	if err != nil {
+		return nil, err
+	}
+	input.DNSServer = dnsServer
 	input.DestinationID = strings.TrimSpace(input.DestinationID)
 	if err := validate(input.Name, input.Provider, input.Token, true); err != nil {
 		return nil, err
@@ -575,18 +607,14 @@ func (s *Store) Create(input CreateInput) (*Config, error) {
 		FROM notification_bots`, input.Provider).Scan(&totalBots, &providerBots); err != nil {
 		return nil, err
 	}
-	if totalBots >= 2 || providerBots > 0 {
-		label := "Telegram"
-		if input.Provider == ProviderDiscord {
-			label = "Discord"
-		}
-		return nil, fmt.Errorf("only one %s bot and two notification bots total are supported", label)
+	if totalBots >= 4 || providerBots >= 2 {
+		return nil, errors.New("only two Telegram bots and two Discord bots are supported")
 	}
 	result, err := tx.Exec(`INSERT INTO notification_bots
-		(name, provider, token_enc, destination_id, enabled,
+		(name, provider, token_enc, dns_server, destination_id, enabled,
 		 notify_server_started, notify_server_stopped, notify_player_joined, notify_player_left,
-		 created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		input.Name, input.Provider, encrypted, input.DestinationID, boolInt(input.Enabled),
+		 created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		input.Name, input.Provider, encrypted, input.DNSServer, input.DestinationID, boolInt(input.Enabled),
 		boolInt(input.NotifyServerStarted), boolInt(input.NotifyServerStopped),
 		boolInt(input.NotifyPlayerJoined), boolInt(input.NotifyPlayerLeft), timestamp, timestamp)
 	if err != nil {
@@ -617,14 +645,14 @@ func (s *Store) Create(input CreateInput) (*Config, error) {
 	return s.ByID(id)
 }
 
-const configColumns = `id, name, provider, destination_id, enabled,
+const configColumns = `id, name, provider, dns_server, destination_id, enabled,
  notify_server_started, notify_server_stopped, notify_player_joined, notify_player_left,
  created_at, updated_at, length(token_enc) > 0`
 
 func scanConfig(row interface{ Scan(...any) error }) (*Config, error) {
 	var config Config
 	var enabled, started, stopped, joined, left, tokenConfigured int
-	if err := row.Scan(&config.ID, &config.Name, &config.Provider, &config.DestinationID,
+	if err := row.Scan(&config.ID, &config.Name, &config.Provider, &config.DNSServer, &config.DestinationID,
 		&enabled, &started, &stopped, &joined, &left, &config.CreatedAt, &config.UpdatedAt,
 		&tokenConfigured); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -685,10 +713,10 @@ func (s *Store) Patch(id int64, patch Patch) (*Config, error) {
 	var current CreateInput
 	var encrypted []byte
 	var enabled, started, stopped, joined, left int
-	err := s.DB.QueryRow(`SELECT name, provider, token_enc, destination_id, enabled,
+	err := s.DB.QueryRow(`SELECT name, provider, token_enc, dns_server, destination_id, enabled,
 		notify_server_started, notify_server_stopped, notify_player_joined, notify_player_left
 		FROM notification_bots WHERE id=?`, id).Scan(
-		&current.Name, &current.Provider, &encrypted, &current.DestinationID,
+		&current.Name, &current.Provider, &encrypted, &current.DNSServer, &current.DestinationID,
 		&enabled, &started, &stopped, &joined, &left)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -714,6 +742,9 @@ func (s *Store) Patch(id int64, patch Patch) (*Config, error) {
 		if requestedProvider != originalProvider {
 			return nil, errors.New("bot provider cannot be changed")
 		}
+	}
+	if patch.DNSServer != nil {
+		current.DNSServer = *patch.DNSServer
 	}
 	if patch.DestinationID != nil {
 		current.DestinationID = strings.TrimSpace(*patch.DestinationID)
@@ -745,6 +776,10 @@ func (s *Store) Patch(id int64, patch Patch) (*Config, error) {
 	if err := validate(current.Name, current.Provider, newToken, false); err != nil {
 		return nil, err
 	}
+	current.DNSServer, err = normalizeDNSServer(current.DNSServer)
+	if err != nil {
+		return nil, err
+	}
 	destinations, err := normalizeDestinations(current.Provider, currentDestinations, current.DestinationID)
 	if err != nil {
 		return nil, err
@@ -765,9 +800,9 @@ func (s *Store) Patch(id int64, patch Patch) (*Config, error) {
 	}
 	defer tx.Rollback()
 	result, err := tx.Exec(`UPDATE notification_bots SET
-		name=?, provider=?, token_enc=?, destination_id=?, enabled=?,
+		name=?, provider=?, token_enc=?, dns_server=?, destination_id=?, enabled=?,
 		notify_server_started=?, notify_server_stopped=?, notify_player_joined=?, notify_player_left=?,
-		updated_at=? WHERE id=?`, current.Name, current.Provider, encrypted, current.DestinationID,
+		updated_at=? WHERE id=?`, current.Name, current.Provider, encrypted, current.DNSServer, current.DestinationID,
 		boolInt(current.Enabled), boolInt(current.NotifyServerStarted), boolInt(current.NotifyServerStopped),
 		boolInt(current.NotifyPlayerJoined), boolInt(current.NotifyPlayerLeft), now(), id)
 	if err != nil {
@@ -822,7 +857,7 @@ func (s *Store) Target(id int64) (Target, error) {
 		return Target{}, err
 	}
 	if len(targets) == 0 {
-		return Target{}, errors.New("notification bot has no destinations")
+		return Target{}, ErrNoDestinations
 	}
 	return targets[0], nil
 }
@@ -830,7 +865,7 @@ func (s *Store) Target(id int64) (Target, error) {
 // TelegramCommandBots returns Telegram credentials and durable update cursors
 // for the background command listener. Tokens never leave the backend.
 func (s *Store) TelegramCommandBots() ([]TelegramCommandState, error) {
-	rows, err := s.DB.Query(`SELECT b.id, b.name, b.token_enc, COALESCE(state.last_update_id, 0),
+	rows, err := s.DB.Query(`SELECT b.id, b.name, b.token_enc, b.dns_server, COALESCE(state.last_update_id, 0),
 		state.bot_id IS NOT NULL
 		FROM notification_bots b
 		LEFT JOIN notification_bot_telegram_state state ON state.bot_id=b.id
@@ -843,7 +878,7 @@ func (s *Store) TelegramCommandBots() ([]TelegramCommandState, error) {
 	for rows.Next() {
 		var state TelegramCommandState
 		var encrypted []byte
-		if err := rows.Scan(&state.BotID, &state.BotName, &encrypted, &state.LastUpdateID, &state.Initialized); err != nil {
+		if err := rows.Scan(&state.BotID, &state.BotName, &encrypted, &state.DNSServer, &state.LastUpdateID, &state.Initialized); err != nil {
 			return nil, err
 		}
 		token, err := security.Decrypt(s.SecretKey, encrypted)
@@ -1008,7 +1043,7 @@ func (s *Store) providerDestination(botID int64, provider, destinationID string)
 }
 
 func (s *Store) DiscordCommandBots() ([]DiscordCommandState, error) {
-	rows, err := s.DB.Query(`SELECT id, name, token_enc FROM notification_bots
+	rows, err := s.DB.Query(`SELECT id, name, token_enc, dns_server FROM notification_bots
 		WHERE provider=? ORDER BY id`, ProviderDiscord)
 	if err != nil {
 		return nil, err
@@ -1018,7 +1053,7 @@ func (s *Store) DiscordCommandBots() ([]DiscordCommandState, error) {
 	for rows.Next() {
 		var state DiscordCommandState
 		var encrypted []byte
-		if err := rows.Scan(&state.BotID, &state.BotName, &encrypted); err != nil {
+		if err := rows.Scan(&state.BotID, &state.BotName, &encrypted, &state.DNSServer); err != nil {
 			return nil, err
 		}
 		token, err := security.Decrypt(s.SecretKey, encrypted)
@@ -1034,9 +1069,9 @@ func (s *Store) DiscordCommandBots() ([]DiscordCommandState, error) {
 func (s *Store) Targets(id int64) ([]Target, error) {
 	var target Target
 	var encrypted []byte
-	err := s.DB.QueryRow(`SELECT id, name, provider, token_enc
+	err := s.DB.QueryRow(`SELECT id, name, provider, token_enc, dns_server
 		FROM notification_bots WHERE id=?`, id).Scan(
-		&target.ID, &target.Name, &target.Provider, &encrypted)
+		&target.ID, &target.Name, &target.Provider, &encrypted, &target.DNSServer)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1072,7 +1107,7 @@ func (s *Store) TelegramPhotoTarget(id int64, destinationID string) (Target, str
 	var target Target
 	var encrypted []byte
 	var photoFileID string
-	err := s.DB.QueryRow(`SELECT b.id, b.name, b.provider, b.token_enc,
+	err := s.DB.QueryRow(`SELECT b.id, b.name, b.provider, b.token_enc, b.dns_server,
 		COALESCE(d.destination_id, discovered.destination_id),
 		COALESCE(NULLIF(d.photo_file_id, ''), discovered.photo_file_id, '')
 		FROM notification_bots b
@@ -1083,7 +1118,7 @@ func (s *Store) TelegramPhotoTarget(id int64, destinationID string) (Target, str
 		WHERE b.id=? AND b.provider=?
 			AND (d.destination_id IS NOT NULL OR discovered.destination_id IS NOT NULL)`,
 		destinationID, destinationID, id, ProviderTelegram).Scan(
-		&target.ID, &target.Name, &target.Provider, &encrypted,
+		&target.ID, &target.Name, &target.Provider, &encrypted, &target.DNSServer,
 		&target.DestinationID, &photoFileID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Target{}, "", ErrNotFound
@@ -1104,19 +1139,19 @@ func (s *Store) TargetsFor(event string) ([]Target, error) {
 	var query string
 	switch event {
 	case EventServerStarted:
-		query = `SELECT b.id, b.name, b.provider, b.token_enc, d.destination_id, d.thread_id
+		query = `SELECT b.id, b.name, b.provider, b.token_enc, b.dns_server, d.destination_id, d.thread_id
 			FROM notification_bots b JOIN notification_bot_destinations d ON d.bot_id=b.id
 			WHERE b.enabled=1 AND b.notify_server_started=1 ORDER BY b.id, d.position`
 	case EventServerStopped:
-		query = `SELECT b.id, b.name, b.provider, b.token_enc, d.destination_id, d.thread_id
+		query = `SELECT b.id, b.name, b.provider, b.token_enc, b.dns_server, d.destination_id, d.thread_id
 			FROM notification_bots b JOIN notification_bot_destinations d ON d.bot_id=b.id
 			WHERE b.enabled=1 AND b.notify_server_stopped=1 ORDER BY b.id, d.position`
 	case EventPlayerJoined:
-		query = `SELECT b.id, b.name, b.provider, b.token_enc, d.destination_id, d.thread_id
+		query = `SELECT b.id, b.name, b.provider, b.token_enc, b.dns_server, d.destination_id, d.thread_id
 			FROM notification_bots b JOIN notification_bot_destinations d ON d.bot_id=b.id
 			WHERE b.enabled=1 AND b.notify_player_joined=1 ORDER BY b.id, d.position`
 	case EventPlayerLeft:
-		query = `SELECT b.id, b.name, b.provider, b.token_enc, d.destination_id, d.thread_id
+		query = `SELECT b.id, b.name, b.provider, b.token_enc, b.dns_server, d.destination_id, d.thread_id
 			FROM notification_bots b JOIN notification_bot_destinations d ON d.bot_id=b.id
 			WHERE b.enabled=1 AND b.notify_player_left=1 ORDER BY b.id, d.position`
 	default:
@@ -1131,7 +1166,7 @@ func (s *Store) TargetsFor(event string) ([]Target, error) {
 	for rows.Next() {
 		var target Target
 		var encrypted []byte
-		if err := rows.Scan(&target.ID, &target.Name, &target.Provider, &encrypted, &target.DestinationID, &target.ThreadID); err != nil {
+		if err := rows.Scan(&target.ID, &target.Name, &target.Provider, &encrypted, &target.DNSServer, &target.DestinationID, &target.ThreadID); err != nil {
 			return nil, err
 		}
 		token, decryptErr := security.Decrypt(s.SecretKey, encrypted)

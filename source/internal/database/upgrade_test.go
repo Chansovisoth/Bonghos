@@ -40,6 +40,9 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	if _, err := db.Exec(`DROP TABLE passkeys`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`ALTER TABLE notification_bots DROP COLUMN dns_server`); err != nil {
+		t.Fatal(err)
+	}
 	// Recreate the recovery-code table as it existed at schema version 5. The
 	// database was initially opened at the latest version so tests can use the
 	// real baseline schema before deliberately rolling selected objects back.
@@ -91,8 +94,8 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if version, err := Version(upgraded); err != nil || version != 13 {
-		t.Fatalf("upgraded schema version = %d, %v; want 13", version, err)
+	if version, err := Version(upgraded); err != nil || version != 16 {
+		t.Fatalf("upgraded schema version = %d, %v; want 16", version, err)
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='passkeys'`).Scan(&table); err != nil {
 		t.Fatalf("passkeys migration was not applied: %v", err)
@@ -117,5 +120,10 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	if err := upgraded.QueryRow(`SELECT destination_id FROM notification_bots
 		WHERE name='existing-alerts'`).Scan(&destination); err != nil || destination != "" {
 		t.Fatalf("legacy Telegram destination field = %q, %v; want empty", destination, err)
+	}
+	var dnsServer string
+	if err := upgraded.QueryRow(`SELECT dns_server FROM notification_bots
+		WHERE name='existing-alerts'`).Scan(&dnsServer); err != nil || dnsServer != "" {
+		t.Fatalf("legacy bot DNS = %q, %v; want empty", dnsServer, err)
 	}
 }

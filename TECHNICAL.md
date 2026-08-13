@@ -244,6 +244,16 @@ Or prepare and verify the development environment from the repository root:
 
 The frontend has no JavaScript build tool. Edit `source/web/src/`, then run `make web` before Go builds so the generated embedded assets are current.
 
+Notification bots use the host's system DNS by default. Each Telegram or
+Discord bot can instead be given an explicit resolver IP in its advanced
+settings. The resolver is used only for that bot's provider connections, and
+Bonghos never enables it automatically. It must provide conventional DNS on
+port 53. Restricted networks can also override Discord endpoints with
+`BONGHOS_DISCORD_BASE_URL`, `BONGHOS_DISCORD_FALLBACK_BASE_URL`, and
+`BONGHOS_DISCORD_GATEWAY_URL`. The fallback endpoint is opt-in; idempotent REST
+calls can retry safe transport failures, while ambiguous message or callback
+POST failures are not retried unless DNS failed before connecting.
+
 For Windows-only notification debugging, copy `.env.development.example` to the ignored
 `.env.development`, configure at most one Telegram bot token and one Discord bot
 token, then run

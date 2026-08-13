@@ -16,6 +16,7 @@ type botRequest struct {
 	Name                   string            `json:"name"`
 	Provider               string            `json:"provider"`
 	Token                  *string           `json:"token"`
+	DNSServer              string            `json:"dns_server"`
 	DestinationID          string            `json:"destination_id"`
 	Destinations           []bot.Destination `json:"destinations"`
 	DiscoveredDestinations []bot.Destination `json:"discovered_destinations"`
@@ -54,6 +55,7 @@ func (a *App) handleBotCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	config, err := a.Bots.Create(bot.CreateInput{
 		Name: request.Name, Provider: request.Provider, Token: token,
+		DNSServer:              request.DNSServer,
 		DestinationID:          request.DestinationID,
 		Destinations:           request.Destinations,
 		DiscoveredDestinations: request.DiscoveredDestinations,
@@ -90,6 +92,7 @@ func (a *App) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 		Name                *string            `json:"name"`
 		Provider            *string            `json:"provider"`
 		Token               *string            `json:"token"`
+		DNSServer           *string            `json:"dns_server"`
 		DestinationID       *string            `json:"destination_id"`
 		Destinations        *[]bot.Destination `json:"destinations"`
 		Enabled             *bool              `json:"enabled"`
@@ -104,6 +107,7 @@ func (a *App) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	config, err := a.Bots.Patch(id, bot.Patch{
 		Name: request.Name, Provider: request.Provider, Token: request.Token,
+		DNSServer:     request.DNSServer,
 		DestinationID: request.DestinationID, Destinations: request.Destinations, Enabled: request.Enabled,
 		NotifyServerStarted: request.NotifyServerStarted,
 		NotifyServerStopped: request.NotifyServerStopped,
@@ -123,10 +127,10 @@ func (a *App) handleBotUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, config)
 }
 
-func (a *App) telegramDiscovery(w http.ResponseWriter, r *http.Request, token string, auditTarget string, persistBotID int64) {
+func (a *App) telegramDiscovery(w http.ResponseWriter, r *http.Request, token, dnsServer, auditTarget string, persistBotID int64) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	discovery, err := a.BotNotify.Sender.DiscoverTelegramGroups(ctx, token)
+	discovery, err := a.BotNotify.Sender.WithDNS(dnsServer).DiscoverTelegramGroups(ctx, token)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
@@ -145,13 +149,14 @@ func (a *App) telegramDiscovery(w http.ResponseWriter, r *http.Request, token st
 
 func (a *App) handleBotTelegramDiscover(w http.ResponseWriter, r *http.Request) {
 	var request struct {
-		Token string `json:"token"`
+		Token     string `json:"token"`
+		DNSServer string `json:"dns_server"`
 	}
 	if err := readJSON(r, &request, 1<<16); err != nil || strings.TrimSpace(request.Token) == "" {
 		writeErr(w, http.StatusBadRequest, errors.New("Telegram bot token is required"))
 		return
 	}
-	a.telegramDiscovery(w, r, request.Token, "new Telegram bot", 0)
+	a.telegramDiscovery(w, r, request.Token, request.DNSServer, "new Telegram bot", 0)
 }
 
 func (a *App) handleBotTelegramDiscoverExisting(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +194,7 @@ func (a *App) handleBotTelegramDiscoverExisting(w http.ResponseWriter, r *http.R
 		}
 		token = target.Token
 	}
-	a.telegramDiscovery(w, r, token, config.Name, id)
+	a.telegramDiscovery(w, r, token, config.DNSServer, config.Name, id)
 }
 
 func (a *App) handleBotTelegramGroupPhoto(w http.ResponseWriter, r *http.Request) {
@@ -212,10 +217,10 @@ func (a *App) handleBotTelegramGroupPhoto(w http.ResponseWriter, r *http.Request
 	var data []byte
 	var contentType string
 	if fileID != "" {
-		data, contentType, err = a.BotNotify.Sender.TelegramGroupPhoto(ctx, target.Token, fileID)
+		data, contentType, err = a.BotNotify.Sender.WithDNS(target.DNSServer).TelegramGroupPhoto(ctx, target.Token, fileID)
 	}
 	if fileID == "" || err != nil {
-		data, contentType, err = a.BotNotify.Sender.TelegramGroupPhotoForChat(ctx, target.Token, target.DestinationID)
+		data, contentType, err = a.BotNotify.Sender.WithDNS(target.DNSServer).TelegramGroupPhotoForChat(ctx, target.Token, target.DestinationID)
 	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, errors.New("Telegram group photo is unavailable"))
@@ -263,7 +268,7 @@ func (a *App) handleBotTest(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadGateway
 		if errors.Is(err, bot.ErrNotFound) {
 			status = http.StatusNotFound
-		} else if errors.Is(err, bot.ErrDisabled) {
+		} else if errors.Is(err, bot.ErrDisabled) || errors.Is(err, bot.ErrNoDestinations) {
 			status = http.StatusConflict
 		}
 		writeErr(w, status, err)
@@ -296,7 +301,7 @@ func (a *App) handleBotInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	inviteURL, err := a.BotNotify.Sender.InviteURL(ctx, credential.Provider, credential.Token)
+	inviteURL, err := a.BotNotify.Sender.InviteURL(ctx, credential.Provider, credential.Token, credential.DNSServer)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return

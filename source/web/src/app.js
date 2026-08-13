@@ -11,8 +11,20 @@ const INLINE_SOLAR_ICONS = {
   "alt-arrow-left-linear": {
     body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m15 5l-6 7l6 7"/>',
   },
+  "arrow-left-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m11 5l-7 7m0 0l7 7m-7-7h16"/>',
+  },
   "alt-arrow-right-linear": {
     body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m9 5l6 7l-6 7"/>',
+  },
+  "alt-arrow-down-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m5 9l7 6l7-6"/>',
+  },
+  "alt-arrow-up-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-linejoin="miter" stroke-width="1.5" d="m5 15l7-6l7 6"/>',
+  },
+  "close-linear": {
+    body: '<path fill="none" stroke="currentColor" stroke-linecap="square" stroke-width="1.5" d="m6 6l12 12M18 6L6 18"/>',
   },
   "moon-linear": {
     body: '<path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21.75 15.5A9.75 9.75 0 0 1 8.5 2.25A10 10 0 1 0 21.75 15.5Z"/>',
@@ -257,8 +269,10 @@ function pageFilterMenu(label, modes, onChange, initialValue = modes[0]?.[0]) {
   return control;
 }
 
-function toast(msg, kind = "") {
-  const t = el("div", { class: "toast " + kind, role: "status" }, msg);
+function toast(msg, kind = "", iconName = "") {
+  const t = el("div", { class: `toast ${kind}${iconName ? " has-icon" : ""}`, role: "status" },
+    iconName ? solarIcon(iconName, "toast-icon") : null,
+    el("span", {}, msg));
   $("#toast-host").append(t);
   setTimeout(() => t.remove(), 6000);
 }
@@ -418,12 +432,12 @@ const DEMO_PERMS = [
 ];
 const DEMO_ME = { id: 1, username: "demo-owner", role: "owner", permissions: DEMO_PERMS };
 const DEMO_SERVERS = [
-  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "neoforge", modloader_version: "21.1.228", minecraft_version: "1.21.1", source_type: "direct-url", startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, created_at: new Date(Date.now() - 30 * 86400000).toISOString(), updated_at: new Date(Date.now() - 2 * 3600000).toISOString(), demo_icon: "demo-server-bio1.png" },
-  { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", external_directory: false, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), demo_icon: "demo-server-creative-lab.png" },
+  { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "neoforge", modloader_version: "21.1.228", minecraft_version: "1.21.1", source_type: "direct-url", server_directory: "servers/minecraft-java/modded/bio1", external_directory: false, startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, created_at: new Date(Date.now() - 30 * 86400000).toISOString(), updated_at: new Date(Date.now() - 2 * 3600000).toISOString(), demo_icon: "demo-server-bio1.png" },
+  { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", server_directory: "servers/minecraft-java/modded/creative-lab", external_directory: false, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), demo_icon: "demo-server-creative-lab.png" },
 ];
 const DEMO_BOTS = [
   { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, thread_id: 23, thread_name: "Server alerts" }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png" }], discovered_destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", discovered_at: new Date(Date.now() - 21 * 86400000).toISOString() }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png", discovered_at: new Date(Date.now() - 14 * 86400000).toISOString() }, { id: "-1005555555555", name: "Build Team", type: "supergroup", discovered_at: new Date(Date.now() - 2 * 86400000).toISOString() }], enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
-  { id: 2, name: "Staff channel", provider: "discord", destination_id: "123456789012345678", destinations: [{ id: "123456789012345678", name: "bot-spam", type: "channel", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo" }], discovered_destinations: [{ id: "223456789012345678", name: "Bonghos Community", type: "guild", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo", discovered_at: new Date(Date.now() - 18 * 86400000).toISOString() }, { id: "323456789012345678", name: "Creative Server", type: "guild", guild_id: "323456789012345678", guild_name: "Creative Server", discovered_at: new Date(Date.now() - 5 * 86400000).toISOString() }], enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
+  { id: 2, name: "Staff channel", provider: "discord", dns_server: "", destination_id: "123456789012345678", destinations: [{ id: "123456789012345678", name: "bot-spam", type: "channel", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo" }], discovered_destinations: [{ id: "223456789012345678", name: "Bonghos Community", type: "guild", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo", discovered_at: new Date(Date.now() - 18 * 86400000).toISOString() }, { id: "323456789012345678", name: "Creative Server", type: "guild", guild_id: "323456789012345678", guild_name: "Creative Server", discovered_at: new Date(Date.now() - 5 * 86400000).toISOString() }], enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
 ];
 const DEMO_TELEGRAM_GROUPS = [
   { id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, topics: [{ id: 23, name: "Server alerts" }, { id: 91, name: "Admin chat" }] },
@@ -635,7 +649,7 @@ async function demoApi(path, opts = {}) {
     const bot = DEMO_BOTS.find((entry) => entry.id === Number(demoBotInvite[1]));
     if (!bot) throw new Error("Notification bot not found");
     return { url: bot.provider === "telegram"
-      ? "https://t.me/bonghos_demo_bot?startgroup&admin=manage_chat"
+      ? "https://t.me/bonghos_demo_bot?startgroup"
       : "https://discord.com/oauth2/authorize?client_id=1536799744431755275&scope=bot%20applications.commands&permissions=274877910016&integration_type=0" };
   }
   switch (clean) {
@@ -694,17 +708,31 @@ async function demoApi(path, opts = {}) {
       { username: "Long_Name_With_Underscores", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 18422 },
       { username: "OfflineMiner", online: false, banned: true, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 7521 },
     ] };
-    case "/files": return [
-      { name: "world", is_dir: true, size: 0, mod_time: new Date(Date.now() - 3600000).toISOString() },
-      { name: "mods", is_dir: true, size: 0, mod_time: new Date(Date.now() - 4200000).toISOString() },
-      { name: "server-icon.png", is_dir: false, size: 12175, mod_time: new Date(Date.now() - 4800000).toISOString() },
-      { name: "server.properties", is_dir: false, size: 914, mod_time: new Date(Date.now() - 7200000).toISOString() },
-      { name: "user_jvm_args.txt", is_dir: false, size: 72, mod_time: new Date(Date.now() - 5400000).toISOString() },
-      { name: "eula.txt", is_dir: false, size: 9, mod_time: new Date(Date.now() - 8200000).toISOString() },
-      { name: "ops.json", is_dir: false, size: 328, mod_time: new Date(Date.now() - 9200000).toISOString() },
-      { name: "forge-1.20.1-47.3.0.jar", is_dir: false, size: 8427356, mod_time: new Date(Date.now() - 10200000).toISOString() },
-      { name: "run.sh", is_dir: false, size: 124, mod_time: new Date(Date.now() - 11200000).toISOString() },
-    ];
+    case "/files": {
+      if (query.get("root") === "servers") {
+        const path = query.get("path") || "";
+        if (!path) return [{ name: "minecraft-java", is_dir: true, size: 0, mod_time: new Date().toISOString() }];
+        if (path === "minecraft-java") return [
+          { name: "modded", is_dir: true, size: 0, mod_time: new Date().toISOString() },
+          { name: "vanilla", is_dir: true, size: 0, mod_time: new Date().toISOString() },
+        ];
+        if (path === "minecraft-java/modded") return DEMO_SERVERS.map((server) => ({
+          name: server.slug, is_dir: true, size: 0, mod_time: server.updated_at,
+        }));
+        return [];
+      }
+      return [
+        { name: "world", is_dir: true, size: 0, mod_time: new Date(Date.now() - 3600000).toISOString() },
+        { name: "mods", is_dir: true, size: 0, mod_time: new Date(Date.now() - 4200000).toISOString() },
+        { name: "server-icon.png", is_dir: false, size: 12175, mod_time: new Date(Date.now() - 4800000).toISOString() },
+        { name: "server.properties", is_dir: false, size: 914, mod_time: new Date(Date.now() - 7200000).toISOString() },
+        { name: "user_jvm_args.txt", is_dir: false, size: 72, mod_time: new Date(Date.now() - 5400000).toISOString() },
+        { name: "eula.txt", is_dir: false, size: 9, mod_time: new Date(Date.now() - 8200000).toISOString() },
+        { name: "ops.json", is_dir: false, size: 328, mod_time: new Date(Date.now() - 9200000).toISOString() },
+        { name: "forge-1.20.1-47.3.0.jar", is_dir: false, size: 8427356, mod_time: new Date(Date.now() - 10200000).toISOString() },
+        { name: "run.sh", is_dir: false, size: 124, mod_time: new Date(Date.now() - 11200000).toISOString() },
+      ];
+    }
     case "/files/content": return { content: "motd=A precise Bonghos local demo\nserver-port=25565\nmax-players=20\n" };
     case "/configuration": return {
       eula: true,
@@ -775,6 +803,7 @@ const S = {
   consoleLines: [],
   consolePaused: false,
   consoleWrap: false,
+  fileEditorWrap: false,
   consoleSearch: "",
   consoleFilterMode: "all",
   consoleHistoryRequest: 0,
@@ -1242,8 +1271,17 @@ function buildNav() {
       page.id === "players"
         ? el("span", { class: "nav-player-count", id: "nav-player-count" }, `· ${S.onlinePlayerCount ?? "—"}`)
         : null);
-    nav.append(el("div", { class: "nav-item", "data-page": page.id, tabindex: "0", onclick: () => navigate(page.id), onkeydown: (e) => {
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(page.id); }
+    const openPage = () => {
+      if (page.id === "files") {
+        filePath = "";
+        fileBrowseRoot = "project";
+        fileEscapeAction = null;
+        S.pendingFileOpen = null;
+      }
+      navigate(page.id);
+    };
+    nav.append(el("div", { class: "nav-item", "data-page": page.id, tabindex: "0", onclick: openPage, onkeydown: (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPage(); }
     } }, el("span", { class: "nav-icon", "aria-hidden": "true" }, solarIcon(page.icon)), label));
   }
 }
@@ -1653,7 +1691,7 @@ async function copyText(value, successMessage) {
     document.execCommand("copy");
     input.remove();
   }
-  toast(successMessage, "ok");
+  toast(successMessage, "ok", "copy-linear");
 }
 
 // eventRow renders one timeline entry, coloured by severity.
@@ -2031,13 +2069,10 @@ async function pageConsole(main) {
         }, S.consolePaused ? "Resume" : "Pause"),
         mobileWrapButton,
         el("button", { class: "btn ghost console-icon-control", "aria-label": "Copy console", title: "Copy console", onclick: async () => {
-          try { await navigator.clipboard.writeText(S.consoleLines.join("\n")); toast("Console buffer copied", "ok"); }
-          catch { toast("Copy failed in this browser", "err"); }
+          try { await navigator.clipboard.writeText(S.consoleLines.join("\n")); toast("Console buffer copied", "ok", "copy-linear"); }
+          catch { toast("Copy failed in this browser", "err", "copy-linear"); }
         } }, "Copy"),
         el("button", { class: "btn ghost console-clear-control", onclick: () => { S.consoleHistoryRequest++; box.innerHTML = ""; S.consoleLines = []; } }, "Clear"),
-        !DEMO_MODE ? el("span", { class: "status-label " + (S.ws && S.ws.readyState === WebSocket.OPEN ? "running" : "stopped") },
-          el("span", { class: "status-square", "aria-hidden": "true" }),
-          S.ws && S.ws.readyState === WebSocket.OPEN ? "Connected" : "Reconnecting") : null,
         el("span", { class: "console-wrap-desktop-group" },
           el("span", { class: "console-wrap-desktop-label" }, "Wrap text"),
           desktopWrapButton)),
@@ -2279,6 +2314,100 @@ function playerActions(p) {
 // ----- files ----------------------------------------------------------------
 let filePath = "";
 let fileEscapeAction = null;
+let fileBrowseRoot = "project";
+
+function currentFileProject() {
+  return S.servers.find((server) => server.id === S.managedServerId)
+    || S.servers.find((server) => server.id === S.activeId)
+    || null;
+}
+
+function projectServersPath(project) {
+  if (!project || project.external_directory) return "";
+  const fallback = project.slug ? `servers/minecraft-java/modded/${project.slug}` : "";
+  const directory = String(project.server_directory || fallback).replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return directory.startsWith("servers/") ? directory.slice("servers/".length) : "";
+}
+
+function projectFolderName(project) {
+  const directory = String(project?.server_directory || "").replace(/\\/g, "/").replace(/\/+$/g, "");
+  return directory.split("/").filter(Boolean).pop() || project?.slug || "project";
+}
+
+function projectAtServersPath(path) {
+  const clean = String(path || "").replace(/^\/+|\/+$/g, "");
+  return S.servers
+    .map((project) => ({ project, directory: projectServersPath(project) }))
+    .filter(({ directory }) => directory && (clean === directory || clean.startsWith(directory + "/")))
+    .sort((a, b) => b.directory.length - a.directory.length)[0] || null;
+}
+
+function appendFileQuery(path, key, value) {
+  return `${path}${path.includes("?") ? "&" : "?"}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+}
+
+function fileRequestScope(path = filePath) {
+  if (fileBrowseRoot === "servers") {
+    const match = projectAtServersPath(path);
+    if (match) {
+      const relative = path.slice(match.directory.length).replace(/^\/+/, "");
+      return { path: relative, project: match.project, serversRoot: false, writable: true };
+    }
+    return { path, project: null, serversRoot: true, writable: false };
+  }
+  return { path, project: currentFileProject(), serversRoot: false, writable: true };
+}
+
+function fileScopeEndpoint(endpoint, scope) {
+  if (scope.serversRoot) return appendFileQuery(endpoint, "root", "servers");
+  if (scope.project?.id) return appendFileQuery(endpoint, "server_id", scope.project.id);
+  return serverScopedPath(endpoint);
+}
+
+function filePathEndpoint(endpoint, path) {
+  const scope = fileRequestScope(path);
+  return { scope, url: appendFileQuery(fileScopeEndpoint(endpoint, scope), "path", scope.path) };
+}
+
+function parentFileLocation(path) {
+  const parts = String(path || "").split("/").filter(Boolean);
+  if (parts.length) return { root: fileBrowseRoot, path: parts.slice(0, -1).join("/") };
+  if (fileBrowseRoot !== "project") return null;
+  const projectPath = projectServersPath(currentFileProject());
+  if (!projectPath) return null;
+  const projectParts = projectPath.split("/").filter(Boolean);
+  return { root: "servers", path: projectParts.slice(0, -1).join("/") };
+}
+
+function fileContextSubtitle(scope) {
+  if (scope.project) {
+    const state = scope.project.id === S.activeId ? "Active" : "Non-Active";
+    return el("span", { class: "project-context" },
+      el("strong", { class: "project-context-state" }, state),
+      " project “",
+      el("span", { class: "project-context-name" }, scope.project.display_name),
+      "”.");
+  }
+  return "Browsing outside of project.";
+}
+
+function activeProjectFilesButton(main, scope) {
+  const activeProject = S.servers.find((server) => server.id === S.activeId);
+  if (!activeProject || scope.project?.id === activeProject.id) return null;
+  return el("button", {
+    class: "btn ghost small file-active-project-button",
+    type: "button",
+    title: `Back to active project: ${activeProject.display_name}`,
+    onclick: () => {
+      S.managedServerId = activeProject.id;
+      filePath = "";
+      fileBrowseRoot = "project";
+      fileEscapeAction = null;
+      S.pendingFileOpen = null;
+      pageFiles(main, "", "project");
+    },
+  }, solarIcon("arrow-left-linear"), "Active");
+}
 
 const FILE_ICON_GROUPS = [
   ["archive-linear", new Set(["7z", "bz2", "gz", "jar", "rar", "tar", "tgz", "war", "xz", "zip"])],
@@ -2317,13 +2446,15 @@ function fileIconName(entry) {
   return "document-text-linear";
 }
 
-function fileIdentity(entry) {
+function fileIdentity(entry, modified = "") {
   return el("span", { class: "file-identity" },
     el("span", { class: "file-type-icon", "aria-hidden": "true" }, solarIcon(fileIconName(entry))),
-    el("span", {}, entry.name));
+    el("span", { class: "file-identity-copy" },
+      el("span", { class: "file-name" }, entry.name),
+      modified ? el("small", { class: "file-modified-mobile mobile-only" }, modified) : null));
 }
 
-async function pageFiles(main, path = filePath) {
+async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
   // A deep link from elsewhere (for example the Configuration page naming the
   // file that owns the JVM settings) opens that file straight away.
   if (S.pendingFileOpen) {
@@ -2331,57 +2462,155 @@ async function pageFiles(main, path = filePath) {
     S.pendingFileOpen = null;
     return openFile(main, pending.path, pending.returnTo);
   }
+  if (root === "servers") {
+    const projectMatch = projectAtServersPath(path);
+    if (projectMatch) {
+      S.managedServerId = projectMatch.project.id;
+      path = path.slice(projectMatch.directory.length).replace(/^\/+/, "");
+      root = "project";
+    }
+  }
   filePath = path;
-  fileEscapeAction = path
-    ? () => pageFiles(main, path.split("/").filter(Boolean).slice(0, -1).join("/"))
+  fileBrowseRoot = root;
+  const parentLocation = parentFileLocation(path);
+  fileEscapeAction = parentLocation
+    ? () => pageFiles(main, parentLocation.path, parentLocation.root)
     : null;
-  const entries = await api(serverScopedPath("/files?path=" + encodeURIComponent(path)));
+  const directoryRequest = filePathEndpoint("/files", path);
+  const entries = await api(directoryRequest.url);
   main.innerHTML = "";
+  let selectionMode = false;
+  const selectedPaths = new Map();
+  let lastVisibleEntries = [];
+  let selectButton;
+  let selectAllInput;
+  let nameHeader;
+  let fileList;
   const crumbs = el("div", { class: "breadcrumb" },
-    el("span", { onclick: () => pageFiles(main, "") }, "root"));
+    el("span", { onclick: () => pageFiles(main, "", fileBrowseRoot) },
+      fileBrowseRoot === "servers" ? "servers" : projectFolderName(currentFileProject())));
   let acc = "";
   for (const part of path.split("/").filter(Boolean)) {
     acc += (acc ? "/" : "") + part;
     const p = acc;
-    crumbs.append(" / ", el("span", { onclick: () => pageFiles(main, p) }, part));
+    crumbs.append(" / ", el("span", { onclick: () => pageFiles(main, p, fileBrowseRoot) }, part));
   }
+  const locationBar = el("div", { class: "file-location-bar" },
+    crumbs,
+    activeProjectFilesButton(main, directoryRequest.scope));
   const upInput = el("input", { type: "file", multiple: true, style: "display:none" });
   upInput.addEventListener("change", async () => {
     const fd = new FormData();
     for (const f of upInput.files) fd.append("file", f);
     try {
-      await fetch("/api" + serverScopedPath("/files/upload?path=" + encodeURIComponent(path)),
+      const uploadScope = fileRequestScope(path);
+      const uploadURL = appendFileQuery(fileScopeEndpoint("/files/upload", uploadScope), "path", uploadScope.path);
+      await fetch("/api" + uploadURL,
         { method: "POST", body: fd, headers: { "X-Bonghos-CSRF": csrfToken }, credentials: "same-origin" });
-      toast("Uploaded", "ok"); pageFiles(main, path);
+      toast("Uploaded", "ok"); pageFiles(main, path, fileBrowseRoot);
     } catch (e) { toast(e.message, "err"); }
   });
-  const fileRow = (e2) => el("tr", {},
-    el("td", { class: "mono", style: "cursor:pointer", onclick: () => {
-      if (e2.is_dir) pageFiles(main, (path ? path + "/" : "") + e2.name);
-      else openFile(main, (path ? path + "/" : "") + e2.name);
-    } }, fileIdentity(e2)),
-    el("td", { class: "file-size-column" }, e2.is_dir ? "—" : fmtBytes(e2.size)),
-    el("td", { class: "mobile-hide" }, fmtTime(e2.mod_time)),
-    el("td", { class: "table-actions file-actions-cell" }, fileActions(main, path, e2)));
+  const entryPath = (entry) => (path ? path + "/" : "") + entry.name;
+  const fileRow = (entry) => {
+    const rel = entryPath(entry);
+    const checkbox = el("input", {
+      class: "file-selection-checkbox", type: "checkbox",
+      "aria-label": `Select ${entry.name}`,
+      checked: selectedPaths.has(rel) ? "checked" : null,
+      onclick: (event) => event.stopPropagation(),
+      onchange: (event) => {
+        if (event.currentTarget.checked) selectedPaths.set(rel, entry);
+        else selectedPaths.delete(rel);
+        updateSelectionUI();
+        draw(search.value.trim().toLowerCase());
+      },
+    });
+    return el("tr", { class: selectedPaths.has(rel) ? "is-selected" : "" },
+      el("td", { class: "mono", style: "cursor:pointer", onclick: () => {
+        if (selectionMode) {
+          if (selectedPaths.has(rel)) selectedPaths.delete(rel);
+          else selectedPaths.set(rel, entry);
+          updateSelectionUI();
+          draw(search.value.trim().toLowerCase());
+        } else if (entry.is_dir) pageFiles(main, rel, fileBrowseRoot);
+        else openFile(main, rel);
+      } }, el("span", { class: "file-selectable-identity" },
+        selectionMode ? checkbox : null,
+        fileIdentity(entry, fmtTime(entry.mod_time || entry.modified)))),
+      el("td", { class: "file-size-column" }, entry.is_dir ? "—" : fmtBytes(entry.size)),
+      el("td", { class: "mobile-hide" }, fmtTime(entry.mod_time || entry.modified)),
+      el("td", { class: "table-actions file-actions-cell" },
+        fileActions(main, path, entry, directoryRequest.scope.writable)));
+  };
+  const parentRow = () => el("tr", { class: "file-parent-row" },
+    el("td", {
+      class: "mono", colspan: "4", style: "cursor:pointer", title: "Parent directory",
+      onclick: () => pageFiles(main, parentLocation.path, parentLocation.root),
+    }, el("span", { class: "file-selectable-identity" },
+      selectionMode ? el("input", {
+        class: "file-selection-checkbox", type: "checkbox", disabled: "disabled",
+        "aria-label": "Parent directory cannot be selected",
+      }) : null,
+      fileIdentity({ name: "..", is_dir: true }))));
   const tbody = el("tbody");
+  const selectedCount = el("strong", { class: "file-selection-count" }, "0 selected");
+  const bulkCopyButton = el("button", { class: "btn ghost small", disabled: "disabled" }, solarIcon("copy-linear"), "Copy");
+  const bulkMoveButton = el("button", { class: "btn ghost small", disabled: "disabled" }, solarIcon("folder-open-linear"), "Move");
+  const bulkDeleteButton = el("button", { class: "btn danger small", disabled: "disabled" }, solarIcon("trash-bin-trash-linear"), "Delete");
+  const selectionBar = el("div", { class: "file-selection-bar", hidden: "" },
+    selectedCount,
+    el("div", { class: "spacer" }),
+    bulkCopyButton, bulkMoveButton, bulkDeleteButton,
+    el("button", {
+      class: "file-selection-close", type: "button", title: "Exit selection mode",
+      "aria-label": "Exit selection mode", onclick: () => setSelectionMode(false),
+    }, solarIcon("close-linear")));
+  const updateSelectionUI = () => {
+    const count = selectedPaths.size;
+    selectedCount.textContent = `${count} selected`;
+    [bulkCopyButton, bulkMoveButton, bulkDeleteButton].forEach((button) => { button.disabled = count === 0; });
+    selectionBar.hidden = !selectionMode;
+    fileList?.classList.toggle("has-selection-bar", selectionMode);
+    fileList?.classList.toggle("is-selecting", selectionMode);
+    selectButton?.classList.toggle("primary", selectionMode);
+    selectButton?.setAttribute("aria-pressed", String(selectionMode));
+    if (nameHeader) nameHeader.classList.toggle("is-selecting", selectionMode);
+    if (selectAllInput) {
+      selectAllInput.hidden = !selectionMode;
+      const visiblePaths = lastVisibleEntries.map(entryPath);
+      const selectedVisible = visiblePaths.filter((rel) => selectedPaths.has(rel)).length;
+      selectAllInput.checked = visiblePaths.length > 0 && selectedVisible === visiblePaths.length;
+      selectAllInput.indeterminate = selectedVisible > 0 && selectedVisible < visiblePaths.length;
+    }
+  };
+  const setSelectionMode = (enabled) => {
+    selectionMode = enabled;
+    if (!enabled) selectedPaths.clear();
+    updateSelectionUI();
+    draw(search.value.trim().toLowerCase());
+  };
   let filterMode = "folders-first";
   const byName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""), undefined, { sensitivity: "base", numeric: true });
   const draw = (query = "") => {
-    let visible = (entries || []).filter((entry) => recordMatchesSearch(entry, query, fmtBytes(entry.size), fmtTime(entry.mod_time)));
+    let visible = (entries || []).filter((entry) => recordMatchesSearch(entry, query, fmtBytes(entry.size), fmtTime(entry.mod_time || entry.modified)));
     if (filterMode === "folders-only") visible = visible.filter((entry) => entry.is_dir);
     if (filterMode === "files-only") visible = visible.filter((entry) => !entry.is_dir);
     visible.sort((a, b) => {
       if (filterMode === "folders-first") return Number(b.is_dir) - Number(a.is_dir) || byName(a, b);
       if (filterMode === "name-desc") return -byName(a, b);
-      if (filterMode === "modified-newest") return (Date.parse(b.mod_time) || 0) - (Date.parse(a.mod_time) || 0) || byName(a, b);
-      if (filterMode === "modified-oldest") return (Date.parse(a.mod_time) || 0) - (Date.parse(b.mod_time) || 0) || byName(a, b);
+      if (filterMode === "modified-newest") return (Date.parse(b.mod_time || b.modified) || 0) - (Date.parse(a.mod_time || a.modified) || 0) || byName(a, b);
+      if (filterMode === "modified-oldest") return (Date.parse(a.mod_time || a.modified) || 0) - (Date.parse(b.mod_time || b.modified) || 0) || byName(a, b);
       if (filterMode === "size-largest") return Number(b.size || 0) - Number(a.size || 0) || byName(a, b);
       if (filterMode === "size-smallest") return Number(a.size || 0) - Number(b.size || 0) || byName(a, b);
       return byName(a, b);
     });
-    tbody.replaceChildren(...(visible.length
+    lastVisibleEntries = visible;
+    const rows = visible.length
       ? visible.map(fileRow)
-      : [el("tr", {}, el("td", { colspan: "4", class: "muted" }, (entries || []).length ? "No matching files." : "Empty directory"))]));
+      : [el("tr", { class: "file-empty-row" }, el("td", { colspan: "4", class: "muted file-empty-cell" }, (entries || []).length ? "No matching files." : "Empty directory"))];
+    if (parentLocation) rows.unshift(parentRow());
+    tbody.replaceChildren(...rows);
+    updateSelectionUI();
   };
   const search = pageSearchInput("files", draw);
   const filter = pageFilterMenu("Filter files", [
@@ -2395,38 +2624,76 @@ async function pageFiles(main, path = filePath) {
     ["folders-only", "Folders only"],
     ["files-only", "Files only"],
   ], (value) => { filterMode = value; draw(search.value.trim().toLowerCase()); }, filterMode);
-  const project = S.servers.find((server) => server.id === S.managedServerId)
-    || S.servers.find((server) => server.id === S.activeId);
-  const subtitle = projectContextSubtitle("Currently in", project, project?.id === S.activeId);
+  selectButton = el("button", {
+    class: "btn",
+    type: "button",
+    title: directoryRequest.scope.writable ? "Select files" : "Selection is available inside a project",
+    disabled: directoryRequest.scope.writable ? null : "disabled",
+    "aria-pressed": "false",
+    onclick: () => setSelectionMode(!selectionMode),
+  }, "Select");
+  selectAllInput = el("input", {
+    class: "file-selection-checkbox", type: "checkbox", hidden: "",
+    "aria-label": "Select all visible files",
+    onchange: (event) => {
+      for (const entry of lastVisibleEntries) {
+        const rel = entryPath(entry);
+        if (event.currentTarget.checked) selectedPaths.set(rel, entry);
+        else selectedPaths.delete(rel);
+      }
+      draw(search.value.trim().toLowerCase());
+    },
+  });
+  nameHeader = el("th", {}, el("span", { class: "file-name-heading" }, selectAllInput, "Name"));
+  bulkCopyButton.addEventListener("click", () => fileDestinationPicker(main, path, selectedPaths, "copy"));
+  bulkMoveButton.addEventListener("click", () => fileDestinationPicker(main, path, selectedPaths, "move"));
+  bulkDeleteButton.addEventListener("click", () => bulkDeleteEntries(main, path, selectedPaths));
+  const createMenu = fileCreateMenu(main, path, directoryRequest.scope.writable);
+  const subtitle = fileContextSubtitle(directoryRequest.scope);
+  const headerActions = [
+    el("div", { class: "page-search-filter-controls" }, search, filter),
+    el("button", {
+      class: "btn",
+      title: directoryRequest.scope.writable ? "Upload" : "Upload is available inside a project",
+      disabled: directoryRequest.scope.writable ? null : "disabled",
+      onclick: () => upInput.click(),
+    }, solarIcon("upload-linear"), "Upload"),
+    el("div", { class: "file-select-create-group" }, selectButton, createMenu),
+    upInput,
+  ];
+  fileList = el("div", { class: "file-list" },
+    el("table", {},
+      el("thead", {}, el("tr", {}, nameHeader, el("th", { class: "file-size-column" }, "Size"), el("th", { class: "mobile-hide" }, "Modified"), el("th", {}, ""))),
+      tbody));
   main.append(
-    pageHeader("Files", subtitle, [
-      el("div", { class: "page-search-filter-controls" }, search, filter),
-      el("button", { class: "btn", title: "Upload", onclick: () => upInput.click() }, solarIcon("upload-linear"), "Upload"),
-      el("button", { class: "btn", title: "New folder", onclick: () => mkdirPrompt(main, path) }, solarIcon("folder-linear"), "New folder"),
-      upInput,
-    ], managedPageBackButton()),
-    crumbs,
-    el("div", { class: "file-list" },
-      el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "Name"), el("th", { class: "file-size-column" }, "Size"), el("th", { class: "mobile-hide" }, "Modified"), el("th", {}, ""))),
-        tbody)));
+    pageHeader("Files", subtitle, headerActions, managedPageBackButton()),
+    locationBar,
+    selectionBar,
+    fileList);
   draw();
 }
 
-function fileActions(main, path, entry) {
+function fileActions(main, path, entry, writable = true) {
   const rel = (path ? path + "/" : "") + entry.name;
-  const download = !entry.is_dir ? "/api" + serverScopedPath("/files/download?path=" + encodeURIComponent(rel)) : "";
-  const desktop = el("div", { class: "row-actions desktop-row-actions" },
-    download ? el("a", { class: "btn ghost", href: download }, solarIcon("download-linear"), "Download") : "",
-    el("button", { class: "btn ghost", onclick: () => renameEntry(main, path, entry.name) }, "Rename"),
-    el("button", { class: "btn danger", onclick: () => deleteEntry(main, path, entry.name) }, "Delete"));
-  const items = [];
-  if (download) items.push(el("a", { class: "action-menu-item", role: "menuitem", href: download }, solarIcon("download-linear"), "Download"));
-  items.push(
+  const download = !entry.is_dir ? "/api" + filePathEndpoint("/files/download", rel).url : "";
+  const editItems = () => writable ? [
     el("button", { class: "action-menu-item", type: "button", role: "menuitem", onclick: () => renameEntry(main, path, entry.name) }, solarIcon("pen-new-square-linear"), "Rename"),
-    el("button", { class: "action-menu-item danger", type: "button", role: "menuitem", onclick: () => deleteEntry(main, path, entry.name) }, solarIcon("trash-bin-trash-linear"), "Delete"));
+    el("button", { class: "action-menu-item danger", type: "button", role: "menuitem", onclick: () => deleteEntry(main, path, entry.name) }, solarIcon("trash-bin-trash-linear"), "Delete"),
+  ] : [];
+  const desktopEditItems = editItems();
+  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+    download ? el("a", {
+      class: "btn ghost small icon-button file-desktop-download",
+      href: download, title: "Download", "aria-label": `Download ${entry.name}`,
+    }, solarIcon("download-linear")) : "",
+    desktopEditItems.length ? overflowActionsMenu(`Edit ${entry.name}`, desktopEditItems) : "");
+  const mobileItems = download ? [el("a", {
+    class: "action-menu-item", role: "menuitem",
+    href: download, title: "Download", "aria-label": `Download ${entry.name}`,
+  }, solarIcon("download-linear"), "Download"), ...editItems()] : editItems();
+  if (!mobileItems.length && !download) return "";
   return el("div", { class: "responsive-row-actions" }, desktop,
-    overflowActionsMenu(`Actions for ${entry.name}`, items, "mobile-row-actions"));
+    mobileItems.length ? overflowActionsMenu(`Actions for ${entry.name}`, mobileItems, "mobile-row-actions") : "");
 }
 
 function openFile(main, rel, returnTo = null) {
@@ -2444,10 +2711,12 @@ function fileViewerBack(main, returnTo) {
 }
 
 function openFileImagePreview(main, rel, returnTo = null) {
+  const previewRequest = filePathEndpoint("/files/preview", rel);
+  const downloadRequest = filePathEndpoint("/files/download", rel);
   const preview = DEMO_MODE && rel.toLowerCase().endsWith("server-icon.png")
     ? (S.servers.find((server) => server.id === (S.managedServerId || S.activeId))?.demo_icon || DEMO_SERVERS[0].demo_icon)
-    : "/api" + serverScopedPath("/files/preview?path=" + encodeURIComponent(rel));
-  const download = DEMO_MODE ? preview : "/api" + serverScopedPath("/files/download?path=" + encodeURIComponent(rel));
+    : "/api" + previewRequest.url;
+  const download = DEMO_MODE ? preview : "/api" + downloadRequest.url;
   const back = () => fileViewerBack(main, returnTo);
   const image = el("img", { src: preview, alt: `Preview of ${rel}`, decoding: "async" });
   const error = el("p", { class: "muted hidden" }, "This image could not be previewed. You can still download it.");
@@ -2467,13 +2736,50 @@ function openFileImagePreview(main, rel, returnTo = null) {
 }
 
 async function openFileEditor(main, rel, returnTo = null) {
+  const fileRequest = filePathEndpoint("/files/content", rel);
   let data;
-  try { data = await api(serverScopedPath("/files/content?path=" + encodeURIComponent(rel))); }
+  try { data = await api(fileRequest.url); }
   catch (e) { toast(e.message, "err"); return; }
   main.innerHTML = "";
-  const ta = el("textarea", { class: "editor", spellcheck: "false" });
+  const ta = el("textarea", {
+    class: "editor" + (S.fileEditorWrap ? " is-wrapped" : ""),
+    spellcheck: "false", wrap: S.fileEditorWrap ? "soft" : "off",
+    readonly: fileRequest.scope.writable ? null : "readonly",
+  });
   ta.value = data.content;
   let baseline = data.content;
+  const toggleEditorWrap = () => {
+    S.fileEditorWrap = !S.fileEditorWrap;
+    const actionLabel = S.fileEditorWrap ? "Disable text wrapping" : "Wrap text";
+    ta.classList.toggle("is-wrapped", S.fileEditorWrap);
+    ta.setAttribute("wrap", S.fileEditorWrap ? "soft" : "off");
+    mobileWrapButton.classList.toggle("is-active", S.fileEditorWrap);
+    desktopWrapButton.classList.toggle("is-on", S.fileEditorWrap);
+    [mobileWrapButton, desktopWrapButton].forEach((button) => {
+      button.setAttribute("aria-pressed", String(S.fileEditorWrap));
+      button.setAttribute("aria-label", actionLabel);
+      button.setAttribute("title", actionLabel);
+    });
+    desktopWrapButton.querySelector(".bot-power-label").textContent = S.fileEditorWrap ? "On" : "Off";
+  };
+  const mobileWrapButton = el("button", {
+    class: "btn ghost file-editor-wrap-control file-editor-wrap-mobile mobile-icon-only" + (S.fileEditorWrap ? " is-active" : ""),
+    type: "button",
+    "aria-label": S.fileEditorWrap ? "Disable text wrapping" : "Wrap text",
+    "aria-pressed": String(S.fileEditorWrap),
+    title: S.fileEditorWrap ? "Disable text wrapping" : "Wrap text",
+    onclick: toggleEditorWrap,
+  }, solarIcon("wrap-text"));
+  const desktopWrapButton = el("button", {
+    class: "bot-power file-editor-wrap-desktop-toggle" + (S.fileEditorWrap ? " is-on" : ""),
+    type: "button",
+    "aria-label": S.fileEditorWrap ? "Disable text wrapping" : "Wrap text",
+    "aria-pressed": String(S.fileEditorWrap),
+    title: S.fileEditorWrap ? "Disable text wrapping" : "Wrap text",
+    onclick: toggleEditorWrap,
+  },
+  el("span", { class: "bot-power-track", "aria-hidden": "true" }, el("span", {})),
+  el("span", { class: "bot-power-label" }, S.fileEditorWrap ? "On" : "Off"));
   const finishLeaving = () => {
     if (returnTo?.page === "configuration") {
       fileEscapeAction = null;
@@ -2493,16 +2799,171 @@ async function openFileEditor(main, rel, returnTo = null) {
   main.append(
     el("div", { class: "toolbar" },
       el("h1", { class: "mono", style: "font-size:1rem" }, rel),
+      fileRequest.scope.writable ? null : el("span", { class: "tag" }, "Read only"),
       el("div", { class: "spacer" }),
+      el("span", { class: "file-editor-wrap-desktop-group" },
+        el("span", { class: "file-editor-wrap-desktop-label" }, "Wrap text"),
+        desktopWrapButton),
+      mobileWrapButton,
       el("button", { class: "btn ghost", title: returnTo ? "Back to Configuration" : "Back to files", onclick: leaveEditor }, solarIcon("folder-open-linear"), "Back"),
-      el("button", { class: "btn primary", title: "Save file", onclick: async () => {
+      fileRequest.scope.writable ? el("button", { class: "btn primary", title: "Save file", onclick: async () => {
         try {
-          await api(serverScopedPath("/files/content"), { method: "POST", json: { path: rel, content: ta.value } });
+          await api(fileScopeEndpoint("/files/content", fileRequest.scope), { method: "POST", json: { path: fileRequest.scope.path, content: ta.value } });
           baseline = ta.value;
           toast("Saved (a .bonghos-backup copy of important files is kept)", "ok");
         } catch (e) { toast(e.message, "err"); }
-      } }, solarIcon("diskette-linear"), "Save")),
+      } }, solarIcon("diskette-linear"), "Save") : null),
     ta);
+}
+
+function fileCreateMenu(main, path, writable) {
+  const menu = overflowActionsMenu("Create", [
+    el("button", {
+      class: "action-menu-item", type: "button", role: "menuitem",
+      onclick: () => mkdirPrompt(main, path),
+    }, solarIcon("folder-linear"), "New folder"),
+    el("button", {
+      class: "action-menu-item", type: "button", role: "menuitem",
+      onclick: () => newFilePrompt(main, path),
+    }, solarIcon("document-text-linear"), "New file"),
+  ], "file-create-menu", el("span", { class: "file-create-plus", "aria-hidden": "true" }, "+"));
+  const trigger = menu.querySelector(".action-menu-trigger");
+  trigger.classList.remove("ghost");
+  trigger.disabled = !writable;
+  trigger.title = writable ? "Create" : "Create is available inside a project";
+  return menu;
+}
+
+function newFilePrompt(main, path) {
+  const inp = el("input", { placeholder: "filename.txt", autocomplete: "off" });
+  modal("New file", [el("div", { class: "field-row" }, el("label", {}, "File name", inp))], [
+    ["Cancel", "ghost", (c) => c()],
+    ["Create", "primary", async (c) => {
+      const name = inp.value.trim();
+      if (!name) return toast("File name is required", "err");
+      const scope = fileRequestScope(path);
+      const target = (scope.path ? scope.path + "/" : "") + name;
+      try {
+        await api(fileScopeEndpoint("/files/create", scope), { method: "POST", json: { path: target } });
+        c();
+        openFile(main, (path ? path + "/" : "") + name);
+      } catch (e) { toast(e.message, "err"); }
+    }],
+  ]);
+}
+
+function fileDestinationPicker(main, path, selectedPaths, operation) {
+  const scope = fileRequestScope(path);
+  if (!scope.writable || !scope.project || !selectedPaths.size) return;
+  const sourceProject = scope.project;
+  const sources = [...selectedPaths.keys()].map((rel) => fileRequestScope(rel).path);
+  const sourceServersPath = projectServersPath(sourceProject);
+  let destinationServersPath = sourceServersPath
+    ? [sourceServersPath, scope.path].filter(Boolean).join("/")
+    : "";
+  let destinationProject = sourceServersPath ? sourceProject : null;
+  let destination = sourceServersPath ? scope.path : "";
+  const destinationLabel = el("span", { class: "mono" });
+  const crumbs = el("div", { class: "breadcrumb file-picker-breadcrumb" });
+  const folders = el("div", { class: "file-destination-list" });
+  let confirmDestinationButton;
+  let renderVersion = 0;
+  const renderDestination = async (nextServersPath = "") => {
+    const version = ++renderVersion;
+    destinationServersPath = String(nextServersPath || "").replace(/^\/+|\/+$/g, "");
+    const projectMatch = projectAtServersPath(destinationServersPath);
+    destinationProject = projectMatch?.project || null;
+    destination = projectMatch
+      ? destinationServersPath.slice(projectMatch.directory.length).replace(/^\/+/, "")
+      : "";
+    if (confirmDestinationButton) {
+      const sameFolder = destinationProject
+        && String(destinationProject.id) === String(sourceProject.id)
+        && destination === scope.path;
+      confirmDestinationButton.disabled = !destinationProject || sameFolder;
+      confirmDestinationButton.title = !destinationProject
+        ? "Open a managed project to choose a destination"
+        : (sameFolder ? "Choose a different destination folder" : `${operation === "copy" ? "Copy" : "Move"} here`);
+    }
+    destinationLabel.textContent = !destinationProject
+      ? (destinationServersPath ? `Servers/${destinationServersPath} (read only)` : "Servers (read only)")
+      : (destination ? `${destinationProject.display_name}/${destination}` : destinationProject.display_name);
+    crumbs.innerHTML = "";
+    crumbs.append(el("span", { onclick: () => renderDestination("") }, "Servers"));
+    let acc = "";
+    for (const part of destinationServersPath.split("/").filter(Boolean)) {
+      acc += (acc ? "/" : "") + part;
+      const target = acc;
+      crumbs.append(" / ", el("span", { onclick: () => renderDestination(target) }, part));
+    }
+    folders.replaceChildren(el("p", { class: "muted" }, "Loading folders…"));
+    try {
+      const destinationScope = destinationProject
+        ? { project: destinationProject, serversRoot: false }
+        : { project: null, serversRoot: true };
+      const endpoint = appendFileQuery(fileScopeEndpoint("/files", destinationScope), "path",
+        destinationProject ? destination : destinationServersPath);
+      const entries = await api(endpoint);
+      if (version !== renderVersion) return;
+      const rows = [];
+      if (destinationServersPath) {
+        const parent = destinationServersPath.split("/").filter(Boolean).slice(0, -1).join("/");
+        rows.push(el("button", { class: "file-destination-row", type: "button", onclick: () => renderDestination(parent) },
+          solarIcon("folder-linear"), el("span", { class: "mono" }, "..")));
+      }
+      for (const entry of entries.filter((item) => item.is_dir)) {
+        const target = (destinationServersPath ? destinationServersPath + "/" : "") + entry.name;
+        rows.push(el("button", { class: "file-destination-row", type: "button", onclick: () => renderDestination(target) },
+          solarIcon("folder-linear"), el("span", { class: "mono" }, entry.name)));
+      }
+      folders.replaceChildren(...(rows.length ? rows : [el("p", { class: "muted" }, "No folders here.")]));
+    } catch (error) {
+      if (version !== renderVersion) return;
+      folders.replaceChildren(el("p", { class: "error" }, error.message));
+    }
+  };
+  const verb = operation === "copy" ? "Copy" : "Move";
+  modal(`${verb} ${sources.length} selected item${sources.length === 1 ? "" : "s"}`, [
+    el("p", { class: "muted" }, `${verb} to `, destinationLabel),
+    crumbs,
+    folders,
+  ], [
+    ["Cancel", "ghost", (c) => c()],
+    [`${verb} here`, "primary", async (c) => {
+      if (!destinationProject) return;
+      try {
+        await api(fileScopeEndpoint(`/files/${operation}`, scope), {
+          method: "POST", json: {
+            paths: sources, destination, destination_server_id: destinationProject.id,
+          },
+        });
+        c();
+        toast(`${sources.length} item${sources.length === 1 ? "" : "s"} ${operation === "copy" ? "copied" : "moved"}`, "ok");
+        pageFiles(main, path, fileBrowseRoot);
+      } catch (error) { toast(error.message, "err"); }
+    }],
+  ]);
+  confirmDestinationButton = $("#modal-host .modal .actions .btn.primary");
+  renderDestination(destinationServersPath);
+}
+
+function bulkDeleteEntries(main, path, selectedPaths) {
+  const selected = [...selectedPaths.keys()];
+  if (!selected.length) return;
+  confirmModal("Delete selected items",
+    `Delete ${selected.length} selected item${selected.length === 1 ? "" : "s"}? This cannot be undone.`,
+    "Delete", async () => {
+      try {
+        for (const rel of selected) {
+          const scope = fileRequestScope(rel);
+          await api(fileScopeEndpoint("/files/delete", scope), {
+            method: "POST", json: { path: scope.path, confirm: true },
+          });
+        }
+        toast(`${selected.length} item${selected.length === 1 ? "" : "s"} deleted`, "ok");
+        pageFiles(main, path, fileBrowseRoot);
+      } catch (error) { toast(error.message, "err"); }
+    });
 }
 
 function mkdirPrompt(main, path) {
@@ -2511,7 +2972,9 @@ function mkdirPrompt(main, path) {
     ["Cancel", "ghost", (c) => c()],
     ["Create", "primary", async (c) => {
       c();
-      try { await api(serverScopedPath("/files/mkdir"), { method: "POST", json: { path: (path ? path + "/" : "") + inp.value } }); pageFiles(main, path); }
+      const scope = fileRequestScope(path);
+      const target = (scope.path ? scope.path + "/" : "") + inp.value;
+      try { await api(fileScopeEndpoint("/files/mkdir", scope), { method: "POST", json: { path: target } }); pageFiles(main, path, fileBrowseRoot); }
       catch (e) { toast(e.message, "err"); }
     }]]);
 }
@@ -2522,9 +2985,10 @@ function renameEntry(main, path, name) {
     ["Cancel", "ghost", (c) => c()],
     ["Rename", "primary", async (c) => {
       c();
-      const from = (path ? path + "/" : "") + name;
-      const to = (path ? path + "/" : "") + inp.value;
-      try { await api(serverScopedPath("/files/rename"), { method: "POST", json: { from, to } }); pageFiles(main, path); }
+      const scope = fileRequestScope(path);
+      const from = (scope.path ? scope.path + "/" : "") + name;
+      const to = (scope.path ? scope.path + "/" : "") + inp.value;
+      try { await api(fileScopeEndpoint("/files/rename", scope), { method: "POST", json: { from, to } }); pageFiles(main, path, fileBrowseRoot); }
       catch (e) { toast(e.message, "err"); }
     }]]);
 }
@@ -2532,7 +2996,8 @@ function renameEntry(main, path, name) {
 function deleteEntry(main, path, name) {
   const rel = (path ? path + "/" : "") + name;
   confirmModal("Delete", `Delete ${rel}? This cannot be undone.`, "Delete", async () => {
-    try { await api(serverScopedPath("/files/delete"), { method: "POST", json: { path: rel, confirm: true } }); pageFiles(main, path); }
+    const scope = fileRequestScope(rel);
+    try { await api(fileScopeEndpoint("/files/delete", scope), { method: "POST", json: { path: scope.path, confirm: true } }); pageFiles(main, path, fileBrowseRoot); }
     catch (e) { toast(e.message, "err"); }
   });
 }
@@ -2570,6 +3035,8 @@ function openFileInEditor(path) {
   if (!can("server.files.manage")) {
     return toast("You do not have permission to edit files", "err");
   }
+  fileBrowseRoot = "project";
+  filePath = String(path || "").split("/").filter(Boolean).slice(0, -1).join("/");
   S.pendingFileOpen = {
     path,
     returnTo: {
@@ -4548,6 +5015,7 @@ function serverManagementButton(server, page, label, icon) {
     onclick: () => {
       if (page === "files") {
         filePath = "";
+        fileBrowseRoot = "project";
         fileEscapeAction = null;
         S.pendingFileOpen = null;
       }
@@ -5795,6 +6263,9 @@ async function botInviteURL(bot) {
     ? invite.protocol === "https:" && invite.hostname === "t.me"
     : invite.protocol === "https:" && invite.hostname === "discord.com";
   if (!allowed) throw new Error("The provider returned an invalid invite link");
+  if (bot.provider === "telegram") {
+    return `${invite.origin}${invite.pathname}?startgroup`;
+  }
   return invite.href;
 }
 
@@ -5824,6 +6295,19 @@ async function copyBotInvite(bot, button) {
   }
 }
 
+function botInviteControls(bot, style = "primary") {
+  const buttonClass = `btn ${style} small`;
+  return el("span", { class: `bot-invite-group is-${style}` },
+    el("button", { class: buttonClass, onclick: () => inviteBot(bot) }, "Invite Bot"),
+    el("button", {
+      class: buttonClass + " bot-invite-copy",
+      type: "button",
+      title: "Copy invite link",
+      "aria-label": "Copy invite link",
+      onclick: (event) => copyBotInvite(bot, event.currentTarget),
+    }, solarIcon("copy-linear")));
+}
+
 function botCard(bot) {
   const destinations = botDestinations(bot);
   const destinationLabel = bot.provider === "telegram"
@@ -5850,7 +6334,7 @@ function botCard(bot) {
                 ? el("small", {}, `#${String(destination.name || destination.id).replace(/^#/, "")}`)
                 : (destination.thread_id ? el("small", {}, destination.thread_name || `Channel ${destination.thread_id}`) : null)),
             el("span", { class: "bot-destination-added" }, `Added on ${fmtTimeToMinute(destination.discovered_at || bot.created_at)}`)))) :
-        el("span", { class: "muted" }, bot.provider === "telegram" ? "Run /bonghos here in a Telegram group" : "Not configured"))),
+        el("span", { class: "muted" }, "Not configured"))),
     el("div", { class: "bot-events-title" }, "Notify when"),
     el("div", { class: "bot-event-grid" },
       ...BOT_EVENT_FIELDS.map(([field, label, note]) => botEventToggle(bot, field, label, note))),
@@ -5869,28 +6353,23 @@ function botCard(bot) {
         } catch (error) { toast(error.message, "err"); }
         finally { button.disabled = !bot.enabled; }
       } }, "Send test"),
-      el("span", { class: "bot-invite-group" },
-        el("button", { class: "btn primary small", onclick: () => inviteBot(bot) }, "Invite Bot"),
-        el("button", {
-          class: "btn primary small bot-invite-copy",
-          type: "button",
-          title: "Copy invite link",
-          "aria-label": "Copy invite link",
-          onclick: (event) => copyBotInvite(bot, event.currentTarget),
-        }, solarIcon("copy-linear"))),
+      botInviteControls(bot),
       el("div", { class: "spacer" }),
       DEMO_DEBUG_BOTS ? null : el("button", { class: "btn danger small", onclick: () => removeBot(bot) }, "Remove")));
 }
 
 function botEditor(existing = null, currentBots = []) {
   const name = el("input", { value: existing?.name || "", maxlength: "80", autocomplete: "off", placeholder: "Bot name" });
-  const usedProviders = new Set((currentBots || []).map((bot) => bot.provider));
+  const providerCounts = (currentBots || []).reduce((counts, bot) => {
+    counts[bot.provider] = (counts[bot.provider] || 0) + 1;
+    return counts;
+  }, {});
   const availableProviders = existing
     ? [{ value: existing.provider, label: botProviderName(existing.provider) }]
     : [{ value: "telegram", label: "Telegram" }, { value: "discord", label: "Discord" }]
-      .filter((option) => !usedProviders.has(option.value));
+      .filter((option) => (providerCounts[option.value] || 0) < 2);
   if (!availableProviders.length) {
-    toast("Only one Telegram bot and one Discord bot can be connected", "err");
+    toast("Up to two Telegram bots and two Discord bots can be connected", "err");
     return;
   }
   const provider = el("select", {}, ...availableProviders.map((option) =>
@@ -5900,10 +6379,61 @@ function botEditor(existing = null, currentBots = []) {
     type: "password", autocomplete: "new-password", spellcheck: "false",
     placeholder: existing ? "Leave blank to keep the current token" : "Paste the bot token",
   });
+  const tokenField = el("div", { class: "field-row" },
+    el("label", {}, existing ? "New bot token (optional)" : "Bot token", token));
+  const dnsServer = el("input", {
+    value: existing?.dns_server || "", autocomplete: "off", spellcheck: "false",
+    inputmode: "text", placeholder: "System DNS (for example, 1.1.1.1)",
+  });
+  const dnsServerField = el("div", { class: "field-row" },
+    el("label", {}, "DNS server (optional)", dnsServer));
+  const advancedFields = el("div", {
+    id: "bot-advanced-fields", class: "bot-advanced-fields", "aria-hidden": "true",
+  }, el("div", { class: "bot-advanced-fields-inner" }, tokenField, dnsServerField));
+  advancedFields.inert = true;
+  const advancedOpenToggle = el("button", {
+    class: "bot-more-toggle", type: "button", "aria-expanded": "false", "aria-controls": "bot-advanced-fields",
+  }, el("span", {}, "Show more"), solarIcon("alt-arrow-down-linear", "bot-more-icon"));
+  const advancedCloseToggle = el("button", {
+    class: "bot-more-toggle hidden", type: "button", "aria-expanded": "true", "aria-controls": "bot-advanced-fields",
+  }, el("span", {}, "Show less"), solarIcon("alt-arrow-up-linear", "bot-more-icon"));
+  const advancedDrawer = el("div", { class: "bot-advanced-drawer" },
+    advancedOpenToggle, advancedFields, advancedCloseToggle);
+  let modalResizeAnimation = null;
+  const applyAdvancedState = (expanded) => {
+    advancedOpenToggle.classList.toggle("hidden", expanded);
+    advancedCloseToggle.classList.toggle("hidden", !expanded);
+    advancedFields.classList.toggle("is-expanded", expanded);
+    advancedFields.setAttribute("aria-hidden", String(!expanded));
+    advancedFields.inert = !expanded;
+  };
+  const setAdvancedExpanded = (expanded) => {
+    const dialog = advancedDrawer.closest(".modal");
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!dialog || reducedMotion || typeof dialog.animate !== "function") {
+      applyAdvancedState(expanded);
+      return;
+    }
+    modalResizeAnimation?.cancel();
+    const startHeight = dialog.getBoundingClientRect().height;
+    advancedFields.classList.add("is-measuring");
+    applyAdvancedState(expanded);
+    const endHeight = dialog.getBoundingClientRect().height;
+    applyAdvancedState(!expanded);
+    void dialog.offsetHeight;
+    advancedFields.classList.remove("is-measuring");
+    applyAdvancedState(expanded);
+    modalResizeAnimation = dialog.animate([
+      { height: `${startHeight}px` },
+      { height: `${endHeight}px` },
+    ], { duration: 240, easing: "cubic-bezier(0.2, 0, 0, 1)" });
+  };
+  advancedOpenToggle.addEventListener("click", () => setAdvancedExpanded(true));
+  advancedCloseToggle.addEventListener("click", () => setAdvancedExpanded(false));
   let configuredDestinations = existing ? botDestinations(existing) : [];
   let knownContainers = existing ? botKnownContainers(existing) : [];
   const groupList = el("div", { class: "bot-group-list" });
-  const groupCount = el("span", { class: "bot-group-count" });
+  const groupHeading = el("span");
   const groupInstruction = el("p", { class: "hint" });
   const findGroupsButton = el("button", { class: "btn ghost small", type: "button" }, "Refresh");
   let refreshTimer = null;
@@ -5913,16 +6443,18 @@ function botEditor(existing = null, currentBots = []) {
   const renderGroupChoices = () => {
     const telegram = provider.value === "telegram";
     groupList.innerHTML = "";
-    groupCount.textContent = `${configuredDestinations.length}/3 configured`;
+    groupHeading.textContent = `Destinations (${configuredDestinations.length}/3)`;
     groupInstruction.textContent = existing
       ? (telegram
-        ? "Run /bonghos here in the Telegram topic that should receive notifications. Use /bonghos help to list commands."
-        : "Invite the bot with bot and applications.commands scopes. Allow it to view and send messages in the target channel, then run /bonghos here. The bot does not need administrator rights.")
+        ? "Run /bonghos here in the destination topic."
+        : "Run /bonghos here in the destination channel.")
       : (telegram
-        ? "Save this bot first, add it to a group as an administrator, then have a group administrator run /bonghos here in the destination topic."
-        : "Save this bot first, invite it with bot and applications.commands scopes, allow View Channel and Send Messages, then have a server administrator run /bonghos here.");
+        ? "Save the bot, invite it, then run /bonghos here in the destination topic."
+        : "Save the bot, invite it, then run /bonghos here in the destination channel.");
     if (!knownContainers.length) {
-      groupList.append(el("div", { class: "bot-group-empty muted" }, existing ? `Bot has not joined any ${telegram ? "groups" : "servers"} yet.` : "Destinations are detected after the bot is saved and invited."));
+      groupList.append(el("div", { class: "bot-group-empty muted" },
+        el("span", { class: "bot-group-empty-copy" }, existing ? `Bot has not joined any ${telegram ? "groups" : "servers"} yet.` : "Destinations are detected after the bot is saved and invited."),
+        existing ? botInviteControls(existing, "ghost") : null));
       return;
     }
     const groups = [...knownContainers].sort((left, right) =>
@@ -5976,8 +6508,8 @@ function botEditor(existing = null, currentBots = []) {
 
   const telegramDestination = el("div", { class: "field-row bot-telegram-destinations" },
     el("div", { class: "bot-group-heading" },
-      el("span", {}, "Destinations"),
-      el("div", { class: "bot-group-heading-actions" }, groupCount, findGroupsButton)),
+      groupHeading,
+      el("div", { class: "bot-group-heading-actions" }, findGroupsButton)),
     groupInstruction,
     groupList);
   const enabled = el("input", { type: "checkbox" });
@@ -6003,7 +6535,8 @@ function botEditor(existing = null, currentBots = []) {
   modal(existing ? "Edit bot" : "Add bot", [
     el("div", { class: "field-row" }, el("label", {}, "Name", name)),
     el("div", { class: "field-row" }, el("label", {}, "Provider", provider)),
-    el("div", { class: "field-row" }, el("label", {}, existing ? "New bot token (optional)" : "Bot token", token)),
+    existing ? advancedDrawer : tokenField,
+    existing ? null : dnsServerField,
     telegramDestination,
     existing ? null : el("label", { class: "check-row bot-enabled-row" }, enabled, " Bot enabled"),
     existing ? null : el("h3", { class: "bot-modal-heading" }, "Notifications"),
@@ -6023,6 +6556,7 @@ function botEditor(existing = null, currentBots = []) {
         BOT_EVENT_FIELDS.forEach(([field]) => { body[field] = eventInputs[field].checked; });
       }
       if (token.value.trim()) body.token = token.value.trim();
+      body.dns_server = dnsServer.value.trim();
       try {
         if (existing) await api(`/bots/${existing.id}`, { method: "PATCH", json: body });
         else await api("/bots", { method: "POST", json: body });
@@ -6087,14 +6621,18 @@ function settingsServiceCard(title, unit, description, rawState, systemdAvailabl
 }
 
 function botsSettingsSection(bots) {
-  const canAddBot = bots.length < 2;
+  const providerCounts = bots.reduce((counts, bot) => {
+    counts[bot.provider] = (counts[bot.provider] || 0) + 1;
+    return counts;
+  }, {});
+  const canAddBot = bots.length < 4 && ["telegram", "discord"].some((provider) => (providerCounts[provider] || 0) < 2);
   return el("section", { class: "settings-page-section", "aria-labelledby": "bots-settings-title" },
     settingsSectionHeading("bots-settings-title", "Bots", "Send server and player activity to Telegram or Discord.",
       DEMO_DEBUG_BOTS
         ? el("span", { class: "muted mono" }, ".env.development")
         : canAddBot
           ? el("button", { class: "btn primary", onclick: () => botEditor(null, bots) }, "Add bot")
-          : el("span", { class: "muted mono" }, "2/2 connected")),
+          : el("span", { class: "muted mono" }, "4/4 connected")),
     bots.length
       ? el("div", { class: "bot-grid" }, ...bots.map(botCard))
       : el("div", { class: "card bot-empty" }, solarIcon("send-square-linear"),

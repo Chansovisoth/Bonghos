@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,12 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
 
 func discordTestInteraction(command, permissions string) discordInteraction {
 	var interaction discordInteraction
@@ -117,6 +124,120 @@ func TestDiscordApplicationRegistrationAndInteractionResponse(t *testing.T) {
 	}
 	if registrations != 1 || callbacks != 1 {
 		t.Fatalf("registrations=%d callbacks=%d", registrations, callbacks)
+	}
+}
+
+func TestDiscordRESTFallbackOnlyHandlesNetworkFailures(t *testing.T) {
+	t.Run("network failure", func(t *testing.T) {
+		primary := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		primaryURL := primary.URL
+		primary.Close()
+
+		fallbackHits := 0
+		fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fallbackHits++
+			_, _ = w.Write([]byte(`{"id":"1536799744431755275","username":"Bonghos","bot":true}`))
+		}))
+		defer fallback.Close()
+
+		sender := NewSender()
+		sender.DiscordBaseURL = primaryURL
+		sender.DiscordFallbackBaseURL = fallback.URL
+		application, err := sender.resolveDiscordApplication(context.Background(), "discord_bot_token_for_fallback")
+		if err != nil || application.ID != "1536799744431755275" || fallbackHits != 1 {
+			t.Fatalf("application = %+v, fallback hits = %d, error = %v", application, fallbackHits, err)
+		}
+	})
+
+	t.Run("HTTP response", func(t *testing.T) {
+		primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		}))
+		defer primary.Close()
+		fallbackHits := 0
+		fallback := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			fallbackHits++
+		}))
+		defer fallback.Close()
+
+		sender := NewSender()
+		sender.DiscordBaseURL = primary.URL
+		sender.DiscordFallbackBaseURL = fallback.URL
+		_, err := sender.resolveDiscordApplication(context.Background(), "discord_bot_token_for_http_error")
+		if err == nil || err.Error() != "Discord returned HTTP 401" {
+			t.Fatalf("HTTP error = %v", err)
+		}
+		if fallbackHits != 0 {
+			t.Fatalf("fallback received %d request(s) after an HTTP response", fallbackHits)
+		}
+	})
+
+	t.Run("ambiguous POST failure", func(t *testing.T) {
+		primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = connection.Close()
+		}))
+		defer primary.Close()
+		fallbackHits := 0
+		fallback := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+			fallbackHits++
+		}))
+		defer fallback.Close()
+
+		sender := NewSender()
+		sender.DiscordBaseURL = primary.URL
+		sender.DiscordFallbackBaseURL = fallback.URL
+		err := sender.discordJSON(context.Background(), http.MethodPost, "channels/123456789012345678/messages", "token", map[string]string{"content": "hello"}, nil)
+		if err == nil {
+			t.Fatal("ambiguous POST transport failure unexpectedly succeeded")
+		}
+		if fallbackHits != 0 {
+			t.Fatalf("fallback received %d duplicate-prone POST request(s)", fallbackHits)
+		}
+	})
+}
+
+func TestDiscordNetworkErrorIsDetailedWithoutExposingToken(t *testing.T) {
+	const token = "discord_bot_token_must_stay_secret"
+	sender := NewSender()
+	sender.DiscordFallbackBaseURL = ""
+	sender.Client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, &net.DNSError{Name: "discord.com", Err: "no such host"}
+	})}
+	_, err := sender.resolveDiscordApplication(context.Background(), token)
+	if err == nil || !strings.Contains(err.Error(), "DNS lookup failed for discord.com") {
+		t.Fatalf("DNS error = %v", err)
+	}
+	if strings.Contains(err.Error(), token) {
+		t.Fatalf("Discord error exposed token: %v", err)
+	}
+}
+
+func TestCustomDNSCreatesDedicatedResolver(t *testing.T) {
+	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	sender := NewSender().WithDNS(listener.LocalAddr().String())
+	dialer := sender.netDialer()
+	if dialer.Resolver == nil {
+		t.Fatal("custom DNS did not create a resolver")
+	}
+	connection, err := dialer.Resolver.Dial(context.Background(), "udp", "ignored:53")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if connection.RemoteAddr().String() != listener.LocalAddr().String() {
+		t.Fatalf("resolver dialed %q, want %q", connection.RemoteAddr(), listener.LocalAddr())
+	}
+	if NewSender().netDialer().Resolver != nil {
+		t.Fatal("system-DNS sender unexpectedly created a custom resolver")
 	}
 }
 

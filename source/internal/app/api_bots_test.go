@@ -129,10 +129,23 @@ func TestDiscordBotCanBeCreatedBeforeSlashCommand(t *testing.T) {
 	var created bot.Config
 	status, body := client.do(http.MethodPost, "/api/bots", map[string]any{
 		"name": "Discord commands", "provider": "discord",
-		"token": "discord_bot_token_for_command_setup",
+		"token": "discord_bot_token_for_command_setup", "enabled": true,
+		"dns_server": "1.1.1.1",
 	}, &created)
-	if status != http.StatusCreated || len(created.Destinations) != 0 || created.DestinationID != "" {
+	if status != http.StatusCreated || len(created.Destinations) != 0 || created.DestinationID != "" || created.DNSServer != "1.1.1.1" {
 		t.Fatalf("create destination-free Discord bot: %d %s %+v", status, body, created)
+	}
+	status, body = client.do(http.MethodPost, "/api/bots/"+itoa(created.ID)+"/test", map[string]any{}, nil)
+	if status != http.StatusConflict || !strings.Contains(body, "no destinations") {
+		t.Fatalf("test destination-free Discord bot: %d %s", status, body)
+	}
+	status, body = client.do(http.MethodPatch, "/api/bots/"+itoa(created.ID), map[string]any{"dns_server": ""}, &created)
+	if status != http.StatusOK || created.DNSServer != "" {
+		t.Fatalf("clear DNS server: %d %s %+v", status, body, created)
+	}
+	status, body = client.do(http.MethodPatch, "/api/bots/"+itoa(created.ID), map[string]any{"dns_server": "resolver.example"}, nil)
+	if status != http.StatusBadRequest || !strings.Contains(body, "IP address") {
+		t.Fatalf("invalid DNS server: %d %s", status, body)
 	}
 }
 
@@ -149,14 +162,14 @@ func TestBotInviteEndpointResolvesProviderLinkServerSide(t *testing.T) {
 	const token = "123456789:telegram_invite_secret"
 	var created bot.Config
 	status, body := client.do(http.MethodPost, "/api/bots", map[string]any{
-		"name": "Invite bot", "provider": "telegram", "token": token,
+		"name": "Invite bot", "provider": "telegram", "token": token, "dns_server": "1.1.1.1",
 	}, &created)
-	if status != http.StatusCreated {
+	if status != http.StatusCreated || created.DNSServer != "1.1.1.1" {
 		t.Fatalf("create bot: %d %s", status, body)
 	}
 	var invite map[string]string
 	status, body = client.do(http.MethodGet, "/api/bots/"+itoa(created.ID)+"/invite", nil, &invite)
-	if status != http.StatusOK || invite["url"] != "https://t.me/bonghos_test_bot?startgroup&admin=manage_chat" || strings.Contains(body, token) {
+	if status != http.StatusOK || invite["url"] != "https://t.me/bonghos_test_bot?startgroup" || strings.Contains(body, token) {
 		t.Fatalf("invite response: %d %s", status, body)
 	}
 }

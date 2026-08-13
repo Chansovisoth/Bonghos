@@ -6,15 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex">
 <title>Bonghos</title>
-<script>
-(() => {
-  const key = "bonghos.theme";
-  const choice = localStorage.getItem(key) || "system";
-  const dark = choice === "dark" || (choice === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = choice;
-  document.documentElement.dataset.resolvedTheme = dark ? "dark" : "light";
-})();
-</script>
+<script src="/theme-init.js"></script>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>

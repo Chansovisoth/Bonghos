@@ -57,8 +57,8 @@ http://127.0.0.1:8000/?demo&debug-bots
 ```
 
 The Settings page shows sanitized provider entries sourced from the environment
-file. For Telegram, add the bot to a group as an administrator and run `/bonghos here`
-inside the topic that should receive broadcasts. For Discord, invite the bot
+file. For Telegram, add the bot to a group and have a group administrator run
+`/bonghos here` inside the topic that should receive broadcasts. For Discord, invite the bot
 with the `bot` and `applications.commands` scopes and allow it to view the target
 channel and send messages there (plus send messages in threads when applicable).
 The relay registers an instant guild command, and a server administrator runs

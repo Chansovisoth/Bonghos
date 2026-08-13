@@ -17,8 +17,8 @@ func TestSenderInviteURLs(t *testing.T) {
 	defer telegram.Close()
 	sender := NewSender()
 	sender.TelegramBaseURL = telegram.URL
-	telegramURL, err := sender.InviteURL(context.Background(), ProviderTelegram, "123456789:telegram_invite_secret")
-	if err != nil || telegramURL != "https://t.me/bonghos_test_bot?startgroup&admin=manage_chat" {
+	telegramURL, err := sender.InviteURL(context.Background(), ProviderTelegram, "123456789:telegram_invite_secret", "")
+	if err != nil || telegramURL != "https://t.me/bonghos_test_bot?startgroup" {
 		t.Fatalf("Telegram invite = %q, %v", telegramURL, err)
 	}
 
@@ -27,12 +27,24 @@ func TestSenderInviteURLs(t *testing.T) {
 	}))
 	defer discord.Close()
 	sender.DiscordBaseURL = discord.URL
-	discordURL, err := sender.InviteURL(context.Background(), ProviderDiscord, "discord_bot_token_for_invite")
+	discordURL, err := sender.InviteURL(context.Background(), ProviderDiscord, "discord_bot_token_for_invite", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(discordURL, "client_id=1536799744431755275") || !strings.Contains(discordURL, "permissions=274877910016") || !strings.Contains(discordURL, "scope=bot+applications.commands") {
 		t.Fatalf("Discord invite = %q", discordURL)
+	}
+}
+
+func TestNewSenderUsesDiscordEndpointOverrides(t *testing.T) {
+	t.Setenv("BONGHOS_DISCORD_BASE_URL", "https://discord-rest.example/v10")
+	t.Setenv("BONGHOS_DISCORD_FALLBACK_BASE_URL", "https://discord-fallback.example/v10")
+	t.Setenv("BONGHOS_DISCORD_GATEWAY_URL", "wss://discord-gateway.example")
+	sender := NewSender()
+	if sender.DiscordBaseURL != "https://discord-rest.example/v10" ||
+		sender.DiscordFallbackBaseURL != "https://discord-fallback.example/v10" ||
+		sender.DiscordGatewayURL != "wss://discord-gateway.example" {
+		t.Fatalf("Discord endpoint overrides were not applied: %+v", sender)
 	}
 }
 

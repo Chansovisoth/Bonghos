@@ -70,11 +70,19 @@ func TestStorePatchAndEventFiltering(t *testing.T) {
 	store := testStore(t)
 	config, err := store.Create(CreateInput{
 		Name: "Discord staff", Provider: ProviderDiscord,
-		Token: "discord_bot_token_that_is_long_enough", DestinationID: "123456789012345678",
-		Enabled: true, NotifyServerStarted: true, NotifyServerStopped: false,
+		Token: "discord_bot_token_that_is_long_enough", DNSServer: "1.1.1.1",
+		DestinationID: "123456789012345678",
+		Enabled:       true, NotifyServerStarted: true, NotifyServerStopped: false,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if config.DNSServer != "1.1.1.1" {
+		t.Fatalf("DNS server = %q", config.DNSServer)
+	}
+	credential, err := store.Credential(config.ID)
+	if err != nil || credential.DNSServer != "1.1.1.1" {
+		t.Fatalf("credential = %+v, %v", credential, err)
 	}
 	enabled := false
 	stopped := true
@@ -100,11 +108,53 @@ func TestStorePatchAndEventFiltering(t *testing.T) {
 	if err != nil || len(targets) != 1 {
 		t.Fatalf("targets=%+v err=%v", targets, err)
 	}
+	if targets[0].DNSServer != "1.1.1.1" {
+		t.Fatalf("event target DNS server = %q", targets[0].DNSServer)
+	}
+	states, err := store.DiscordCommandBots()
+	if err != nil || len(states) != 1 || states[0].DNSServer != "1.1.1.1" {
+		t.Fatalf("Discord command states = %+v, %v", states, err)
+	}
 	if err := store.Delete(config.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.ByID(config.ID); err != ErrNotFound {
 		t.Fatalf("ByID after delete = %v", err)
+	}
+}
+
+func TestStoreValidatesOptionalDNSForBothProviders(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		provider string
+		server   string
+	}{
+		{name: "Discord hostname", provider: ProviderDiscord, server: "resolver.example"},
+		{name: "Discord wrong port", provider: ProviderDiscord, server: "1.1.1.1:853"},
+		{name: "Telegram hostname", provider: ProviderTelegram, server: "resolver.example"},
+		{name: "Telegram wrong port", provider: ProviderTelegram, server: "1.1.1.1:853"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := testStore(t).Create(CreateInput{
+				Name: "DNS validation", Provider: test.provider,
+				Token: "123456789:notification_bot_token_secret", DNSServer: test.server,
+			})
+			if err == nil || !strings.Contains(err.Error(), "DNS") {
+				t.Fatalf("DNS validation error = %v", err)
+			}
+		})
+	}
+	store := testStore(t)
+	config, err := store.Create(CreateInput{
+		Name: "Telegram DNS", Provider: ProviderTelegram,
+		Token: "123456789:telegram_dns_token_secret", DNSServer: "1.1.1.1",
+	})
+	if err != nil || config.DNSServer != "1.1.1.1" {
+		t.Fatalf("Telegram DNS config = %+v, %v", config, err)
+	}
+	states, err := store.TelegramCommandBots()
+	if err != nil || len(states) != 1 || states[0].DNSServer != "1.1.1.1" {
+		t.Fatalf("Telegram command states = %+v, %v", states, err)
 	}
 }
 
@@ -246,31 +296,23 @@ func TestStoreRetainsDiscoveredTelegramGroupsAndDeduplicatesTopics(t *testing.T)
 	}
 }
 
-func TestStoreLimitsBotsToOnePerProviderAndTwoTotal(t *testing.T) {
+func TestStoreLimitsBotsToTwoPerProviderAndFourTotal(t *testing.T) {
 	store := testStore(t)
-	if _, err := store.Create(CreateInput{
-		Name: "Telegram", Provider: ProviderTelegram,
-		Token: "123456789:telegram_limit_secret", DestinationID: "-1001111111111",
-	}); err != nil {
-		t.Fatal(err)
+	for index, input := range []CreateInput{
+		{Name: "Telegram primary", Provider: ProviderTelegram, Token: "123456789:telegram_limit_secret", DestinationID: "-1001111111111"},
+		{Name: "Telegram secondary", Provider: ProviderTelegram, Token: "123456789:telegram_limit_second", DestinationID: "-1002222222222"},
+		{Name: "Discord primary", Provider: ProviderDiscord, Token: "discord_bot_token_for_limit_test", DestinationID: "123456789012345678"},
+		{Name: "Discord secondary", Provider: ProviderDiscord, Token: "discord_bot_token_for_second_test", DestinationID: "223456789012345678"},
+	} {
+		if _, err := store.Create(input); err != nil {
+			t.Fatalf("create bot %d: %v", index+1, err)
+		}
 	}
 	if _, err := store.Create(CreateInput{
-		Name: "Telegram duplicate", Provider: ProviderTelegram,
-		Token: "123456789:telegram_limit_second", DestinationID: "-1002222222222",
-	}); err == nil || !strings.Contains(err.Error(), "only one Telegram") {
-		t.Fatalf("duplicate Telegram error = %v", err)
-	}
-	if _, err := store.Create(CreateInput{
-		Name: "Discord", Provider: ProviderDiscord,
-		Token: "discord_bot_token_for_limit_test", DestinationID: "123456789012345678",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Create(CreateInput{
-		Name: "Third bot", Provider: ProviderDiscord,
-		Token: "discord_bot_token_for_third_test", DestinationID: "223456789012345678",
-	}); err == nil {
-		t.Fatal("third notification bot was accepted")
+		Name: "Telegram third", Provider: ProviderTelegram,
+		Token: "123456789:telegram_limit_third", DestinationID: "-1003333333333",
+	}); err == nil || !strings.Contains(err.Error(), "only two Telegram") {
+		t.Fatalf("fifth bot error = %v", err)
 	}
 }
 

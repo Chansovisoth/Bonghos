@@ -23,7 +23,7 @@ For implementation details, security design, data layout, development instructio
 - Create scheduled actions, announcements, saves, and backups
 - Make full, world-only, or configuration-only backups; verify and restore them
 - Browse and edit server files, properties, icons, and startup settings
-- Connect one Telegram and one Discord bot for selected server and player notifications; administrators choose up to three Telegram topics or Discord channels with `/bonghos here`
+- Connect up to two Telegram and two Discord bots for selected server and player notifications; administrators choose up to three destinations per bot with `/bonghos here`
 - Invite users with Owner, Admin, Member, or Viewer access
 - Protect accounts with mandatory TOTP, recovery codes, and optional passkeys
 - Move the self-contained Bonghos runtime to another disk or Linux machine

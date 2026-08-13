@@ -3,9 +3,38 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestWebThemeBootstrapCompliesWithScriptCSP(t *testing.T) {
+	webSource := filepath.Join("..", "..", "web", "src")
+	index, err := os.ReadFile(filepath.Join(webSource, "index.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scripts := regexp.MustCompile(`(?is)<script([^>]*)>(.*?)</script>`).FindAllSubmatch(index, -1)
+	for _, script := range scripts {
+		attributes := strings.ToLower(string(script[1]))
+		body := strings.TrimSpace(string(script[2]))
+		if body != "" && !strings.Contains(attributes, "src=") {
+			t.Fatalf("index.html contains inline JavaScript blocked by script-src 'self': %q", body)
+		}
+	}
+	if !strings.Contains(string(index), `<script src="/theme-init.js"></script>`) {
+		t.Fatal("index.html does not load the external theme bootstrap")
+	}
+	theme, err := os.ReadFile(filepath.Join(webSource, "theme-init.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(strings.TrimSpace(string(theme))) == 0 {
+		t.Fatal("theme-init.js is empty")
+	}
+}
 
 func TestRequestUsesHTTPS(t *testing.T) {
 	direct := httptest.NewRequest("GET", "https://panel.example/api", nil)

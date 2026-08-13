@@ -507,7 +507,7 @@ async function botInviteURL(bot, fetchImpl = fetch) {
     const me = await telegramAPI(bot, "getMe", {}, fetchImpl);
     const username = String(me?.username || "").replace(/^@/, "").trim();
     if (!/^[A-Za-z0-9_]{5,}$/.test(username)) throw new Error("Telegram bot username is unavailable");
-    return `https://t.me/${username}?startgroup&admin=manage_chat`;
+    return `https://t.me/${username}?startgroup`;
   }
   if (bot.provider === "discord") {
     const application = await resolveDiscordApplication(bot.token, fetchImpl);

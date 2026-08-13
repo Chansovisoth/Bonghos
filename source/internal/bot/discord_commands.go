@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -69,45 +70,142 @@ type discordGatewayPacket struct {
 	Event    string          `json:"t"`
 }
 
+func (s *Sender) WithDNS(server string) *Sender {
+	server = strings.TrimSpace(server)
+	if server == s.DNSServer {
+		return s
+	}
+	copy := *s
+	copy.DNSServer = server
+	return &copy
+}
+
+func (s *Sender) netDialer() *net.Dialer {
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	if s.DNSServer == "" {
+		return dialer
+	}
+	resolverDialer := &net.Dialer{Timeout: 5 * time.Second}
+	dnsAddress := s.DNSServer
+	if _, _, err := net.SplitHostPort(dnsAddress); err != nil {
+		dnsAddress = net.JoinHostPort(dnsAddress, "53")
+	}
+	dialer.Resolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return resolverDialer.DialContext(ctx, network, dnsAddress)
+		},
+	}
+	return dialer
+}
+
+func (s *Sender) httpClient() *http.Client {
+	if s.DNSServer == "" {
+		return s.Client
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if configured, ok := s.Client.Transport.(*http.Transport); ok {
+		transport = configured.Clone()
+	}
+	transport.DialContext = s.netDialer().DialContext
+	client := *s.Client
+	client.Transport = transport
+	return &client
+}
+
+func (s *Sender) discordGatewayDialer() *websocket.Dialer {
+	dialer := *websocket.DefaultDialer
+	if s.DNSServer != "" {
+		dialer.NetDialContext = s.netDialer().DialContext
+	}
+	return &dialer
+}
+
 func (s *Sender) discordJSON(ctx context.Context, method, path, token string, input, output any) error {
-	var body io.Reader
+	var encoded []byte
 	if input != nil {
-		encoded, err := json.Marshal(input)
+		var err error
+		encoded, err = json.Marshal(input)
 		if err != nil {
 			return err
 		}
-		body = bytes.NewReader(encoded)
 	}
-	endpoint := strings.TrimRight(s.DiscordBaseURL, "/") + "/" + strings.TrimLeft(path, "/")
-	request, err := http.NewRequestWithContext(ctx, method, endpoint, body)
-	if err != nil {
-		return err
+	bases := []string{s.DiscordBaseURL}
+	if fallback := strings.TrimSpace(s.DiscordFallbackBaseURL); fallback != "" && strings.TrimRight(fallback, "/") != strings.TrimRight(s.DiscordBaseURL, "/") {
+		bases = append(bases, fallback)
 	}
-	request.Header.Set("User-Agent", "Bonghos/notification-bot")
-	if token != "" {
-		request.Header.Set("Authorization", "Bot "+token)
+	client := s.httpClient()
+	if s.DNSServer != "" {
+		defer client.CloseIdleConnections()
 	}
-	if input != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	response, err := s.Client.Do(request)
-	if err != nil {
-		return errors.New("Discord request failed")
-	}
-	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if err != nil {
-		return errors.New("reading Discord response failed")
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("Discord returned HTTP %d", response.StatusCode)
-	}
-	if output != nil && len(bytes.TrimSpace(data)) > 0 {
-		if err := json.Unmarshal(data, output); err != nil {
-			return errors.New("Discord returned invalid response data")
+	for index, base := range bases {
+		endpoint := strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
+		var body io.Reader
+		if input != nil {
+			body = bytes.NewReader(encoded)
 		}
+		request, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+		if err != nil {
+			return errors.New("Discord endpoint is invalid")
+		}
+		request.Header.Set("User-Agent", "Bonghos/notification-bot")
+		if token != "" {
+			request.Header.Set("Authorization", "Bot "+token)
+		}
+		if input != nil {
+			request.Header.Set("Content-Type", "application/json")
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			if index+1 < len(bases) && ctx.Err() == nil && discordFallbackAllowed(method, err) {
+				continue
+			}
+			return discordNetworkError("Discord request", endpoint, err)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		response.Body.Close()
+		if readErr != nil {
+			return errors.New("reading Discord response failed")
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return fmt.Errorf("Discord returned HTTP %d", response.StatusCode)
+		}
+		if output != nil && len(bytes.TrimSpace(data)) > 0 {
+			if err := json.Unmarshal(data, output); err != nil {
+				return errors.New("Discord returned invalid response data")
+			}
+		}
+		return nil
 	}
-	return nil
+	return errors.New("Discord request failed")
+}
+
+func discordFallbackAllowed(method string, requestErr error) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions:
+		return true
+	}
+	// A DNS failure happens before a non-idempotent request can reach Discord.
+	// Retrying other POST transport failures could duplicate a delivered message
+	// or interaction response whose acknowledgement was lost.
+	var dnsErr *net.DNSError
+	return errors.As(requestErr, &dnsErr)
+}
+
+func discordNetworkError(operation, endpoint string, requestErr error) error {
+	host := "Discord"
+	if parsed, err := url.Parse(endpoint); err == nil && parsed.Hostname() != "" {
+		host = parsed.Hostname()
+	}
+	var dnsErr *net.DNSError
+	if errors.As(requestErr, &dnsErr) {
+		return fmt.Errorf("%s failed: DNS lookup failed for %s", operation, host)
+	}
+	var networkErr net.Error
+	if errors.As(requestErr, &networkErr) && networkErr.Timeout() {
+		return fmt.Errorf("%s failed: timeout contacting %s", operation, host)
+	}
+	return fmt.Errorf("%s failed: network error contacting %s", operation, host)
 }
 
 func (s *Sender) resolveDiscordApplication(ctx context.Context, token string) (discordApplication, error) {
@@ -242,8 +340,9 @@ func (s *Sender) respondDiscordInteraction(ctx context.Context, interaction disc
 }
 
 type discordWorker struct {
-	token  string
-	cancel context.CancelFunc
+	token     string
+	dnsServer string
+	cancel    context.CancelFunc
 }
 
 // RunDiscordCommands manages a Gateway worker for every configured Discord
@@ -262,13 +361,13 @@ func (d *Dispatcher) RunDiscordCommands(ctx context.Context) {
 		desired := make(map[int64]DiscordCommandState, len(states))
 		for _, state := range states {
 			desired[state.BotID] = state
-			if current, ok := workers[state.BotID]; ok && current.token == state.Token {
+			if current, ok := workers[state.BotID]; ok && current.token == state.Token && current.dnsServer == state.DNSServer {
 				continue
 			} else if ok {
 				current.cancel()
 			}
 			workerCtx, cancel := context.WithCancel(ctx)
-			workers[state.BotID] = discordWorker{token: state.Token, cancel: cancel}
+			workers[state.BotID] = discordWorker{token: state.Token, dnsServer: state.DNSServer, cancel: cancel}
 			go d.runDiscordWorker(workerCtx, state)
 		}
 		for id, worker := range workers {
@@ -297,12 +396,13 @@ func (d *Dispatcher) RunDiscordCommands(ctx context.Context) {
 }
 
 func (d *Dispatcher) runDiscordWorker(ctx context.Context, state DiscordCommandState) {
+	sender := d.Sender.WithDNS(state.DNSServer)
 	backoff := time.Second
 	var application discordApplication
 	globalRegistered := false
 	for ctx.Err() == nil {
 		if application.ID == "" {
-			resolved, err := d.Sender.resolveDiscordApplication(ctx, state.Token)
+			resolved, err := sender.resolveDiscordApplication(ctx, state.Token)
 			if err != nil {
 				d.logCommand("Discord setup for %s failed: %v", state.BotName, err)
 			} else {
@@ -313,7 +413,7 @@ func (d *Dispatcher) runDiscordWorker(ctx context.Context, state DiscordCommandS
 		if application.ID != "" {
 			if !globalRegistered {
 				registerCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
-				if err := d.Sender.registerDiscordCommands(registerCtx, state.Token, application.ID, ""); err == nil {
+				if err := sender.registerDiscordCommands(registerCtx, state.Token, application.ID, ""); err == nil {
 					globalRegistered = true
 				} else {
 					d.logCommand("Discord global command registration for %s failed: %v", state.BotName, err)
@@ -336,10 +436,11 @@ func (d *Dispatcher) runDiscordWorker(ctx context.Context, state DiscordCommandS
 }
 
 func (d *Dispatcher) runDiscordGateway(ctx context.Context, state DiscordCommandState, applicationID string) error {
-	gateway := strings.TrimRight(d.Sender.DiscordGatewayURL, "/") + "/?v=" + discordGatewayVersion + "&encoding=json"
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, gateway, http.Header{"User-Agent": []string{"Bonghos/notification-bot"}})
+	sender := d.Sender.WithDNS(state.DNSServer)
+	gateway := strings.TrimRight(sender.DiscordGatewayURL, "/") + "/?v=" + discordGatewayVersion + "&encoding=json"
+	conn, _, err := sender.discordGatewayDialer().DialContext(ctx, gateway, http.Header{"User-Agent": []string{"Bonghos/notification-bot"}})
 	if err != nil {
-		return errors.New("Discord gateway connection failed")
+		return discordNetworkError("Discord gateway connection", gateway, err)
 	}
 	defer conn.Close()
 
@@ -393,7 +494,7 @@ func (d *Dispatcher) runDiscordGateway(ctx context.Context, state DiscordCommand
 		go func() {
 			registerCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 			defer cancel()
-			if err := d.Sender.registerDiscordCommands(registerCtx, state.Token, applicationID, guildID); err != nil {
+			if err := sender.registerDiscordCommands(registerCtx, state.Token, applicationID, guildID); err != nil {
 				d.logCommand("Discord guild command registration for %s failed: %v", state.BotName, err)
 			}
 		}()
@@ -497,7 +598,7 @@ func (d *Dispatcher) runDiscordGateway(ctx context.Context, state DiscordCommand
 						go func() {
 							responseCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 							defer cancel()
-							if err := d.Sender.respondDiscordInteraction(responseCtx, interaction, *reply); err != nil {
+							if err := sender.respondDiscordInteraction(responseCtx, interaction, *reply); err != nil {
 								d.logCommand("Discord interaction reply for %s failed: %v", state.BotName, err)
 							}
 						}()

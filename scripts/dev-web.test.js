@@ -176,7 +176,7 @@ test("botInviteURL builds provider-standard links without exposing tokens", asyn
   const telegramURL = await botInviteURL(telegram, async () => ({
     ok: true, status: 200, text: async () => JSON.stringify({ ok: true, result: { username: "bonghos_test_bot" } }),
   }));
-  assert.equal(telegramURL, "https://t.me/bonghos_test_bot?startgroup&admin=manage_chat");
+  assert.equal(telegramURL, "https://t.me/bonghos_test_bot?startgroup");
 
   const discord = configuredBots({ BONGHOS_DEV_DISCORD_TOKEN: "discord.secret.token" })[0];
   const discordURL = await botInviteURL(discord, async () => ({

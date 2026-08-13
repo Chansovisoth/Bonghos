@@ -115,6 +115,24 @@ func (m *Manager) WriteText(rel, content string) error {
 	return atomicWrite(p, []byte(content), 0o644)
 }
 
+func (m *Manager) CreateFile(rel string) error {
+	p, err := m.resolve(rel)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return errors.New("file already exists")
+		}
+		return err
+	}
+	return f.Close()
+}
+
 var importantNames = map[string]bool{
 	"server.properties": true, "eula.txt": true, "user_jvm_args.txt": true,
 	"whitelist.json": true, "ops.json": true, "banned-players.json": true,
@@ -142,21 +160,143 @@ func (m *Manager) Mkdir(rel string) error {
 }
 
 func (m *Manager) Rename(fromRel, toRel string) error {
+	return m.MoveTo(fromRel, m, toRel)
+}
+
+// MoveTo moves a file or folder into another independently jailed manager.
+// It prefers an atomic rename and falls back to copy-and-delete when project
+// roots live on different filesystems.
+func (m *Manager) MoveTo(fromRel string, destination *Manager, toRel string) error {
+	if destination == nil {
+		return errors.New("destination project is required")
+	}
 	from, err := m.resolve(fromRel)
 	if err != nil {
 		return err
 	}
-	to, err := m.resolve(toRel)
+	to, err := destination.resolve(toRel)
 	if err != nil {
 		return err
 	}
 	if _, err := os.Stat(to); err == nil {
 		return errors.New("destination already exists")
 	}
+	if info, err := os.Stat(from); err == nil && info.IsDir() {
+		rel, relErr := filepath.Rel(from, to)
+		if relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return errors.New("cannot move a folder into itself")
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
 		return err
 	}
-	return os.Rename(from, to)
+	if err := os.Rename(from, to); err == nil {
+		return nil
+	}
+	info, err := os.Lstat(from)
+	if err != nil {
+		return err
+	}
+	if err := copyTree(from, to, info); err != nil {
+		_ = os.RemoveAll(to)
+		return err
+	}
+	if err := os.RemoveAll(from); err != nil {
+		_ = os.RemoveAll(to)
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) Copy(fromRel, toRel string) error {
+	return m.CopyTo(fromRel, m, toRel)
+}
+
+// CopyTo copies a file or folder into another independently jailed manager.
+func (m *Manager) CopyTo(fromRel string, destination *Manager, toRel string) error {
+	if destination == nil {
+		return errors.New("destination project is required")
+	}
+	from, err := m.resolve(fromRel)
+	if err != nil {
+		return err
+	}
+	to, err := destination.resolve(toRel)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(to); err == nil {
+		return errors.New("destination already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	info, err := os.Lstat(from)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("copying symbolic links is not allowed")
+	}
+	if info.IsDir() {
+		rel, err := filepath.Rel(from, to)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return errors.New("cannot copy a folder into itself")
+		}
+	}
+	if err := copyTree(from, to, info); err != nil {
+		_ = os.RemoveAll(to)
+		return err
+	}
+	return nil
+}
+
+func copyTree(from, to string, info os.FileInfo) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return errors.New("copying symbolic links is not allowed")
+	}
+	if !info.IsDir() {
+		if !info.Mode().IsRegular() {
+			return errors.New("only regular files and folders can be copied")
+		}
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			return err
+		}
+		src, err := os.Open(from)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		dst, err := os.OpenFile(to, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(dst, src)
+		closeErr := dst.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		return closeErr
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	if err := os.Mkdir(to, info.Mode().Perm()); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(from)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		childInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if err := copyTree(filepath.Join(from, entry.Name()), filepath.Join(to, entry.Name()), childInfo); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Manager) Delete(rel string) error {
