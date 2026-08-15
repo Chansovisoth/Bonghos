@@ -235,12 +235,12 @@ func serverForceStop(a *app.App, args []string) error {
 }
 
 // ---------------------------------------------------------------------------
-// bonghos admin create   (first Owner, equivalent to the setup account step)
+// bonghos owner create   (first Owner, equivalent to the setup account step)
 // ---------------------------------------------------------------------------
 
-func cmdAdminCreate(home string, args []string) error {
+func cmdOwnerCreate(home string, args []string) error {
 	if len(args) != 1 || args[0] != "create" {
-		return errors.New("usage: bonghos admin create")
+		return errors.New("usage: bonghos owner create")
 	}
 	a, err := app.New(home, nil)
 	if err != nil {

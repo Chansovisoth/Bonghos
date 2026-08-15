@@ -72,7 +72,7 @@ Type=exec
 Environment=%s
 WorkingDirectory=%s
 ExecStart=%s --home %s serve
-Restart=on-failure
+Restart=always
 RestartSec=5s
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -170,8 +170,22 @@ func Uninstall() error {
 
 func Start(unit string) error   { return run("systemctl", "--user", "start", unit) }
 func Stop(unit string) error    { return run("systemctl", "--user", "stop", unit) }
+func Restart(unit string) error { return run("systemctl", "--user", "restart", unit) }
 func Enable(unit string) error  { return run("systemctl", "--user", "enable", unit) }
 func Disable(unit string) error { return run("systemctl", "--user", "disable", unit) }
+
+// Logs returns recent journal entries, or follows them until interrupted.
+func Logs(unit string, follow bool) error {
+	args := []string{"--user", "-u", unit, "--no-pager", "-n", "100"}
+	if follow {
+		args = append(args, "--follow")
+	}
+	cmd := exec.Command("journalctl", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
 
 // IsActive reports whether a unit is currently active.
 func IsActive(unit string) bool {
@@ -213,4 +227,18 @@ func LingerHint() (string, error) {
 		return "", errors.New("cannot determine username")
 	}
 	return "sudo loginctl enable-linger " + u, nil
+}
+
+// LingerEnabled reports whether the current user's systemd manager is allowed
+// to start at boot and remain available without an interactive login session.
+func LingerEnabled() (bool, error) {
+	u := os.Getenv("USER")
+	if u == "" {
+		return false, errors.New("cannot determine username")
+	}
+	out, err := exec.Command("loginctl", "show-user", u, "--property=Linger", "--value").CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("checking linger for %s: %w: %s", u, err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)) == "yes", nil
 }

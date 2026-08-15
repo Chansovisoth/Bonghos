@@ -746,6 +746,7 @@ async function demoApi(path, opts = {}) {
       { backup_id: "demo-full-20260803-1900", backup_type: "full_server", consistency_mode: "online", trigger_type: "manual", compressed_size: 4620000000, verification_status: "verified", created_at: new Date(Date.now() - 5 * 3600000).toISOString(), protected: true },
       { backup_id: "demo-world-20260802-0400", backup_type: "world_and_player_data", consistency_mode: "offline", trigger_type: "schedule", compressed_size: 2110000000, verification_status: "verified", created_at: new Date(Date.now() - 29 * 3600000).toISOString(), protected: false },
     ];
+    case "/backups/storage": return { path: "/home/demo/bonghos/backups", external: false, included_in_bonghos_size: true };
     case "/schedules": return [
       { id: 1, name: "Nightly verified backup", enabled: true, action: "backup", schedule_type: "daily", schedule_expression: "04:00", timezone: "Asia/Phnom_Penh", next_run_at: new Date(Date.now() + 3 * 3600000).toISOString(), last_result: "success" },
       { id: 2, name: "Weekly restart", enabled: false, action: "restart_server", schedule_type: "weekly", schedule_expression: "sun 05:00", timezone: "Asia/Phnom_Penh", next_run_at: null, last_result: "skipped" },
@@ -3649,7 +3650,7 @@ async function pageConfiguration(main) {
 
 // ----- backups --------------------------------------------------------------
 async function pageBackups(main) {
-  const list = await api("/backups");
+  const [list, storage] = await Promise.all([api("/backups"), api("/backups/storage")]);
   main.innerHTML = "";
   const integrityLabel = (status) => {
     if (status === "verified") return "Checked";
@@ -3724,6 +3725,10 @@ async function pageBackups(main) {
       can("server.backups.create") ? mkBtn("full", "Full backup") : null,
       can("server.backups.create") ? mkBtn("configuration", "Config backup") : null,
     ]),
+    el("div", { class: "notice backup-storage-location" },
+      el("strong", {}, storage.external ? "External backup storage" : "Backup storage"),
+      el("span", { class: "mono" }, storage.path),
+      storage.external ? el("span", { class: "muted" }, "Excluded from Bonghos disk size.") : null),
     el("div", { class: "progress hidden", id: "backup-progress" }, el("div", { style: "width:0%" })),
     el("div", { class: "table-wrap backups-table" },
       el("table", {},

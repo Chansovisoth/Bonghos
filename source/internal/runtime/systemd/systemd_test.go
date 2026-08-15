@@ -31,6 +31,12 @@ func TestGeneratedUnitsQuotePathsAndApplyPortableHardening(t *testing.T) {
 	if !strings.Contains(control, `PrivateTmp=yes`) {
 		t.Error("control-plane unit does not contain PrivateTmp=yes")
 	}
+	if !strings.Contains(control, "Restart=always\nRestartSec=5s") {
+		t.Error("control-plane unit must restart after unexpected clean or failed exits")
+	}
+	if !strings.Contains(minecraft, "Restart=on-failure\nRestartSec=5s") {
+		t.Error("Minecraft unit must not restart after an intentional clean stop")
+	}
 	// ProtectControlGroups, ProtectKernelModules and ProtectKernelTunables
 	// implicitly alter the capability bounding set. Some restricted Linux
 	// hosts reject those changes in user units with 218/CAPABILITIES before

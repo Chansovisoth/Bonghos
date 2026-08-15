@@ -703,6 +703,7 @@ body.file-selection-dragging { cursor: default; user-select: none; }
 .configuration-server-icon-copy { min-width: 0; flex: 1 1 auto; }
 .configuration-server-icon-copy > strong { display: block; margin-bottom: var(--space-1); }
 .configuration-server-icon-copy > p { margin-bottom: var(--space-3); }
+.backup-storage-location { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
 .server-icon-file-input { display: none; }
 .server-icon-crop-stage { width: min(320px, 100%); margin-inline: auto; border: 1px solid var(--border-strong); background: var(--inset); overflow: hidden; }
 .server-icon-crop-canvas { width: 100%; height: auto; aspect-ratio: 1 / 1; display: block; cursor: grab; touch-action: none; }

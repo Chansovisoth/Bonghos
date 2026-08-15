@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bonghos web start|stop|restart|status|logs|enable|disable` provides ordinary
+  background Web-panel management without requiring users to remember
+  `systemctl` or `journalctl` syntax.
+- The Web-panel service now restarts after both failed and unexpected clean
+  exits. Explicit `bonghos web stop` and machine shutdown remain intentional
+  stops. `web enable` and `web status` also report whether systemd lingering is
+  enabled for automatic startup before login after reboot.
+- Backup storage can be inspected and relocated with `bonghos backup storage
+  show|set|move|reset`. Moves copy and hash-verify every archive, switch the
+  configuration only after validation, and require the Web panel to be
+  stopped. External archives remain excluded from the literal BONGHOS_HOME
+  disk-size metric and are identified separately on the Backups page.
+- Backup lists now reflect archives physically present in the active storage
+  directory. Moving an archive away hides and disables it without discarding
+  its recovery metadata; returning it to its original relative path makes it
+  available for verification and restore again.
 - Telegram and Discord bot settings include an optional resolver IP for
   networks where the host DNS cannot resolve the provider. It applies only to
   that bot's connections, uses port 53, and is never activated automatically.
@@ -61,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Builds now select Go 1.26.6, which includes standard-library security fixes
+  required by the vulnerability scan.
+- `bonghos help` now groups the complete public command surface by purpose and
+  spells out server-import, scoped restore/export, and advanced-service forms.
+  Internal supervisor and compatibility-alias commands remain intentionally
+  hidden from the everyday reference.
+- `bonghos owner create` is now the canonical command for creating the first
+  Owner account. The former `bonghos admin create` spelling remains as a
+  compatibility alias and prints a rename notice.
 - Installations now support up to two Telegram and two Discord notification
   bots, with four bots total and up to three destinations per bot. Optional
   replacement-token and DNS fields are collapsed under Show more when

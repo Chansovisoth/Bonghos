@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -27,11 +28,13 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/config"
 	"github.com/Chansovisoth/Bonghos/internal/database"
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
+	"github.com/Chansovisoth/Bonghos/internal/operations"
 	"github.com/Chansovisoth/Bonghos/internal/portability"
 	"github.com/Chansovisoth/Bonghos/internal/qrcode"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/console"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/systemd"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/tmux"
+	"github.com/Chansovisoth/Bonghos/internal/security"
 	"github.com/Chansovisoth/Bonghos/internal/supervisor"
 )
 
@@ -58,6 +61,8 @@ func main() {
 	switch cmd {
 	case "serve":
 		err = cmdServe(*home)
+	case "web":
+		err = cmdWeb(*home, args)
 	case "supervisor":
 		err = cmdSupervisor(*home)
 	case "setup":
@@ -78,8 +83,11 @@ func main() {
 		err = cmdBackup(*home, args)
 	case "server":
 		err = cmdServer(*home, args)
+	case "owner":
+		err = cmdOwnerCreate(*home, args)
 	case "admin":
-		err = cmdAdminCreate(*home, args)
+		fmt.Fprintln(os.Stderr, "Note: 'bonghos admin create' was renamed to 'bonghos owner create'.")
+		err = cmdOwnerCreate(*home, args)
 	case "service":
 		err = cmdService(*home, args)
 	case "user":
@@ -115,12 +123,26 @@ func usage() {
 
 Usage: bonghos [--home DIR] <command>
 
-Server control:
-  serve                     Run the control plane (Web UI + API)     [default]
-  supervisor                Run the Minecraft supervisor (used by systemd)
+Getting started:
+  setup                     Configure Bonghos and create the first Owner
+  owner create              Create the first Owner account
+  version                   Print the installed version
+  help                      Show this command reference
+
+Web panel:
+  serve                     Run the Web UI and API in the foreground [default]
+  web start                 Start the Web panel in the background
+  web stop                  Stop the background Web panel
+  web restart               Restart the background Web panel
+  web status                Show the background Web panel status
+  web logs [--follow]       Show or follow Web panel logs
+  web enable                Start now and automatically after reboot
+  web disable               Disable automatic startup
+
+Minecraft servers:
   server list               List server projects
   server select <slug|id>   Choose the active project
-  server import <dir>       Import an existing server directory
+  server import <dir> [name] Import an existing server directory
   server start              Start the active server
   server stop               Stop gracefully (saves the world)
   server restart            Save, stop gracefully, then start again
@@ -128,10 +150,9 @@ Server control:
   console [--direct]        Attach the Minecraft console (tmux, or --direct)
 
 Accounts:
-  setup                     First-run setup (Owner account, services)
-  admin create              Create the first Owner account
   user list                 List accounts
-  user invite [role]        Create a single-use activation link
+  user invite [admin|member|viewer]
+                            Create a single-use activation link
   user disable <username>   Disable an account and revoke its sessions
   user enable <username>    Re-enable an account
   user revoke-sessions <u>  Sign an account out everywhere
@@ -141,16 +162,28 @@ Backups:
   backup <type>             Create a backup (world|full|configuration)
   backup list               List backups for the active project
   backup verify <id>        Re-verify an archive and its checksum
-  backup restore <id>       Restore (requires a stopped server)
+  backup restore <id> [--scope full_server|world_only|configuration_only]
+                            Restore into the stopped active server
+  backup storage show       Show the active backup directory
+  backup storage move <dir> Move existing backups and switch storage
+  backup storage set <dir>  Set storage when no backups exist
+  backup storage reset      Restore the default when no backups exist
 
-Maintenance:
-  doctor [--repair]         Diagnose (and optionally repair) the installation
+Health and repair:
+  doctor [flags]            Diagnose; --repair, --json, --fix-permissions
   database checkpoint       Integrity-check and checkpoint the SQLite database
-  fix-permissions           Restore expected file modes inside the home
-  export [flags]            Create a portable export archive
+  fix-permissions           Restore expected file modes inside BONGHOS_HOME
+
+Import and export:
+  export [--scope SCOPE] [--include-secrets] [--output FILE]
+                            Create a portable export archive
   import [--force] <file>   Import a portable export archive
-  service <verb>            install | repair | uninstall | status
-  version                   Print the version
+
+Advanced service management:
+  service install           Install the systemd user-service definitions
+  service repair            Regenerate definitions for the current home
+  service status            Show Web-panel and Minecraft service status
+  service uninstall         Remove service definitions without deleting data
 
 Environment:
   BONGHOS_HOME      Overrides the default home (~/bonghos)
@@ -190,6 +223,116 @@ func cmdServe(home string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	return a.Serve(ctx)
+}
+
+// cmdWeb provides ordinary background lifecycle commands without requiring
+// users to know systemctl or journalctl syntax. The foreground `serve` command
+// remains available for debugging.
+func cmdWeb(home string, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: bonghos web <start|stop|restart|status|logs|enable|disable>")
+	}
+	if !systemd.Available() {
+		return errors.New("background Web panel management requires a systemd user session; use 'bonghos serve' in the foreground")
+	}
+	var cfg *config.Config
+	loadConfig := func() error {
+		if cfg != nil {
+			return nil
+		}
+		var err error
+		cfg, err = config.Load(home)
+		return err
+	}
+	ensureInstalled := func() error {
+		if err := loadConfig(); err != nil {
+			return err
+		}
+		return systemd.Install(home, cfg.GracefulStopSeconds)
+	}
+	switch args[0] {
+	case "start":
+		if len(args) != 1 {
+			return errors.New("usage: bonghos web start")
+		}
+		if err := ensureInstalled(); err != nil {
+			return err
+		}
+		if err := systemd.Start(systemd.ServiceControlPlane); err != nil {
+			return err
+		}
+		fmt.Printf("Bonghos Web panel started: http://%s:%d\n", cfg.BindAddress, cfg.Port)
+	case "stop":
+		if len(args) != 1 {
+			return errors.New("usage: bonghos web stop")
+		}
+		if err := systemd.Stop(systemd.ServiceControlPlane); err != nil {
+			return err
+		}
+		fmt.Println("Bonghos Web panel stopped.")
+	case "restart":
+		if len(args) != 1 {
+			return errors.New("usage: bonghos web restart")
+		}
+		if err := ensureInstalled(); err != nil {
+			return err
+		}
+		if err := systemd.Restart(systemd.ServiceControlPlane); err != nil {
+			return err
+		}
+		fmt.Printf("Bonghos Web panel restarted: http://%s:%d\n", cfg.BindAddress, cfg.Port)
+	case "status":
+		if len(args) != 1 {
+			return errors.New("usage: bonghos web status")
+		}
+		fmt.Print(systemd.Status(systemd.ServiceControlPlane))
+		if enabled, err := systemd.LingerEnabled(); err == nil {
+			if enabled {
+				fmt.Println("Boot without login: enabled (systemd lingering is on)")
+			} else if hint, hintErr := systemd.LingerHint(); hintErr == nil {
+				fmt.Println("Boot without login: disabled")
+				fmt.Println("Enable it once with:", hint)
+			}
+		}
+	case "logs":
+		fs := flag.NewFlagSet("web logs", flag.ContinueOnError)
+		follow := fs.Bool("follow", false, "follow new log entries")
+		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+			return errors.New("usage: bonghos web logs [--follow]")
+		}
+		return systemd.Logs(systemd.ServiceControlPlane, *follow)
+	case "enable":
+		if len(args) != 1 {
+			return errors.New("usage: bonghos web enable")
+		}
+		if err := ensureInstalled(); err != nil {
+			return err
+		}
+		if err := systemd.Enable(systemd.ServiceControlPlane); err != nil {
+			return err
+		}
+		if err := systemd.Start(systemd.ServiceControlPlane); err != nil {
+			return err
+		}
+		fmt.Printf("Bonghos Web panel enabled and started: http://%s:%d\n", cfg.BindAddress, cfg.Port)
+		if enabled, err := systemd.LingerEnabled(); err == nil && enabled {
+			fmt.Println("Boot without login is enabled (systemd lingering is on).")
+		} else if hint, err := systemd.LingerHint(); err == nil && hint != "" {
+			fmt.Println("One more step is required for startup after reboot without logging in:")
+			fmt.Println(" ", hint)
+		}
+	case "disable":
+		if len(args) != 1 {
+			return errors.New("usage: bonghos web disable")
+		}
+		if err := systemd.Disable(systemd.ServiceControlPlane); err != nil {
+			return err
+		}
+		fmt.Println("Automatic Web panel startup disabled. The currently running panel was not stopped.")
+	default:
+		return fmt.Errorf("unknown web verb %q", args[0])
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -301,7 +444,7 @@ func cmdSetup(home string) error {
 			if err := systemd.Install(home, a.Cfg.GracefulStopSeconds); err != nil {
 				fmt.Println("Service install failed:", err)
 			} else {
-				fmt.Println("Services installed. Enable bonghos.service when you are ready to start the panel.")
+				fmt.Println("Services installed. Run 'bonghos web enable' when you are ready to start the panel.")
 				if hint, err := systemd.LingerHint(); err == nil && hint != "" {
 					fmt.Println(hint)
 				}
@@ -311,8 +454,8 @@ func cmdSetup(home string) error {
 		fmt.Println("Note: systemd user services are unavailable; Bonghos will run in the foreground.")
 	}
 
-	fmt.Printf("\nSetup complete. Start the panel with:\n  systemctl --user start %s\nor:\n  bonghos serve\n\nThen open http://%s:%d\n",
-		systemd.ServiceControlPlane, a.Cfg.BindAddress, a.Cfg.Port)
+	fmt.Printf("\nSetup complete. Start the panel with:\n  bonghos web start\n\nOr run it in the foreground with:\n  bonghos serve\n\nThen open http://%s:%d\n",
+		a.Cfg.BindAddress, a.Cfg.Port)
 	return nil
 }
 
@@ -583,7 +726,10 @@ func cmdImport(home string, args []string) error {
 
 func cmdBackup(home string, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: bonghos backup <create world|full|configuration | list | verify ID | restore ID>")
+		return fmt.Errorf("usage: bonghos backup <world|full|configuration|list|verify|restore|storage>")
+	}
+	if args[0] == "storage" {
+		return cmdBackupStorage(home, args[1:])
 	}
 	// Sub-verbs that operate on existing backups.
 	switch args[0] {
@@ -643,6 +789,236 @@ func cmdBackup(home string, args []string) error {
 	return nil
 }
 
+func cmdBackupStorage(home string, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: bonghos backup storage <show|set|move|reset>")
+	}
+	cfg, err := config.Load(home)
+	if err != nil {
+		return err
+	}
+	current := config.BackupRoot(home, cfg)
+	if args[0] == "show" {
+		if len(args) != 1 {
+			return errors.New("usage: bonghos backup storage show")
+		}
+		fmt.Println(current)
+		if filepath.Clean(current) == filepath.Clean(config.DefaultBackupRoot(home)) {
+			fmt.Println("Storage: default (inside BONGHOS_HOME)")
+		} else {
+			fmt.Println("Storage: external (excluded from Bonghos disk size)")
+		}
+		return nil
+	}
+	if err := requireWebStopped(cfg); err != nil {
+		return err
+	}
+	release, err := operations.NewLock(home).Acquire("backup-storage")
+	if err != nil {
+		return err
+	}
+	defer release()
+	db, err := database.Open(filepath.Join(home, config.FileDatabase))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := database.Migrate(db); err != nil {
+		return err
+	}
+	currentManager := &backup.Manager{
+		Home: home, Root: current, DB: db,
+		FreeSpaceReserve: cfg.FreeSpaceReserveMB << 20,
+	}
+	availableRecords, err := currentManager.List(0)
+	if err != nil {
+		return err
+	}
+	records := len(availableRecords)
+
+	setConfig := func(target string) error {
+		if filepath.Clean(target) == filepath.Clean(config.DefaultBackupRoot(home)) {
+			cfg.BackupDirectory = ""
+		} else {
+			cfg.BackupDirectory = target
+		}
+		return config.Save(home, cfg)
+	}
+	switch args[0] {
+	case "set":
+		if len(args) != 2 {
+			return errors.New("usage: bonghos backup storage set <directory>")
+		}
+		if records != 0 {
+			return errors.New("backups already exist; use 'bonghos backup storage move <directory>'")
+		}
+		empty, err := backup.StorageEmpty(current)
+		if err != nil || !empty {
+			if err != nil {
+				return err
+			}
+			return errors.New("current backup storage contains files; use the move command")
+		}
+		target, err := absoluteUserPath(args[1])
+		if err != nil {
+			return err
+		}
+		if err := validateBackupStorageTarget(home, target); err != nil {
+			return err
+		}
+		if err := backup.ValidateStorageRoot(current, target); err != nil {
+			return err
+		}
+		st, err := os.Stat(target)
+		if err != nil || !st.IsDir() {
+			return errors.New("new backup storage must be an existing directory")
+		}
+		empty, err = backup.StorageEmpty(target)
+		if err != nil || !empty {
+			if err != nil {
+				return err
+			}
+			return errors.New("new backup storage must be empty")
+		}
+		if err := setConfig(target); err != nil {
+			return err
+		}
+		fmt.Println("Backup storage set to", target)
+	case "reset":
+		if len(args) != 1 {
+			return errors.New("usage: bonghos backup storage reset")
+		}
+		defaultRoot := config.DefaultBackupRoot(home)
+		if filepath.Clean(current) == filepath.Clean(defaultRoot) {
+			fmt.Println("Backup storage already uses the default:", defaultRoot)
+			return nil
+		}
+		if records != 0 {
+			return fmt.Errorf("backups already exist; move them with: bonghos backup storage move %q", defaultRoot)
+		}
+		empty, err := backup.StorageEmpty(current)
+		if err != nil || !empty {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("current storage contains files; move them with: bonghos backup storage move %q", defaultRoot)
+		}
+		if err := os.MkdirAll(defaultRoot, 0o755); err != nil {
+			return err
+		}
+		if err := setConfig(defaultRoot); err != nil {
+			return err
+		}
+		fmt.Println("Backup storage reset to", defaultRoot)
+	case "move":
+		if len(args) != 2 {
+			return errors.New("usage: bonghos backup storage move <directory>")
+		}
+		target, err := absoluteUserPath(args[1])
+		if err != nil {
+			return err
+		}
+		if err := validateBackupStorageTarget(home, target); err != nil {
+			return err
+		}
+		if err := backup.ValidateStorageRoot(current, target); err != nil {
+			return err
+		}
+		if _, err := os.Stat(target); err == nil {
+			empty, emptyErr := backup.StorageEmpty(target)
+			if emptyErr != nil {
+				return emptyErr
+			}
+			if !empty {
+				return errors.New("move destination already contains files")
+			}
+			if err := backup.RemoveStorage(target); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		fmt.Printf("Copying backups from %s to %s ...\n", current, target)
+		if err := backup.CopyStorageVerified(current, target); err != nil {
+			return err
+		}
+		candidate := &backup.Manager{
+			Home: home, Root: target, DB: db,
+			FreeSpaceReserve: cfg.FreeSpaceReserveMB << 20,
+		}
+		recs, err := candidate.List(0)
+		if err != nil {
+			_ = backup.RemoveStorage(target)
+			return err
+		}
+		for _, rec := range recs {
+			if err := candidate.Verify(rec.BackupID); err != nil {
+				_ = backup.RemoveStorage(target)
+				return fmt.Errorf("copied backup %s failed verification: %w", rec.BackupID, err)
+			}
+		}
+		if err := setConfig(target); err != nil {
+			_ = backup.RemoveStorage(target)
+			return err
+		}
+		if err := backup.RemoveStorage(current); err != nil {
+			return fmt.Errorf("storage switched to %s, but the verified old copy could not be removed: %w", target, err)
+		}
+		fmt.Printf("Backup storage moved to %s (%d available backup(s) verified).\n", target, len(recs))
+	default:
+		return fmt.Errorf("unknown backup storage verb %q", args[0])
+	}
+	return nil
+}
+
+func absoluteUserPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(path, "~"), "/"))
+	}
+	return filepath.Abs(path)
+}
+
+func validateBackupStorageTarget(home, target string) error {
+	absHome, err := filepath.Abs(home)
+	if err != nil {
+		return err
+	}
+	defaultRoot, err := filepath.Abs(config.DefaultBackupRoot(absHome))
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(target) != filepath.Clean(defaultRoot) && security.WithinRoot(absHome, target) {
+		return fmt.Errorf("custom backup storage must be outside BONGHOS_HOME; use %q for the default location", defaultRoot)
+	}
+	if st, err := os.Lstat(target); err == nil && st.Mode()&os.ModeSymlink != 0 {
+		return errors.New("backup storage cannot be a symbolic link; choose the real directory")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func requireWebStopped(cfg *config.Config) error {
+	if systemd.Available() && systemd.IsActive(systemd.ServiceControlPlane) {
+		return errors.New("stop the Web panel first: bonghos web stop")
+	}
+	host := cfg.BindAddress
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(cfg.Port)), 300*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		return errors.New("the Web panel port is active; stop the foreground or background panel before changing backup storage")
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // service
 // ---------------------------------------------------------------------------
@@ -660,7 +1036,7 @@ func cmdService(home string, args []string) error {
 		if err := systemd.Install(home, cfg.GracefulStopSeconds); err != nil {
 			return err
 		}
-		fmt.Println("Installed and enabled", systemd.ServiceControlPlane, "and", systemd.ServiceMinecraft)
+		fmt.Println("Installed", systemd.ServiceControlPlane, "and", systemd.ServiceMinecraft)
 		if hint, err := systemd.LingerHint(); err == nil && hint != "" {
 			fmt.Println(hint)
 		}

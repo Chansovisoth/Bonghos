@@ -89,8 +89,8 @@ During guided setup, you will:
 Start the Web UI service:
 
 ```bash
-systemctl --user enable --now bonghos.service
-systemctl --user status bonghos.service
+bonghos web enable
+bonghos web status
 ```
 
 To let the user service start after boot without waiting for an interactive login, enable lingering once:
@@ -98,6 +98,11 @@ To let the user service start after boot without waiting for an interactive logi
 ```bash
 sudo loginctl enable-linger "$USER"
 ```
+
+There is no service time limit. The managed Web-panel unit restarts after an
+unexpected exit with a five-second delay. An explicit `bonghos web stop` or
+machine shutdown remains stopped normally; after the next boot, the enabled
+unit starts automatically when lingering is enabled.
 
 If systemd user services are unavailable, run Bonghos in the foreground:
 
@@ -171,12 +176,24 @@ Run `bonghos help` or `./setup.sh --help` on the server for the current built-in
 | `./setup.sh --yes` | Accept supported installer prompts non-interactively |
 | `./setup.sh --help` | Show every installer option |
 
-### Panel and server control
+### Web panel
 
 | Command | Purpose |
 |---|---|
 | `bonghos serve` | Run the Web UI and API in the foreground |
+| `bonghos web start` | Start the Web panel in the background |
+| `bonghos web stop` | Stop the background Web panel |
+| `bonghos web restart` | Restart the background Web panel |
+| `bonghos web status` | Show Web panel service status |
+| `bonghos web logs [--follow]` | Show or follow Web panel logs |
+| `bonghos web enable` | Start now and automatically after reboot |
+| `bonghos web disable` | Disable automatic startup without stopping the panel |
 | `bonghos version` | Print the installed version |
+
+### Minecraft server control
+
+| Command | Purpose |
+|---|---|
 | `bonghos server list` | List server projects |
 | `bonghos server import <directory> [display name]` | Copy an existing server into Bonghos |
 | `bonghos server select <slug-or-id>` | Select the active project |
@@ -192,7 +209,7 @@ Run `bonghos help` or `./setup.sh --help` on the server for the current built-in
 | Command | Purpose |
 |---|---|
 | `bonghos setup` | Run first-account and service setup |
-| `bonghos admin create` | Create the first Owner if none exists |
+| `bonghos owner create` | Create the first Owner if none exists |
 | `bonghos user list` | List accounts and their status |
 | `bonghos user invite [admin\|member\|viewer]` | Create a single-use invitation |
 | `bonghos user disable <username>` | Disable an account and revoke its sessions |
@@ -208,9 +225,23 @@ Run `bonghos help` or `./setup.sh --help` on the server for the current built-in
 | `bonghos backup list` | List backups for the active project |
 | `bonghos backup verify <backup-id>` | Check an archive and its checksum again |
 | `bonghos backup restore <backup-id>` | Restore a backup while the server is stopped |
+| `bonghos backup storage show` | Show the active backup directory |
+| `bonghos backup storage move <directory>` | Move existing backups and use the new directory |
+| `bonghos backup storage set <directory>` | Set an empty location when no backups exist |
+| `bonghos backup storage reset` | Return an empty installation to the default location |
 | `bonghos export --output <file.tar.zst>` | Create a portable export without account secrets |
 | `bonghos export --include-secrets --output <file.tar.zst>` | Export accounts and secrets too; protect this archive |
 | `bonghos import [--force] <archive.tar.zst>` | Import a portable Bonghos export |
+
+Custom backup storage must be an absolute location outside `BONGHOS_HOME`.
+Stop the Web panel before changing it. External archives appear on the Backups
+page but are excluded from the Bonghos disk-size total, which counts only files
+physically inside `BONGHOS_HOME`.
+
+Backup lists reflect the archives currently present in the active storage
+directory. If an archive is moved away manually, it disappears from normal
+lists and cannot be restored. Returning it to the same relative path makes it
+available again because Bonghos retains only the dormant recovery metadata.
 
 Limit an export to one area with `--scope complete`, `configuration_only`, `system_data`, `servers`, or `backups`:
 
@@ -235,7 +266,7 @@ bonghos backup restore <backup-id> --scope configuration_only
 | `bonghos doctor --json` | Print diagnostic results as JSON |
 | `bonghos database checkpoint` | Check SQLite integrity and checkpoint its WAL |
 | `bonghos fix-permissions` | Restore expected file permissions |
-| `bonghos service install` | Install and enable the user services |
+| `bonghos service install` | Install the advanced user-service definitions |
 | `bonghos service status` | Show control-panel and Minecraft service status |
 | `bonghos service repair` | Regenerate service files for the current runtime path |
 | `bonghos service uninstall` | Remove the user services without deleting data |

@@ -105,6 +105,7 @@ func InitHome(home string) error {
 type Config struct {
 	BindAddress          string
 	Port                 int
+	BackupDirectory      string
 	AllowInsecureHTTPURL bool
 	TrustedDownloadHosts []string
 	MaxUploadBytes       int64
@@ -156,12 +157,19 @@ func Load(home string) (*Config, error) {
 			continue
 		}
 		k = strings.TrimSpace(k)
-		v = strings.Trim(strings.TrimSpace(v), `"`)
+		v = strings.TrimSpace(v)
+		if unquoted, err := strconv.Unquote(v); err == nil {
+			v = unquoted
+		} else {
+			v = strings.Trim(v, `"`)
+		}
 		switch k {
 		case "bind_address":
 			c.BindAddress = v
 		case "port":
 			c.Port = atoi(v, c.Port)
+		case "backup_directory":
+			c.BackupDirectory = v
 		case "allow_insecure_http_url":
 			c.AllowInsecureHTTPURL = v == "true"
 		case "trusted_download_hosts":
@@ -202,6 +210,8 @@ func Save(home string, c *Config) error {
 	fmt.Fprintf(&b, "bind_address = %q\n", c.BindAddress)
 	fmt.Fprintf(&b, "port = %d\n", c.Port)
 	fmt.Fprintf(&b, "session_hours = %d\n\n", c.SessionHours)
+	b.WriteString("[backups]\n")
+	fmt.Fprintf(&b, "backup_directory = %q\n\n", c.BackupDirectory)
 	b.WriteString("[downloads]\n")
 	fmt.Fprintf(&b, "allow_insecure_http_url = %t\n", c.AllowInsecureHTTPURL)
 	hosts := make([]string, len(c.TrustedDownloadHosts))
@@ -221,6 +231,27 @@ func Save(home string, c *Config) error {
 	b.WriteString("[logging]\n")
 	fmt.Fprintf(&b, "log_level = %q\n", c.LogLevel)
 	return AtomicWrite(filepath.Join(home, FileConfig), []byte(b.String()), 0o600)
+}
+
+// BackupRoot returns the effective absolute archive-storage directory. An
+// empty setting keeps the portable default under BONGHOS_HOME. Configured
+// paths are stored as absolute paths by the CLI, but relative values from a
+// manually edited config remain anchored to BONGHOS_HOME rather than the
+// process working directory.
+func BackupRoot(home string, c *Config) string {
+	if c == nil || strings.TrimSpace(c.BackupDirectory) == "" {
+		return filepath.Join(home, DirBackups)
+	}
+	p := filepath.Clean(strings.TrimSpace(c.BackupDirectory))
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(home, p)
+}
+
+// DefaultBackupRoot is the portable backup directory inside BONGHOS_HOME.
+func DefaultBackupRoot(home string) string {
+	return filepath.Join(home, DirBackups)
 }
 
 // AtomicWrite writes data to path via a same-directory temp file and rename.

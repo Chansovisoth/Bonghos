@@ -6,6 +6,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,6 +87,28 @@ func New(home string, webFS fs.FS) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
+	backupRoot := config.BackupRoot(home, cfg)
+	absHome, absErr := filepath.Abs(home)
+	absBackupRoot, rootErr := filepath.Abs(backupRoot)
+	absDefaultRoot, defaultErr := filepath.Abs(config.DefaultBackupRoot(home))
+	if absErr != nil || rootErr != nil || defaultErr != nil {
+		return nil, errors.Join(absErr, rootErr, defaultErr)
+	}
+	if filepath.Clean(absBackupRoot) != filepath.Clean(absDefaultRoot) && security.WithinRoot(absHome, absBackupRoot) {
+		return nil, fmt.Errorf("custom backup directory must be outside BONGHOS_HOME; use %s for internal backups", absDefaultRoot)
+	}
+	backupRoot = absBackupRoot
+	if st, err := os.Lstat(backupRoot); err == nil && st.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("configured backup directory cannot be a symbolic link: %s", backupRoot)
+	}
+	if st, err := os.Stat(backupRoot); err != nil || !st.IsDir() {
+		if strings.TrimSpace(cfg.BackupDirectory) != "" {
+			return nil, fmt.Errorf("configured backup directory is unavailable: %s", backupRoot)
+		}
+		if err := os.MkdirAll(backupRoot, 0o755); err != nil {
+			return nil, fmt.Errorf("creating backup directory: %w", err)
+		}
+	}
 	keyPath := filepath.Join(home, config.FileSecretKey)
 	if _, err := os.Stat(keyPath); err != nil {
 		if err := security.GenerateSecretKey(keyPath); err != nil {
@@ -125,7 +149,10 @@ func New(home string, webFS fs.FS) (*App, error) {
 	a.Instances = &instance.Store{DB: db}
 	a.Operations = operations.NewStore(db)
 	a.OpLock = operations.NewLock(home)
-	a.Backups = &backup.Manager{Home: home, DB: db}
+	a.Backups = &backup.Manager{
+		Home: home, Root: backupRoot, DB: db,
+		FreeSpaceReserve: cfg.FreeSpaceReserveMB << 20,
+	}
 	a.Bots = &bot.Store{DB: db, SecretKey: key}
 	a.BotNotify = &bot.Dispatcher{Store: a.Bots, Sender: bot.NewSender(), Logf: a.Logf}
 	a.Hub = websocket.NewHub()

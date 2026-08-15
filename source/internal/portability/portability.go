@@ -99,6 +99,23 @@ func Doctor(home string, repair bool) (*Report, error) {
 			r.add("dir:"+d, StatusOK, "")
 		}
 	}
+	cfg, cfgErr := config.Load(home)
+	if cfgErr != nil {
+		r.add("backup-storage", StatusError, cfgErr.Error())
+	} else {
+		backupRoot := config.BackupRoot(home, cfg)
+		if st, err := os.Lstat(backupRoot); err == nil && st.Mode()&os.ModeSymlink != 0 {
+			r.add("backup-storage", StatusError, "configured backup directory cannot be a symbolic link: "+backupRoot)
+		} else if st, err := os.Stat(backupRoot); err != nil || !st.IsDir() {
+			r.add("backup-storage", StatusError, "configured backup directory is unavailable: "+backupRoot)
+		} else if filepath.Clean(backupRoot) == filepath.Clean(config.DefaultBackupRoot(home)) {
+			r.add("backup-storage", StatusOK, "default: "+backupRoot)
+		} else if security.WithinRoot(home, backupRoot) {
+			r.add("backup-storage", StatusError, "custom backup directory must be outside BONGHOS_HOME: "+backupRoot)
+		} else {
+			r.add("backup-storage", StatusOK, "external: "+backupRoot)
+		}
+	}
 	if repair {
 		if err := config.InitHome(home); err != nil {
 			r.add("init", StatusError, err.Error())
@@ -543,6 +560,13 @@ func Export(home string, opts ExportOptions) (string, error) {
 	if opts.DB != nil {
 		_ = database.Checkpoint(opts.DB)
 	}
+	cfg, err := config.Load(absHome)
+	if err != nil {
+		return "", err
+	}
+	backupRoot := config.BackupRoot(absHome, cfg)
+	externalBackupRoot := filepath.Clean(backupRoot) != filepath.Clean(config.DefaultBackupRoot(absHome)) &&
+		!security.WithinRoot(absHome, backupRoot)
 
 	manifest := Manifest{
 		Format:             "bonghos-portable-export",
@@ -573,7 +597,18 @@ func Export(home string, opts ExportOptions) (string, error) {
 	}
 	tw := tar.NewWriter(zw)
 
-	var files []string
+	type exportFile struct {
+		rel  string
+		path string
+	}
+	var files []exportFile
+	seen := map[string]bool{}
+	addFile := func(rel, path string) {
+		if !seen[rel] {
+			seen[rel] = true
+			files = append(files, exportFile{rel: rel, path: path})
+		}
+	}
 	err = filepath.WalkDir(absHome, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -608,26 +643,54 @@ func Export(home string, opts ExportOptions) (string, error) {
 		if !exportIncluded(rel, opts.Scope, opts.IncludeSecrets) {
 			return nil
 		}
-		files = append(files, rel)
+		addFile(rel, p)
 		return nil
 	})
 	if err != nil {
 		return "", err
 	}
+	if externalBackupRoot && (opts.Scope == ScopeComplete || opts.Scope == ScopeBackups) {
+		if st, err := os.Stat(backupRoot); err != nil || !st.IsDir() {
+			return "", fmt.Errorf("external backup storage is unavailable: %s", backupRoot)
+		}
+		err = filepath.WalkDir(backupRoot, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			rel, relErr := filepath.Rel(backupRoot, p)
+			if relErr != nil || rel == "." {
+				return relErr
+			}
+			logical := filepath.ToSlash(filepath.Join(config.DirBackups, rel))
+			if d.IsDir() {
+				return nil
+			}
+			if d.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("unsafe symlink in external backup storage: %s", logical)
+			}
+			if !d.Type().IsRegular() {
+				return nil
+			}
+			addFile(logical, p)
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
+	}
 
-	for _, rel := range files {
-		p := filepath.Join(absHome, rel)
-		st, err := os.Stat(p)
+	for _, file := range files {
+		st, err := os.Stat(file.path)
 		if err != nil {
 			continue
 		}
-		f, err := os.Open(p)
+		f, err := os.Open(file.path)
 		if err != nil {
 			continue
 		}
 		h := sha256.New()
 		hdr := &tar.Header{
-			Name:    "bonghos/" + rel,
+			Name:    "bonghos/" + file.rel,
 			Mode:    int64(st.Mode().Perm()),
 			Size:    st.Size(),
 			ModTime: st.ModTime(),
@@ -641,7 +704,7 @@ func Export(home string, opts ExportOptions) (string, error) {
 			return "", err
 		}
 		f.Close()
-		manifest.Checksums[rel] = hex.EncodeToString(h.Sum(nil))
+		manifest.Checksums[file.rel] = hex.EncodeToString(h.Sum(nil))
 	}
 
 	mb, _ := json.MarshalIndent(manifest, "", "  ")
@@ -845,6 +908,18 @@ func Import(archive, targetHome string, force bool) (*Manifest, error) {
 	_ = os.RemoveAll(filepath.Join(absTarget, config.DirRuntime))
 	if err := config.InitHome(absTarget); err != nil {
 		return nil, err
+	}
+	// External storage paths belong to the source machine. Exported archives
+	// are restored under the target's portable default backup directory.
+	cfg, err := config.Load(absTarget)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.BackupDirectory != "" {
+		cfg.BackupDirectory = ""
+		if err := config.Save(absTarget, cfg); err != nil {
+			return nil, err
+		}
 	}
 	return m, nil
 }

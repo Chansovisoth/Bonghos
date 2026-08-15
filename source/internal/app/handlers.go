@@ -141,6 +141,7 @@ func (a *App) routes() http.Handler {
 
 	// --- backups ------------------------------------------------------------
 	mux.HandleFunc("GET /api/backups", a.requirePerm(authorization.PermBackupsView, a.handleBackupList))
+	mux.HandleFunc("GET /api/backups/storage", a.requirePerm(authorization.PermBackupsView, a.handleBackupStorage))
 	mux.HandleFunc("POST /api/backups", a.requirePerm(authorization.PermBackupsCreate, a.handleBackupCreate))
 	mux.HandleFunc("POST /api/backups/{id}/verify", a.requirePerm(authorization.PermBackupsCreate, a.handleBackupVerify))
 	mux.HandleFunc("POST /api/backups/{id}/restore", a.requirePerm(authorization.PermBackupsRestore, a.handleBackupRestore))

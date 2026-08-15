@@ -624,6 +624,16 @@ func (a *App) handleBackupList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, list)
 }
 
+func (a *App) handleBackupStorage(w http.ResponseWriter, r *http.Request) {
+	root := config.BackupRoot(a.Home, a.Cfg)
+	external := filepath.Clean(root) != filepath.Clean(config.DefaultBackupRoot(a.Home))
+	writeJSON(w, 200, map[string]any{
+		"path":                     root,
+		"external":                 external,
+		"included_in_bonghos_size": !external,
+	})
+}
+
 // runBackup executes the online/offline backup workflow.
 func (a *App) runBackup(ctx context.Context, inst *instance.Instance, t backup.Type, mode, trigger string, by int64) (*backup.Record, error) {
 	release, err := a.OpLock.Acquire("backup")

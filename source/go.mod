@@ -1,6 +1,6 @@
 module github.com/Chansovisoth/Bonghos
 
-go 1.26.5
+go 1.26.6
 
 replace golang.org/x/crypto => ./third_party/crypto
 

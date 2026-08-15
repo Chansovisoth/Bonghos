@@ -57,13 +57,47 @@ type Record struct {
 	CompletedAt        string `json:"completed_at,omitempty"`
 }
 
+// ErrArchiveUnavailable means the catalog remembers a backup, but its archive
+// is not currently present in the active backup-storage directory. Keeping the
+// dormant catalog row lets the backup become usable again if the file returns.
+var ErrArchiveUnavailable = errors.New("backup archive is not present in active storage")
+
 // Manager coordinates backup operations for a Bonghos home.
 type Manager struct {
-	Home string
-	DB   *sql.DB
+	Home             string
+	Root             string
+	FreeSpaceReserve int64
+	DB               *sql.DB
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
+
+func (m *Manager) storageRoot() string {
+	if strings.TrimSpace(m.Root) != "" {
+		return filepath.Clean(m.Root)
+	}
+	return filepath.Join(m.Home, config.DirBackups)
+}
+
+func logicalStoragePath(rel string) (string, error) {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(rel)))
+	prefix := config.DirBackups + "/"
+	if clean == config.DirBackups {
+		return ".", nil
+	}
+	if !strings.HasPrefix(clean, prefix) {
+		return "", errors.New("archive path outside backup storage")
+	}
+	return strings.TrimPrefix(clean, prefix), nil
+}
+
+func (m *Manager) archiveFullPath(rel string) (string, error) {
+	storageRel, err := logicalStoragePath(rel)
+	if err != nil {
+		return "", err
+	}
+	return security.SafeJoin(m.storageRoot(), storageRel)
+}
 
 // selectPaths chooses paths to include for the backup type. Include/exclude
 // patterns extend the defaults; nothing assumes an identical modpack layout.
@@ -145,6 +179,10 @@ func (m *Manager) Create(inst *instance.Instance, t Type, mode, trigger string,
 	stamp := time.Now().UTC().Format("2006-01-02_15-04-05")
 	shortType := map[Type]string{TypeFull: "full", TypeWorld: "world", TypeConfig: "config"}[t]
 	relDir := instance.BackupDirFor(inst.Slug)
+	storageRelDir, err := logicalStoragePath(relDir)
+	if err != nil {
+		return nil, err
+	}
 
 	// The timestamp only has one-second resolution, so two backups of the same
 	// type started in the same second would collide. That is not hypothetical:
@@ -153,11 +191,11 @@ func (m *Manager) Create(inst *instance.Instance, t Type, mode, trigger string,
 	// checksum. Append the backup ID whenever the name is already taken.
 	archiveName := fmt.Sprintf("%s_%s.tar.zst", stamp, shortType)
 	relPath := filepath.Join(relDir, archiveName)
-	finalPath := filepath.Join(m.Home, relPath)
+	finalPath := filepath.Join(m.storageRoot(), storageRelDir, archiveName)
 	if _, err := os.Lstat(finalPath); err == nil {
 		archiveName = fmt.Sprintf("%s_%s_%s.tar.zst", stamp, shortType, backupID)
 		relPath = filepath.Join(relDir, archiveName)
-		finalPath = filepath.Join(m.Home, relPath)
+		finalPath = filepath.Join(m.storageRoot(), storageRelDir, archiveName)
 	}
 	stagingDir := filepath.Join(m.Home, config.DirStaging, "backup-"+backupID)
 	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
@@ -212,6 +250,9 @@ func (m *Manager) Create(inst *instance.Instance, t Type, mode, trigger string,
 		}
 		return nil, err
 	}
+	if free := storageFreeSpace(m.storageRoot()); free <= 0 || free < csize+m.FreeSpaceReserve {
+		return nil, fmt.Errorf("not enough free space in backup storage: need %d bytes plus %d bytes reserved", csize, m.FreeSpaceReserve)
+	}
 	// move atomically into final storage
 	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 		return nil, err
@@ -219,9 +260,18 @@ func (m *Manager) Create(inst *instance.Instance, t Type, mode, trigger string,
 	if err := os.Rename(stagingArchive, finalPath); err != nil {
 		// cross-device fallback
 		if cerr := copyFile(stagingArchive, finalPath); cerr != nil {
+			_ = os.Remove(finalPath)
 			return nil, cerr
 		}
-		os.Remove(stagingArchive)
+		copiedSum, copiedSize, cerr := fileChecksum(finalPath)
+		if cerr != nil || copiedSum != sum || copiedSize != csize {
+			_ = os.Remove(finalPath)
+			if cerr != nil {
+				return nil, fmt.Errorf("verifying copied backup archive: %w", cerr)
+			}
+			return nil, errors.New("verifying copied backup archive: checksum or size mismatch")
+		}
+		_ = os.Remove(stagingArchive)
 	}
 	rec.CompressedSize = csize
 	rec.UncompressedSize = uncompressed
@@ -235,7 +285,7 @@ func (m *Manager) Create(inst *instance.Instance, t Type, mode, trigger string,
 
 	// sidecar metadata JSON beside the archive
 	meta, _ := json.MarshalIndent(rec, "", "  ")
-	metaDir := filepath.Join(m.Home, relDir, "metadata")
+	metaDir := filepath.Join(m.storageRoot(), storageRelDir, "metadata")
 	os.MkdirAll(metaDir, 0o755)
 	os.WriteFile(filepath.Join(metaDir, archiveName+".json"), meta, 0o644)
 	return rec, nil
@@ -375,10 +425,13 @@ func (m *Manager) Verify(backupID string) error {
 	if err != nil {
 		return err
 	}
-	full := filepath.Join(m.Home, rec.ArchivePath)
+	full, err := m.archiveFullPath(rec.ArchivePath)
+	if err != nil {
+		return err
+	}
 	sum, size, err := fileChecksum(full)
 	if err == nil && sum != rec.Checksum {
-		err = fmt.Errorf("checksum mismatch: stored %s, computed %s", rec.Checksum[:12], sum[:12])
+		err = fmt.Errorf("checksum mismatch: stored %s, computed %s", shortChecksum(rec.Checksum), shortChecksum(sum))
 	}
 	if err == nil {
 		var count int64
@@ -394,6 +447,13 @@ func (m *Manager) Verify(backupID string) error {
 	}
 	m.DB.Exec(`UPDATE backups SET verification_status=? WHERE backup_id=?`, status, backupID)
 	return err
+}
+
+func shortChecksum(sum string) string {
+	if len(sum) <= 12 {
+		return sum
+	}
+	return sum[:12]
 }
 
 // worldNames returns every directory name that could hold the world being
@@ -498,7 +558,10 @@ func (m *Manager) Restore(rec *Record, destServerDir string, scope string) (*Res
 	if err != nil {
 		return nil, err
 	}
-	full := filepath.Join(m.Home, rec.ArchivePath)
+	full, err := m.archiveFullPath(rec.ArchivePath)
+	if err != nil {
+		return nil, err
+	}
 	if err := m.Verify(rec.BackupID); err != nil {
 		return nil, fmt.Errorf("backup failed verification, refusing restore: %w", err)
 	}
@@ -706,12 +769,9 @@ func (m *Manager) Delete(backupID string) error {
 	if rec.Protected {
 		return errors.New("backup is protected")
 	}
-	full, err := security.SafeJoin(m.Home, rec.ArchivePath)
+	full, err := m.archiveFullPath(rec.ArchivePath)
 	if err != nil {
 		return err
-	}
-	if !strings.Contains(rec.ArchivePath, "backups/") {
-		return errors.New("archive path outside backup storage")
 	}
 	os.Remove(full)
 	os.Remove(filepath.Join(filepath.Dir(full), "metadata", filepath.Base(full)+".json"))
@@ -720,7 +780,39 @@ func (m *Manager) Delete(backupID string) error {
 }
 
 func (m *Manager) Get(backupID string) (*Record, error) {
-	return scanRec(m.DB.QueryRow(`SELECT `+recCols+` FROM backups WHERE backup_id=?`, backupID))
+	r, err := scanRec(m.DB.QueryRow(`SELECT `+recCols+` FROM backups WHERE backup_id=?`, backupID))
+	if err != nil {
+		return nil, err
+	}
+	available, err := m.archiveAvailable(r)
+	if err != nil {
+		return nil, err
+	}
+	if !available {
+		return nil, fmt.Errorf("%w: %s", ErrArchiveUnavailable, r.ArchivePath)
+	}
+	return r, nil
+}
+
+func (m *Manager) archiveAvailable(r *Record) (bool, error) {
+	full, err := m.archiveFullPath(r.ArchivePath)
+	if err != nil {
+		return false, err
+	}
+	st, err := os.Lstat(full)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if st.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("backup archive cannot be a symbolic link: %s", r.ArchivePath)
+	}
+	if !st.Mode().IsRegular() {
+		return false, fmt.Errorf("backup archive is not a regular file: %s", r.ArchivePath)
+	}
+	return true, nil
 }
 
 const recCols = `id, backup_id, COALESCE(instance_id,0), instance_slug, display_name,
@@ -761,6 +853,13 @@ func (m *Manager) List(instanceID int64) ([]*Record, error) {
 		r, err := scanRec(rows)
 		if err != nil {
 			return nil, err
+		}
+		available, err := m.archiveAvailable(r)
+		if err != nil {
+			return nil, err
+		}
+		if !available {
+			continue
 		}
 		out = append(out, r)
 	}

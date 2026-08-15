@@ -24,7 +24,7 @@ BONGHOS_VERSION="0.2.0-rc.1"
 
 # Some minimal environments (containers, cron) do not export USER.
 USER="${USER:-$(id -un)}"
-MIN_GO_VERSION="1.26.5" # patched toolchain selected by source/go.mod
+MIN_GO_VERSION="1.26.6" # patched toolchain selected by source/go.mod
 MIN_DISK_MB=1024
 
 # ---------------------------------------------------------------------------
@@ -869,7 +869,8 @@ mode_uninstall() {
   say ""
   say "${C_BOLD}Your data is preserved by default:${C_RESET}"
   say "  $BONGHOS_HOME/servers/   Minecraft server files"
-  say "  $BONGHOS_HOME/backups/   backups"
+  say "  $BONGHOS_HOME/backups/   backups using the default storage location"
+  say "  Configured external backup storage is also left untouched"
   say "  $BONGHOS_HOME/system/config/secret.key"
   say "  $BONGHOS_HOME/system/data/bonghos.db"
   say ""
@@ -893,10 +894,11 @@ mode_uninstall() {
   ok "Executable removed"
 
   say ""
-  say "Bonghos is uninstalled. Your servers, backups and database remain at:"
+  say "Bonghos is uninstalled. Your servers, default backups and database remain at:"
   say "  $BONGHOS_HOME"
+  say "Any configured external backup storage also remains at its separate path."
   say ""
-  say "To remove everything permanently, delete that directory yourself:"
+  say "To remove the Bonghos directory permanently, delete it yourself:"
   say "  ${C_DIM}rm -rf \"$BONGHOS_HOME\"${C_RESET}"
   warn "That also deletes system/config/secret.key. Encrypted data (including"
   warn "TOTP secrets and notification bot tokens) becomes permanently unrecoverable without it."
@@ -928,8 +930,8 @@ ${C_BOLD}Start it${C_RESET}
 EOF
   if [ "${SYSTEMD_OK:-0}" = "1" ]; then
     cat <<EOF
-  systemctl --user enable --now bonghos.service
-  systemctl --user status bonghos.service
+  $cli web enable
+  $cli web status
 
   To let Bonghos start at boot without an interactive login, enable lingering
   for your user (this needs sudo once, and Bonghos will not do it for you):

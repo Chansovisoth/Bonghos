@@ -165,7 +165,7 @@
 
    * Linux, 64-bit (x86_64 or ARM64). Ubuntu 24.04 LTS recommended.
    * A normal user account (not root).
-   * Go 1.26.5 or newer        — patched toolchain selected by go.mod
+   * Go 1.26.6 or newer        — patched toolchain selected by go.mod
    * Git                       — to clone and update
    * Java 17 or 21             — to run Minecraft (depends on the modpack)
    * tmux                      — optional, for the console session
@@ -381,7 +381,11 @@
 
  Start the control plane:
 
-     systemctl --user start bonghos.service
+     bonghos web start
+
+ To start now and automatically after reboot:
+
+     bonghos web enable
 
  or without systemd:
 
@@ -847,13 +851,11 @@
 
  Install the two systemd user services (the installer offers this):
 
-     ~/bonghos/system/bin/bonghos service install
+     ~/bonghos/system/bin/bonghos web enable
 
- Enable the control plane:
+ Confirm the control plane is running:
 
-     systemctl --user daemon-reload
-     systemctl --user enable --now bonghos.service
-     systemctl --user status bonghos.service
+     ~/bonghos/system/bin/bonghos web status
 
  IMPORTANT — lingering. By default a user's systemd manager only runs while
  that user is logged in, so Bonghos would not start after an unattended
@@ -865,6 +867,12 @@
  Verify:
 
      loginctl show-user yourusername | grep Linger
+
+ The Web-panel service has no running-time limit. It restarts five seconds
+ after either a failed exit or an unexpected clean exit. Explicitly stopping
+ it with `bonghos web stop` and shutting down the computer are still treated
+ as intentional stops; the enabled service starts again on the next boot when
+ lingering is enabled.
 
  To undo it:
 
@@ -1063,6 +1071,27 @@
        2026-08-02_04-00-00_full.tar.zst
        2026-08-02_10-00-00_world.tar.zst
 
+ To move existing backups to another disk, stop the Web panel and run:
+
+     bonghos web stop
+     bonghos backup storage move /mnt/storage/bonghos-backups
+     bonghos web start
+
+ Inspect the current location with:
+
+     bonghos backup storage show
+
+ `storage set` and `storage reset` are intentionally limited to installations
+ with no existing backups. Use `storage move` whenever archives already exist.
+ External backup storage is shown on the Backups page but is not included in
+ the Performance page's Bonghos disk-size total, which counts only files
+ physically inside BONGHOS_HOME.
+
+ Backup lists follow the files physically present in the active storage
+ directory. Moving an archive out hides it and prevents restore. Put it back
+ at the same relative path and Bonghos recognizes it again from its retained
+ recovery metadata.
+
  You can extract them by hand without Bonghos:
 
      tar --zstd -xf 2026-08-02_04-00-00_full.tar.zst
@@ -1119,8 +1148,9 @@
      /mnt/storage/bonghos/system/bin/bonghos \
        --home /mnt/storage/bonghos \
        service repair
-     systemctl --user daemon-reload
-     systemctl --user start bonghos.service
+     /mnt/storage/bonghos/system/bin/bonghos \
+       --home /mnt/storage/bonghos \
+       web start
 
  To avoid typing --home every time:
 
@@ -1146,8 +1176,7 @@
    On the new machine:
 
      ~/bonghos/system/bin/bonghos doctor --repair
-     ~/bonghos/system/bin/bonghos service install
-     systemctl --user enable --now bonghos.service
+     ~/bonghos/system/bin/bonghos web enable
 
    Because secret.key came along, all accounts and authenticator apps keep
    working. Java paths and services are re-resolved by doctor --repair.
@@ -1354,7 +1383,7 @@
 
      ~/bonghos/system/bin/bonghos version
      ~/bonghos/system/bin/bonghos doctor
-     systemctl --user status bonghos.service
+     ~/bonghos/system/bin/bonghos web status
      systemctl --user status bonghos-minecraft.service
 
  Then open the Web UI and confirm your servers, backups, schedules and users
@@ -1425,7 +1454,8 @@
 
  THE WEB UI DOES NOT LOAD
 
-     systemctl --user status bonghos.service
+     bonghos web status
+     bonghos web logs
      ~/bonghos/system/bin/bonghos doctor
      tail -50 ~/bonghos/system/logs/bonghos.log
 
@@ -1569,15 +1599,24 @@
      ./setup.sh --home DIR       custom runtime location
      ./setup.sh --help           all options
 
- EVERYDAY
+ WEB PANEL
 
      bonghos version
      bonghos serve
-     bonghos console
-     bonghos console --direct
+     bonghos web start
+     bonghos web stop
+     bonghos web restart
+     bonghos web status
+     bonghos web logs [--follow]
+     bonghos web enable
+     bonghos web disable
+
+ HEALTH AND REPAIR
+
      bonghos doctor
      bonghos doctor --repair
      bonghos doctor --fix-permissions
+     bonghos fix-permissions
 
  SERVERS
 
@@ -1588,11 +1627,13 @@
      bonghos server stop
      bonghos server restart
      bonghos server force-stop [--yes]
+     bonghos console
+     bonghos console --direct
 
  USERS
 
      bonghos setup
-     bonghos admin create
+     bonghos owner create
      bonghos user list
      bonghos user invite [admin|member|viewer]
      bonghos user disable <username>
@@ -1606,6 +1647,10 @@
      bonghos backup list
      bonghos backup verify <backup-id>
      bonghos backup restore <backup-id> [--scope full_server|world_only|configuration_only]
+     bonghos backup storage show
+     bonghos backup storage move <directory>
+     bonghos backup storage set <empty-directory>
+     bonghos backup storage reset
 
  PORTABILITY
 
@@ -1613,7 +1658,7 @@
      bonghos export --include-secrets --output <file.tar.zst>
      bonghos import [--force] <archive.tar.zst>
 
- SERVICES
+ ADVANCED SERVICES
 
      bonghos service install
      bonghos service status
