@@ -89,9 +89,13 @@ During guided setup, you will:
 Start the Web UI service:
 
 ```bash
-bonghos web enable
+bonghos
 bonghos web status
 ```
+
+Running `bonghos` without a command is the convenient form of `bonghos web
+start`. To start now and enable automatic startup after reboot, run `bonghos
+web enable` once.
 
 To let the user service start after boot without waiting for an interactive login, enable lingering once:
 
@@ -180,6 +184,7 @@ Run `bonghos help` or `./setup.sh --help` on the server for the current built-in
 
 | Command | Purpose |
 |---|---|
+| `bonghos` | Start the Web panel in the background (same as `bonghos web start`) |
 | `bonghos serve` | Run the Web UI and API in the foreground |
 | `bonghos web start` | Start the Web panel in the background |
 | `bonghos web stop` | Stop the background Web panel |

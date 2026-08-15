@@ -381,7 +381,9 @@
 
  Start the control plane:
 
-     bonghos web start
+     bonghos
+
+ This is the convenient form of `bonghos web start`.
 
  To start now and automatically after reboot:
 
@@ -1602,6 +1604,7 @@
  WEB PANEL
 
      bonghos version
+     bonghos                    start the Web panel in the background
      bonghos serve
      bonghos web start
      bonghos web stop

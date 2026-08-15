@@ -50,12 +50,7 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	args := flag.Args()
-	cmd := "serve"
-	if len(args) > 0 {
-		cmd = args[0]
-		args = args[1:]
-	}
+	cmd, args := commandAndArgs(flag.Args())
 
 	var err error
 	switch cmd {
@@ -121,7 +116,9 @@ func defaultHome() string {
 func usage() {
 	fmt.Print(`Bonghos — Minecraft Server Management Panel
 
-Usage: bonghos [--home DIR] <command>
+Usage: bonghos [--home DIR] [command]
+
+Running bonghos without a command starts the Web panel in the background.
 
 Getting started:
   setup                     Configure Bonghos and create the first Owner
@@ -130,8 +127,8 @@ Getting started:
   help                      Show this command reference
 
 Web panel:
-  serve                     Run the Web UI and API in the foreground [default]
-  web start                 Start the Web panel in the background
+  web start                 Start the Web panel in the background [default]
+  serve                     Run the Web UI and API in the foreground
   web stop                  Stop the background Web panel
   web restart               Restart the background Web panel
   web status                Show the background Web panel status
@@ -454,7 +451,7 @@ func cmdSetup(home string) error {
 		fmt.Println("Note: systemd user services are unavailable; Bonghos will run in the foreground.")
 	}
 
-	fmt.Printf("\nSetup complete. Start the panel with:\n  bonghos web start\n\nOr run it in the foreground with:\n  bonghos serve\n\nThen open http://%s:%d\n",
+	fmt.Printf("\nSetup complete. Start the panel with:\n  bonghos\n\nOr run it in the foreground with:\n  bonghos serve\n\nThen open http://%s:%d\n",
 		a.Cfg.BindAddress, a.Cfg.Port)
 	return nil
 }

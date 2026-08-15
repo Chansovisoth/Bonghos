@@ -77,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Running `bonghos` without a subcommand now starts the Web panel in the
+  background, matching `bonghos web start`. The explicit `bonghos serve`
+  command remains available for foreground and debugging use.
 - Builds now select Go 1.26.6, which includes standard-library security fixes
   required by the vulnerability scan.
 - `bonghos help` now groups the complete public command surface by purpose and
