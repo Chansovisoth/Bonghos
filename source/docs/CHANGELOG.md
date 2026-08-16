@@ -102,6 +102,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- When Minecraft stops, crashes, restarts, or leaves stale supervisor state,
+  Bonghos now closes every active player session, reports zero online players,
+  rejects stale Java PID and uptime data, and records the terminal lifecycle
+  event once. Overview player counts and faces also refresh immediately on
+  joins, leaves, reconciled lists, and shutdown.
 - The strict script CSP no longer blocks theme initialization, and an optional
   Discord REST fallback uses the legacy API hostname only after safe transport
   failures, without retrying ambiguous message POSTs that could cause

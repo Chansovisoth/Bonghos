@@ -814,6 +814,7 @@ const S = {
   perfStorage: null,
   overviewCPUTrend: "machine",
   overviewMemoryTrend: "java",
+  overviewMaxPlayers: 20,
   performanceTarget: "",
   serverTargetId: null,
   managedServerId: null,
@@ -976,9 +977,11 @@ function handleEvent(m) {
     setUptimeBaseline(data);
     updateUptimeDisplay();
     updateLiveStats(data);
+  } else if (topic === "overview" && type === "players") {
+    refreshOverviewPlayers();
   } else if (topic === "players") {
     refreshPlayerCount();
-    if (S.page === "players" || S.page === "overview") renderPage();
+    if (S.page === "players") renderPage();
   } else if (topic === "servers" && (type === "operation" || type === "installed")) {
     updateOperation(data, type);
   } else if (topic === "backups") {
@@ -1306,6 +1309,17 @@ async function refreshPlayerCount() {
   try { setOnlinePlayerCount((await api("/players")).players || []); } catch {}
 }
 
+async function refreshOverviewPlayers() {
+  if (S.page !== "overview" || !can("server.players.view")) return;
+  try {
+    const players = (await api("/players")).players || [];
+    setOnlinePlayerCount(players);
+    const onlinePlayers = players.filter((player) => player.online);
+    const card = $("#overview-player-summary");
+    if (card) card.replaceWith(playerSummaryCard(onlinePlayers, onlinePlayers.length, S.overviewMaxPlayers));
+  } catch {}
+}
+
 function pageAllowed(page) {
   const entry = PAGES.find((p) => p.id === page);
   return !!entry && (!entry.perm || can(entry.perm));
@@ -1618,6 +1632,7 @@ async function pageOverview(main) {
   const onlinePlayers = (players || []).filter((player) => player.online);
   const onlineCount = players ? onlinePlayers.length : Number(s.online_players || 0);
   const maxPlayers = Number(d.max_players || s.max_players || 20);
+  S.overviewMaxPlayers = maxPlayers;
 
   main.innerHTML = "";
   main.append(
@@ -1845,7 +1860,7 @@ function playerFaceStack(players, capacity) {
 function playerSummaryCard(players, onlineCount, maxPlayers) {
   const value = `${onlineCount} / ${maxPlayers}`;
   return el("a", {
-    class: "card metric player-summary-card", href: "#players",
+    id: "overview-player-summary", class: "card metric player-summary-card", href: "#players",
     "aria-label": `${onlineCount} of ${maxPlayers} players online. Open players.`,
     onclick: (event) => { event.preventDefault(); navigate("players", { fromOverview: true }); },
   },

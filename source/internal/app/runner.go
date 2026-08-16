@@ -56,8 +56,16 @@ func (r *Runner) State() (string, *supervisor.PersistedState) {
 	if err != nil || ps == nil {
 		return "stopped", nil
 	}
-	stale, _ := supervisor.StaleCheck(ps)
+	// Terminal snapshots intentionally have no live Minecraft PID. Preserve
+	// their classification instead of flattening a crash into a clean stop.
+	if ps.State == supervisor.StateStopped || ps.State == supervisor.StateCrashed {
+		return string(ps.State), ps
+	}
+	stale, unclean := supervisor.StaleCheck(ps)
 	if stale {
+		if unclean {
+			return "crashed", ps
+		}
 		return "stopped", ps
 	}
 	return string(ps.State), ps
@@ -184,13 +192,6 @@ func (r *Runner) spawnDetachedSupervisor() error {
 }
 
 // Stop performs a graceful stop through the supervisor.
-// noteStopped records a clean stop once the process has actually exited.
-func (r *Runner) noteStopped(reason string) {
-	if inst, err := r.app.activeInstance(); err == nil {
-		r.app.recordEvent(inst.ID, CatLifecycle, "stopped", SevInfo, reason, nil)
-	}
-}
-
 func (r *Runner) Stop(ctx context.Context) error {
 	release, err := r.acquire("stop")
 	if err != nil {
@@ -291,6 +292,8 @@ func (r *Runner) ForceStop() error {
 		r.app.recordEvent(inst.ID, CatLifecycle, "force_stopped", SevWarning,
 			"Force stopped; recent world changes may be lost", nil)
 	}
+	finalState, _ := r.State()
+	r.app.rememberServerState(finalState)
 	r.app.broadcastStatus()
 	return nil
 }
@@ -465,19 +468,19 @@ func (a *App) handleConsoleLine(line string, live bool) {
 	switch ev.Kind {
 	case "joined":
 		a.recordPlayerJoin(instID, ev.Player)
-		a.Hub.Broadcast("players", "joined", map[string]any{"username": ev.Player})
+		a.broadcastPlayerChange("joined", map[string]any{"username": ev.Player}, true)
 		if live {
 			a.notifyBotEvent(bot.EventPlayerJoined, instID, ev.Player)
 		}
 	case "left":
 		a.recordPlayerLeave(instID, ev.Player)
-		a.Hub.Broadcast("players", "left", map[string]any{"username": ev.Player})
+		a.broadcastPlayerChange("left", map[string]any{"username": ev.Player}, true)
 		if live {
 			a.notifyBotEvent(bot.EventPlayerLeft, instID, ev.Player)
 		}
 	case "list":
-		a.reconcileOnline(instID, ev.Online)
-		a.Hub.Broadcast("players", "list", map[string]any{"players": ev.Online})
+		changed := a.reconcileOnline(instID, ev.Online)
+		a.broadcastPlayerChange("list", map[string]any{"players": ev.Online}, changed)
 	case "done":
 		a.recordEvent(instID, CatLifecycle, "ready", SevInfo,
 			"Server is ready and accepting players", nil)

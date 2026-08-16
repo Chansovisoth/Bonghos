@@ -55,23 +55,26 @@ type App struct {
 	Runner     *Runner
 
 	// Startup phases already reported for the current server run.
-	phaseMu         sync.Mutex
-	seenPhases      map[string]bool
-	consoleMu       sync.Mutex
-	consoleHistory  []string
-	Collector       *monitoring.Collector
-	storageMu       sync.RWMutex
-	storageSnapshot monitoring.StorageSnapshot
-	uploadMu        sync.Mutex
-	botLifecycleMu  sync.Mutex
-	botSawOnline    bool
-	botReadySent    bool
-	botStoppedSent  bool
-	passkeyMu       sync.Mutex
-	passkeyFlows    map[string]passkeyFlow
-	accountMu       sync.Mutex
-	accountActions  map[string]accountAction
-	totpEnrollments map[string]totpEnrollment
+	phaseMu                 sync.Mutex
+	seenPhases              map[string]bool
+	consoleMu               sync.Mutex
+	consoleHistory          []string
+	Collector               *monitoring.Collector
+	storageMu               sync.RWMutex
+	storageSnapshot         monitoring.StorageSnapshot
+	uploadMu                sync.Mutex
+	botLifecycleMu          sync.Mutex
+	botSawOnline            bool
+	botReadySent            bool
+	botStoppedSent          bool
+	serverStateMu           sync.Mutex
+	lastServerState         string
+	lastServerStateInstance int64
+	passkeyMu               sync.Mutex
+	passkeyFlows            map[string]passkeyFlow
+	accountMu               sync.Mutex
+	accountActions          map[string]accountAction
+	totpEnrollments         map[string]totpEnrollment
 
 	WebFS fs.FS // embedded frontend (dist), may be nil in dev
 
@@ -183,6 +186,8 @@ func (a *App) activeInstance() (*instance.Instance, error) {
 // Serve runs the HTTP server and background loops until ctx is cancelled.
 func (a *App) Serve(ctx context.Context) error {
 	a.Operations.CleanStale()
+	state, processState := a.Runner.State()
+	a.observeServerState(state, processState)
 
 	go a.Sched.Run(ctx)
 	go a.metricsLoop(ctx)
@@ -294,6 +299,8 @@ func (a *App) metricsLoop(ctx context.Context) {
 			if !lastSampleAt.IsZero() && now.Sub(lastSampleAt)+250*time.Millisecond < effective {
 				continue
 			}
+			state, processState := a.Runner.State()
+			a.observeServerState(state, processState)
 			s := a.collectSample()
 			if lastHistoryAt.IsZero() || now.Sub(lastHistoryAt)+250*time.Millisecond >= historyInterval {
 				instID := a.activeInstanceIDQuiet()
@@ -318,8 +325,9 @@ func (a *App) collectSample() *monitoring.Sample {
 			s.CPUCores[index].TempCelsius = &temperatureCopy
 		}
 	}
-	_, ps := a.Runner.State()
-	if ps != nil && ps.JavaPID > 0 {
+	state, ps := a.Runner.State()
+	processActive := state == "starting" || state == "running" || state == "stopping"
+	if processActive && ps != nil && ps.JavaPID > 0 {
 		s.JavaPID = ps.JavaPID
 		s.CPUPercent = a.Collector.ProcessCPU(ps.JavaPID)
 		s.RSSBytes = monitoring.ProcessRSS(ps.JavaPID)
@@ -338,7 +346,9 @@ func (a *App) collectSample() *monitoring.Sample {
 	s.SystemDirBytes = storage.SystemDirBytes
 	var online int
 	if inst, err := a.activeInstance(); err == nil {
-		_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, inst.ID).Scan(&online)
+		if processActive {
+			_ = a.DB.QueryRow(`SELECT COUNT(*) FROM players WHERE instance_id=? AND is_online=1`, inst.ID).Scan(&online)
+		}
 		s.JVMXmsBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXms)
 		s.JVMXmxBytes, _ = minecraft.ParseMemoryBytes(inst.JVMXmx)
 	}
@@ -434,18 +444,44 @@ func (a *App) recordPlayerLeave(instID int64, name string) {
 		instID, name)
 }
 
-func (a *App) reconcileOnline(instID int64, online []string) {
+func (a *App) markAllPlayersOffline(instID int64) int64 {
 	if instID == 0 {
-		return
+		return 0
 	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := a.DB.Exec(`
+		UPDATE players SET
+			is_online=0,
+			last_left_at=?,
+			last_seen_at=?,
+			observed_playtime_seconds = observed_playtime_seconds + CAST(MAX(0,
+				strftime('%s', ?) - strftime('%s', COALESCE(current_session_started_at, ?))) AS INTEGER),
+			current_session_started_at=NULL
+		WHERE instance_id=? AND is_online=1`,
+		now, now, now, now, instID)
+	if err != nil {
+		a.Logf("marking players offline: %v", err)
+		return 0
+	}
+	changed, _ := result.RowsAffected()
+	return changed
+}
+
+func (a *App) reconcileOnline(instID int64, online []string) bool {
+	if instID == 0 {
+		return false
+	}
+	changed := false
 	set := map[string]bool{}
 	for _, n := range online {
 		set[n] = true
-		a.recordPlayerJoinIfNew(instID, n)
+		if a.recordPlayerJoinIfNew(instID, n) {
+			changed = true
+		}
 	}
 	rows, err := a.DB.Query(`SELECT username FROM players WHERE instance_id=? AND is_online=1`, instID)
 	if err != nil {
-		return
+		return changed
 	}
 	var toLeave []string
 	for rows.Next() {
@@ -457,16 +493,70 @@ func (a *App) reconcileOnline(instID int64, online []string) {
 	rows.Close()
 	for _, n := range toLeave {
 		a.recordPlayerLeave(instID, n)
+		changed = true
 	}
+	return changed
 }
 
-func (a *App) recordPlayerJoinIfNew(instID int64, name string) {
+func (a *App) recordPlayerJoinIfNew(instID int64, name string) bool {
 	var online int
 	err := a.DB.QueryRow(`SELECT is_online FROM players WHERE instance_id=? AND username=?`,
 		instID, name).Scan(&online)
 	if err == sql.ErrNoRows || (err == nil && online == 0) {
 		a.recordPlayerJoin(instID, name)
+		return true
 	}
+	return false
+}
+
+func (a *App) broadcastPlayerChange(typ string, data any, overview bool) {
+	a.Hub.Broadcast("players", typ, data)
+	if overview {
+		a.Hub.Broadcast("overview", "players", nil)
+	}
+}
+
+func (a *App) observeServerState(state string, ps *supervisor.PersistedState) {
+	instID := a.activeInstanceIDQuiet()
+	a.serverStateMu.Lock()
+	previous := a.lastServerState
+	previousInstance := a.lastServerStateInstance
+	a.lastServerState = state
+	a.lastServerStateInstance = instID
+	a.serverStateMu.Unlock()
+	transition := previous != state || previousInstance != instID
+	if transition && (state == "stopped" || state == "crashed" || state == "restarting") {
+		if changed := a.markAllPlayersOffline(instID); changed > 0 {
+			a.broadcastPlayerChange("list", map[string]any{"players": []string{}}, true)
+		}
+	}
+	if previous == "" || !transition || previousInstance != instID || instID == 0 {
+		return
+	}
+
+	switch state {
+	case "stopped":
+		a.recordEvent(instID, CatLifecycle, "stopped", SevInfo, "Server stopped", nil)
+	case "crashed":
+		detail := map[string]any{}
+		if ps != nil {
+			if ps.State == supervisor.StateCrashed || ps.LastExitCode != 0 {
+				detail["exit_code"] = ps.LastExitCode
+			}
+			if ps.LastSignal != "" {
+				detail["signal"] = ps.LastSignal
+			}
+		}
+		a.recordEvent(instID, CatLifecycle, "crashed", SevError, "Server stopped unexpectedly", detail)
+	}
+}
+
+func (a *App) rememberServerState(state string) {
+	instID := a.activeInstanceIDQuiet()
+	a.serverStateMu.Lock()
+	a.lastServerState = state
+	a.lastServerStateInstance = instID
+	a.serverStateMu.Unlock()
 }
 
 func (a *App) audit(userID int64, username, action, target, detail, remote string) {
@@ -479,6 +569,7 @@ func (a *App) audit(userID int64, username, action, target, detail, remote strin
 
 func (a *App) broadcastStatus() {
 	st, ps := a.Runner.State()
+	a.observeServerState(st, ps)
 	payload := map[string]any{"state": st}
 	if ps != nil {
 		payload["detail"] = ps
