@@ -24,6 +24,7 @@ type Permission string
 
 const (
 	PermServerView        Permission = "server.view"
+	PermPerformanceView   Permission = "server.performance.view"
 	PermServerStart       Permission = "server.start"
 	PermServerStop        Permission = "server.stop"
 	PermServerRestart     Permission = "server.restart"
@@ -52,7 +53,8 @@ const (
 var rolePerms = map[Role]map[Permission]bool{
 	RoleOwner: allPermissions(),
 	RoleAdmin: {
-		PermServerView: true, PermServerStart: true, PermServerStop: true,
+		PermServerView: true, PermPerformanceView: true,
+		PermServerStart: true, PermServerStop: true,
 		PermServerRestart: true, PermServerForceStop: true,
 		PermConsoleView: true, PermConsoleUse: true,
 		PermPlayersView: true, PermPlayersManage: true,
@@ -80,7 +82,7 @@ var rolePerms = map[Role]map[Permission]bool{
 func allPermissions() map[Permission]bool {
 	m := map[Permission]bool{}
 	for _, p := range []Permission{
-		PermServerView, PermServerStart, PermServerStop, PermServerRestart,
+		PermServerView, PermPerformanceView, PermServerStart, PermServerStop, PermServerRestart,
 		PermServerForceStop, PermConsoleView, PermConsoleUse, PermPlayersView,
 		PermPlayersManage, PermFilesManage, PermConfigManage, PermIconManage,
 		PermImportManage, PermBackupsView, PermBackupsCreate, PermBackupsRestore,

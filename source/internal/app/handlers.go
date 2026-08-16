@@ -113,8 +113,8 @@ func (a *App) routes() http.Handler {
 
 	// --- monitoring ---------------------------------------------------------
 	mux.HandleFunc("GET /api/metrics", a.requirePerm(authorization.PermServerView, a.handleMetrics))
-	mux.HandleFunc("GET /api/metrics/config", a.requirePerm(authorization.PermServerView, a.handleMetricsConfig))
-	mux.HandleFunc("GET /api/metrics/storage", a.requirePerm(authorization.PermServerView, a.handleMetricsStorage))
+	mux.HandleFunc("GET /api/metrics/config", a.requirePerm(authorization.PermPerformanceView, a.handleMetricsConfig))
+	mux.HandleFunc("GET /api/metrics/storage", a.requirePerm(authorization.PermPerformanceView, a.handleMetricsStorage))
 	mux.HandleFunc("GET /api/overview", a.requirePerm(authorization.PermServerView, a.handleOverview))
 
 	// --- files --------------------------------------------------------------
@@ -1011,8 +1011,10 @@ func (a *App) handleActivity(w http.ResponseWriter, r *http.Request) {
 
 func websocketTopicAllowed(role authorization.Role, topic string) bool {
 	switch topic {
-	case "overview", "performance", "servers":
+	case "overview", "servers":
 		return authorization.Has(role, authorization.PermServerView)
+	case "performance":
+		return authorization.Has(role, authorization.PermPerformanceView)
 	case "console":
 		return authorization.Has(role, authorization.PermConsoleView)
 	case "console_use":

@@ -34,7 +34,7 @@ import (
 )
 
 // Version is stamped at build time via -ldflags.
-var Version = "0.2.0-rc.1-dev"
+var Version = "0.2.0-dev"
 
 // App is the control plane.
 type App struct {

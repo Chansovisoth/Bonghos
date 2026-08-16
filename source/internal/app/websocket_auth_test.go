@@ -13,14 +13,17 @@ func TestWebsocketTopicAuthorization(t *testing.T) {
 		allowed bool
 	}{
 		{authorization.RoleViewer, "overview", true},
+		{authorization.RoleViewer, "performance", false},
 		{authorization.RoleViewer, "console", true},
 		{authorization.RoleViewer, "console_use", false},
 		{authorization.RoleViewer, "activity", false},
 		{authorization.RoleMember, "players", true},
+		{authorization.RoleMember, "performance", false},
 		{authorization.RoleMember, "backups", false},
 		{authorization.RoleAdmin, "backups", true},
 		{authorization.RoleAdmin, "schedules", true},
 		{authorization.RoleAdmin, "activity", true},
+		{authorization.RoleAdmin, "performance", true},
 		{authorization.RoleOwner, "activity", true},
 		{authorization.RoleOwner, "unknown", false},
 	}

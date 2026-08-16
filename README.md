@@ -6,7 +6,7 @@
 
 Bonghos lets you import, configure, run, monitor, schedule, back up, restore, and manage Minecraft Java Edition servers from a browser. It runs directly on your Linux machine with no Docker, cloud account, subscription, or required telemetry.
 
-> **Status: v0.2.0-rc.1** — latest release. Keep independent backups and test restores before using it with an important world.
+> **Status: v0.2.0** — current stable release. Keep independent backups and test restores before using it with an important world.
 
 For implementation details, security design, data layout, development instructions, and current limitations, see [TECHNICAL.md](TECHNICAL.md).
 
@@ -22,8 +22,9 @@ For implementation details, security design, data layout, development instructio
 - Manage players, operators, bans, and the whitelist
 - Create scheduled actions, announcements, saves, and backups
 - Make full, world-only, or configuration-only backups; verify and restore them
-- Browse and edit server files, properties, icons, and startup settings
-- Connect up to two Telegram and two Discord bots for selected server and player notifications; administrators choose up to three destinations per bot with `/bonghos here`
+- Browse and edit server files, properties, icons, and startup settings; copy or move selections safely between managed projects
+- Connect up to two Telegram and two Discord bots for selected server and player notifications; Owners and Admins choose up to three destinations per bot with `/bonghos here`
+- Reconcile player sessions, Java PID, uptime, and Overview counts immediately when Minecraft stops, crashes, or restarts
 - Invite users with Owner, Admin, Member, or Viewer access
 - Protect accounts with mandatory TOTP, recovery codes, and optional passkeys
 - Move the self-contained Bonghos runtime to another disk or Linux machine
@@ -50,7 +51,7 @@ cd ~/bonghos-source
 ### From an extracted release archive
 
 ```bash
-cd ~/Downloads/Bonghos-0.2.0-rc.1
+cd ~/Downloads/Bonghos-0.2.0
 chmod +x setup.sh
 ./setup.sh
 ```

@@ -43,7 +43,7 @@ Killing the tmux session does not stop, restart, or signal Minecraft. Minecraft 
 
 | Layer | Choice |
 |---|---|
-| Backend, CLI, and supervisor | Go 1.26.5 |
+| Backend, CLI, and supervisor | Go 1.26.6 |
 | Database | SQLite with WAL, foreign keys, and versioned migrations |
 | Frontend | Dependency-free HTML, CSS, and JavaScript embedded with Go `embed` |
 | Process management | systemd user services |
@@ -74,6 +74,11 @@ The runtime root has three top-level areas:
 `-- system/             executable, config, database, logs, runtime, and temp data
 ```
 
+`backups/` is the default archive location. An operator can configure an
+absolute backup directory outside `BONGHOS_HOME`; those archives remain
+available to Bonghos but are intentionally excluded from the Bonghos
+disk-usage total, which measures only files physically inside the runtime root.
+
 Minecraft files remain normal files. They can be edited over SSH, SFTP, or directly on disk. Bonghos watches for outside changes and does not use SQLite as a second source of truth for server files.
 
 SQLite stores Bonghos metadata such as users, projects, schedules, audit records, and operational state. Backups are normal archives that can be extracted without Bonghos, for example:
@@ -81,6 +86,15 @@ SQLite stores Bonghos metadata such as users, projects, schedules, audit records
 ```bash
 tar --zstd -xf 2026-08-02_04-00-00_full.tar.zst
 ```
+
+### Runtime state reconciliation
+
+The supervisor process and its verified Java child determine whether Minecraft
+is online. A persisted PID or phase alone is not treated as proof that the
+server is still running. When Minecraft stops, crashes, restarts, or leaves
+stale supervisor state, Bonghos closes active player sessions, clears Java PID
+and uptime from monitoring samples, records one terminal lifecycle event, and
+broadcasts refreshed server and player state to the Overview and Players pages.
 
 ### Runtime location resolution
 
@@ -147,6 +161,7 @@ There is no public registration. Setup creates the first Owner; an Owner or Admi
 | Capability | Owner | Admin | Member | Viewer |
 |---|:---:|:---:|:---:|:---:|
 | View status and players | Yes | Yes | Yes | Yes |
+| View detailed Performance page | Yes | Yes | No | No |
 | Start, stop, and restart | Yes | Yes | Yes | No |
 | View console | Yes | Yes | No | Yes |
 | Use console | Yes | Yes | No | No |
@@ -189,6 +204,10 @@ When Bonghos is placed behind a reverse proxy or tunnel, the operator is respons
 - State-changing browser requests require CSRF tokens.
 - Responses include a Content Security Policy and other security headers.
 - File access uses canonical path containment rather than string-prefix checks.
+- File browsing is jailed to `<BONGHOS_HOME>/servers`. The servers root and
+  non-project directories are browse-only; mutations require a recognized
+  managed project. Cross-project copy and move operations validate both source
+  and destination containment on the backend.
 - Archive extraction rejects traversal, absolute paths, symlink and hard-link escapes, decompression bombs, and configured size/file-count excesses.
 - Server-side URL downloads enforce SSRF protections, including address validation, redirect revalidation, HTTPS defaults, and size/disk-space limits.
 - Process launch uses argument arrays rather than concatenated shell commands.
@@ -242,6 +261,25 @@ Or prepare and verify the development environment from the repository root:
 ./setup.sh --dev
 ```
 
+### Release preparation
+
+Before creating a stable tag, update the version consistently in `setup.sh`,
+`source/cmd/bonghos/main.go`, `source/Makefile`, `source/internal/app/app.go`,
+the demo values in `source/web/src/app.js`, `README.md`, `Tutorial.txt`, and the
+validation-status heading in this file. Move the completed changelog entries
+from **Unreleased** into a dated version section and add a fresh **Unreleased**
+section.
+
+Run every development check above, then validate a clean installation and an
+in-place update on Linux. Because browser automation is not yet present, the
+stable-release pass should manually cover login and TOTP, the Web service and
+lingering status, server start/stop/crash state, player reconciliation,
+console input, file containment and cross-project operations, backup creation
+and restore, external backup storage, schedules, and both bot providers. Push
+the tested commit before creating and pushing its annotated `vX.Y.Z` tag; the
+tag-triggered release workflow builds, tests, scans, and publishes the AMD64,
+ARM64, source, and checksum assets.
+
 The frontend has no JavaScript build tool. Edit `source/web/src/`, then run `make web` before Go builds so the generated embedded assets are current.
 
 Notification bots use the host's system DNS by default. Each Telegram or
@@ -289,12 +327,12 @@ See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) before contributing.
 
 ## Validation status and limitations
 
-This section describes the v0.2.0-rc.1 release.
+This section describes the v0.2.0 release.
 
 ### Automated coverage
 
-- Unit tests cover canonical path containment, archive safety, authenticated encryption, TOTP against the RFC 6238 vector, role permissions, scheduler next-run calculation, SSRF validation, slug generation, and running-process detection.
-- API tests drive the real HTTP handler through `httptest`, including login anti-enumeration behavior, CSRF rejection, session revocation, disabled accounts, Member/Viewer restrictions, Owner protections, and restore safety/scope handling.
+- Unit tests cover canonical path containment, archive safety, authenticated encryption, TOTP against the RFC 6238 vector, role permissions, scheduler next-run calculation, SSRF validation, slug generation, running-process detection, external backup storage, notification destinations, and shutdown-state reconciliation.
+- API tests drive the real HTTP handler through `httptest`, including login anti-enumeration behavior, CSRF rejection, session revocation, disabled accounts, Member/Viewer restrictions, Owner protections, restore safety/scope handling, bot management, and cross-project file operations without access outside managed projects.
 - Linux validation launches OpenJDK to check Java-process discovery and cleanup, but uses synthetic server-pack fixtures rather than a complete modded server.
 - Generated service units are checked with `systemd-analyze verify`, including custom runtime paths containing spaces.
 - The cgo-enabled ARM64 release binary is executed under ARM64 emulation and opens its SQLite database.
@@ -302,13 +340,12 @@ This section describes the v0.2.0-rc.1 release.
 ### Remaining limitations
 
 - There are no automated browser-level tests. Web UI behavior is still verified manually.
-- Supervisor crash/restart/backoff behavior, boot autostart, unclean-shutdown recovery, tmux lifecycle, archive import, scheduled execution, and retention pruning need more real-system integration coverage.
+- Supervisor crash/restart/backoff behavior, boot autostart with live systemd user managers, unclean-shutdown recovery, tmux lifecycle, archive import, scheduled execution, and retention pruning need more real-system integration coverage.
 - A complete modded server has not yet been validated across long-running real hardware scenarios.
-- Boot and restart lifecycle behavior still needs broader testing with live systemd user managers.
 - The ARM64 build has not yet been tested on physical ARM hardware.
 - Interrupted URL downloads restart from zero; HTTP range resume is not implemented.
 
-Treat this early release as unproven for irreplaceable worlds until you have independent backups and have tested a restore yourself.
+Treat a new deployment as unproven for irreplaceable worlds until you have independent backups and have tested a restore yourself.
 
 ## Roadmap boundaries
 

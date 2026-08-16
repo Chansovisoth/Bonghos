@@ -12,7 +12,7 @@
 BINARY      := bonghos
 BIN_DIR     := bin
 OUT         := $(BIN_DIR)/$(BINARY)
-VERSION     ?= 0.2.0-rc.1
+VERSION     ?= 0.2.0
 DEV_HOME    ?= $(CURDIR)/devhome
 
 WEB_SRC     := web/src

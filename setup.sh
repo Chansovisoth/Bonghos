@@ -20,7 +20,7 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$PROJECT_ROOT/source"
 OFFICIAL_REPO="https://github.com/Chansovisoth/Bonghos"
 
-BONGHOS_VERSION="0.2.0-rc.1"
+BONGHOS_VERSION="0.2.0"
 
 # Some minimal environments (containers, cron) do not export USER.
 USER="${USER:-$(id -un)}"

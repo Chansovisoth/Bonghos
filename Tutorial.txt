@@ -3,9 +3,9 @@
 ===============================================================================
 
  Official repository: https://github.com/Chansovisoth/Bonghos
- Bonghos version:     0.2.0-rc.1
+ Bonghos version:     0.2.0
  Tutorial format:     1
- Last updated:        2026-08-03
+ Last updated:        2026-08-16
  License:             AGPL-3.0-only
 
 -------------------------------------------------------------------------------
@@ -23,7 +23,7 @@
 
  * Bonghos does NOT configure public networking. It never touches your router,
    firewall, port forwarding or tunnels. Making a server reachable from the
-   internet is entirely your responsibility. See section 13 and section 51.
+   internet is entirely your responsibility. See section 13.
 
  * The Web UI listens on 127.0.0.1 (this machine only) by default.
 
@@ -32,7 +32,7 @@
  TABLE OF CONTENTS
 ===============================================================================
 
-  1. What Bonghos is and what version 1 supports
+  1. What Bonghos is and what this release supports
   2. Source directory versus installed runtime directory
   3. System requirements
   4. Installing Git
@@ -81,11 +81,13 @@
  47. Repairing Bonghos
  48. Uninstalling Bonghos
  49. Troubleshooting
- 50. Command quick reference
+ 50. Managing files safely
+ 51. Configuring Telegram and Discord notification bots
+ 52. Command quick reference
 
 
 ===============================================================================
- 1. WHAT BONGHOS IS AND WHAT VERSION 1 SUPPORTS
+ 1. WHAT BONGHOS IS AND WHAT THIS RELEASE SUPPORTS
 ===============================================================================
 
  Bonghos is a free-forever, open-source, self-hosted web control panel for
@@ -93,7 +95,7 @@
 
  "Bonghos" comes from the Khmer word បង្ហោះ, meaning "hosting".
 
- Version 1 supports:
+ This release supports:
 
    * Linux (Ubuntu 24.04 LTS is the primary supported system)
    * Minecraft Java Edition, modded server packs
@@ -105,15 +107,17 @@
    * Java selection, RAM and JVM argument editing
    * Server and host monitoring, online and historical player lists
    * Player management (kick, ban, whitelist, operators)
+   * A jailed file manager with editing and cross-project copy or move
    * Persistent schedules that run without a browser open
    * Manual and scheduled backups, verification, retention and restore
+   * Telegram and Discord notifications for server and player events
    * Multiple user accounts with mandatory two-factor authentication
    * Owner / Admin / Member / Viewer roles
    * Portable installation you can move between directories and computers
    * Automatic startup after reboot
    * Safe, source-driven updates
 
- Version 1 deliberately does NOT include:
+ This release deliberately does NOT include:
 
    * CurseForge browsing, search, API keys or project-link resolution
    * Modrinth browsing
@@ -208,9 +212,9 @@
  If you downloaded a source ZIP or tar archive instead of using Git:
 
      cd ~/Downloads
-     unzip Bonghos-0.2.0-rc.1.zip          # GitHub source ZIP
-     # or: tar -xzf Bonghos-0.2.0-rc.1-source.tar.gz
-     cd Bonghos-0.2.0-rc.1
+     unzip Bonghos-0.2.0.zip          # GitHub source ZIP
+     # or: tar -xzf Bonghos-0.2.0-source.tar.gz
+     cd Bonghos-0.2.0
      chmod +x setup.sh
      ./setup.sh
 
@@ -559,7 +563,7 @@
  the archive size, and stops before filling the disk. An Owner can allow plain
  HTTP or configure a trusted-domain allowlist in Settings.
 
- If a download is interrupted in version 1, restart it from the beginning.
+ If a download is interrupted in this release, restart it from the beginning.
 
 
 ===============================================================================
@@ -662,6 +666,14 @@
  Bonghos edits the correct place. It never blindly injects arguments into a
  script it does not understand. Before changing a pack-owned file it makes a
  timestamped backup, writes atomically, and preserves comments and formatting.
+
+ Some modpacks regenerate a JVM argument file every time `start.sh` runs. If
+ the Configuration page says, for example, "Controlled by JAVA_ARGS in
+ variables.txt", the Minimum and Maximum inputs edit that variable in
+ `variables.txt`; Bonghos does not edit the generated file that would be
+ overwritten on the next start. A genuinely generated file with no safely
+ detected source remains read-only and the page tells you which launch setting
+ to change manually.
 
  Values are validated:
 
@@ -973,8 +985,9 @@
  files, change any settings, force stop, touch backups or schedules, manage
  users, or import anything.
 
- VIEWER — read-only. Dashboard, status, player list, performance metrics and
- read-only console logs. Changes nothing.
+ VIEWER — read-only. Dashboard, status, player list and read-only console
+ logs. Changes nothing. The detailed Performance page is limited to Owners
+ and Admins.
 
  These limits are enforced by the backend, not merely hidden in the interface.
  Nobody can grant themselves extra permissions.
@@ -1105,23 +1118,20 @@
 
  Backups -> pick a backup -> Restore.
 
- Bonghos never restores over a running server. It will stop it first.
+ Bonghos never restores over a running server. Stop the active server first;
+ the Web UI and CLI refuse the restore while Minecraft is running.
 
- The process: verify the archive and checksum, show you what is inside, stop
- the server if needed, create an EMERGENCY pre-restore backup of the current
+ The process: verify the archive and checksum, show you what is inside, require
+ explicit confirmation, create an EMERGENCY pre-restore backup of the current
  state, extract into staging, validate every path and symlink, then replace
- files atomically. The server restarts only if it was running before.
+ files atomically. The server remains stopped so you can inspect the result and
+ start it deliberately when ready.
 
  Restore scopes:
 
      full_server               everything
      world_only                just the world and player data
      configuration_only        just settings
-     restore_as_new_instance   creates a SEPARATE new project
-
- "Restore as new instance" is the safest way to inspect an old backup: it asks
- for a new display name, generates a new slug, and never overwrites the
- existing project.
 
  Only Owners and Admins can restore.
 
@@ -1195,7 +1205,7 @@
 
      ~/bonghos/system/bin/bonghos export --include-secrets --output ...
 
-   In v0.2.0-rc.1 this requires a typed confirmation but is not separately
+   In v0.2.0 this requires a typed confirmation but is not separately
    passphrase-encrypted. It produces an archive containing your accounts and
    local secret key — treat it like a password file.
 
@@ -1298,7 +1308,7 @@
 
  Download the newer source archive, extract it, then:
 
-     cd ~/Downloads/Bonghos-0.2.0
+     cd ~/Downloads/Bonghos-<new-version>
      ./setup.sh --update
 
  It finds your existing runtime and upgrades it in place.
@@ -1561,7 +1571,73 @@
 
 
 ===============================================================================
- 50. COMMAND QUICK REFERENCE
+ 50. MANAGING FILES SAFELY
+===============================================================================
+
+ Open Files to start in the active project's directory. Use `..` to move up;
+ you can browse as far as the shared `servers/` directory but never above it.
+ Bonghos labels locations outside the active project clearly. The `servers/`
+ root and folders that are not recognized projects are read-only, so Upload,
+ New file and New folder remain visible but disabled there.
+
+ Inside any managed project, Owners and Admins can upload, create, edit,
+ download, rename and delete files. The text editor does not wrap long lines by
+ default; use Wrap text when that is easier to read.
+
+ Select enters multi-file mode. On desktop you can:
+
+   * Click rows or their checkboxes one at a time.
+   * Hold the left mouse button and drag up or down across rows.
+   * Select one row, then Shift-click another to select the whole range.
+
+ The floating action bar can Copy, Move or Delete the selection. Copy and Move
+ may target another managed project, but never the shared `servers/` root or an
+ arbitrary directory outside a project. `..` is deliberately disabled while
+ selecting so a selection cannot silently change directories.
+
+ Clicking the Files navigation tab again returns to the active project.
+
+
+===============================================================================
+ 51. CONFIGURING TELEGRAM AND DISCORD NOTIFICATION BOTS
+===============================================================================
+
+ Owners and Admins manage bots in Settings. Bonghos supports up to four bots:
+ two Telegram and two Discord. Each bot can send to as many as three groups,
+ topics or channels and can notify for server starts, server stops, player
+ joins and player leaves.
+
+ To connect a bot:
+
+   1. Create the bot with Telegram's BotFather or the Discord developer portal.
+   2. In Settings, add its provider, a recognizable name and its token.
+   3. Use Invite Bot to add it to the intended Telegram group or Discord
+      server. The Telegram invite does not request administrator permission.
+   4. As an administrator of that Telegram group or Discord server, run
+      `/bonghos here` in the exact topic or channel that should receive alerts.
+   5. Return to Settings, enable the desired event toggles and send a test.
+
+ Provider commands:
+
+     /bonghos here          send notifications to this topic or channel
+     /bonghos where         show whether this destination is connected
+     /bonghos disconnect    stop notifications to this destination
+     /bonghos help          show the available commands
+
+ Bot tokens are encrypted with `secret.key` and are never returned to the
+ browser after saving. Replacing `secret.key` makes the saved tokens
+ unrecoverable.
+
+ Show more exposes an optional DNS resolver for each bot. Leave it empty to use
+ the host's normal DNS. If DNS resolution alone is broken, enter the IP address
+ of a conventional DNS server such as `1.1.1.1`; it is used only for that
+ bot's provider connections on port 53. This setting is not a VPN or proxy and
+ cannot bypass a network that blocks Discord or Telegram traffic after DNS has
+ resolved.
+
+
+===============================================================================
+ 52. COMMAND QUICK REFERENCE
 ===============================================================================
 
  INSTALL

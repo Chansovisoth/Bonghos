@@ -10,7 +10,7 @@ func TestMemberExactPermissions(t *testing.T) {
 		}
 	}
 	denied := []Permission{
-		PermServerForceStop, PermConsoleView, PermConsoleUse, PermPlayersManage,
+		PermPerformanceView, PermServerForceStop, PermConsoleView, PermConsoleUse, PermPlayersManage,
 		PermFilesManage, PermConfigManage, PermIconManage, PermImportManage,
 		PermBackupsView, PermBackupsCreate, PermBackupsRestore, PermSchedulesManage,
 		PermUsersManage, PermBotsManage, PermSecurityManage, PermHostManage, PermPortabilityManage,
@@ -26,7 +26,7 @@ func TestViewerReadOnly(t *testing.T) {
 	if !Has(RoleViewer, PermServerView) || !Has(RoleViewer, PermPlayersView) {
 		t.Error("Viewer should view status and players")
 	}
-	for _, p := range []Permission{PermServerStart, PermServerStop, PermServerRestart, PermConsoleUse,
+	for _, p := range []Permission{PermPerformanceView, PermServerStart, PermServerStop, PermServerRestart, PermConsoleUse,
 		PermFilesManage, PermBackupsCreate, PermUsersManage} {
 		if Has(RoleViewer, p) {
 			t.Errorf("Viewer must NOT have %s", p)

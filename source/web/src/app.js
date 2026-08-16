@@ -423,7 +423,7 @@ const DEMO_MODE = DEMO_PARAMS.has("demo");
 const DEMO_VIEW = (DEMO_PARAMS.get("demo") || "app").toLowerCase();
 const DEMO_DEBUG_BOTS = DEMO_MODE && DEMO_PARAMS.has("debug-bots");
 const DEMO_PERMS = [
-  "server.view", "server.start", "server.stop", "server.restart", "server.force_stop",
+  "server.view", "server.performance.view", "server.start", "server.stop", "server.restart", "server.force_stop",
   "server.console.view", "server.console.use", "server.players.view", "server.players.manage",
   "server.files.manage", "server.configuration.manage", "server.icon.manage",
   "server.import.manage", "server.backups.view", "server.backups.create",
@@ -657,13 +657,13 @@ async function demoApi(path, opts = {}) {
     case "/auth/me": return DEMO_ME;
     case `/invitations/${DEMO_INVITE_TOKEN}`: return { role: "admin" };
     case "/bots": return DEMO_BOTS.map((bot) => ({ ...bot }));
-    case "/version": return { version: "0.2.0-rc.1-demo" };
+    case "/version": return { version: "0.2.0-demo" };
     case "/servers": return { servers: DEMO_SERVERS, active_id: 1 };
     case "/server/status": return S.status;
     case "/server/console/history": return { lines: DEMO_CONSOLE.slice(-CONSOLE_LINE_LIMIT), limit: CONSOLE_LINE_LIMIT, source: "demo" };
     case "/overview": return {
       state: S.status.state,
-      version: "0.2.0-rc.1-demo",
+      version: "0.2.0-demo",
       instance: DEMO_SERVERS[0],
       motd: "A precise Bonghos local demo",
       lan_ip: "192.168.1.42",
@@ -680,7 +680,7 @@ async function demoApi(path, opts = {}) {
       mem_total: 32 * 1024 * 1024 * 1024, mem_available: 18 * 1024 * 1024 * 1024,
       disk_total: 512 * 1024 * 1024 * 1024, disk_free: 186 * 1024 * 1024 * 1024,
       load1: 0.82, systemd: true, service_bonghos: "active", service_minecraft: "running",
-      version: "0.2.0-rc.1-demo",
+      version: "0.2.0-demo",
       note: "Demo data only. Local listening does not prove public accessibility.",
     };
     case "/events": return { events: [
@@ -1249,7 +1249,7 @@ function enterApp() {
 const PAGES = [
   { section: "Operate", id: "overview", label: "Overview", icon: "home-2-linear", perm: "server.view" },
   { section: "Operate", id: "console", label: "Console", icon: "command-linear", perm: "server.console.view" },
-  { section: "Operate", id: "performance", label: "Performance", icon: "chart-2-linear", perm: "server.view" },
+  { section: "Operate", id: "performance", label: "Performance", icon: "chart-2-linear", perm: "server.performance.view" },
   { section: "Operate", id: "players", label: "Players", icon: "users-group-rounded-linear", perm: "server.players.view" },
   { section: "Manage", id: "servers", label: "Servers", icon: "server-square-linear", perm: "server.view" },
   { section: "Manage", id: "files", label: "Files", icon: "folder-with-files-linear", perm: "server.files.manage" },
@@ -1646,7 +1646,8 @@ async function pageOverview(main) {
       statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
       playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
       statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
-        diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure",
+        diskTotal > 0 ? "of " + fmtBytes(diskTotal)
+          : (can("server.performance.view") ? "Visit Performance to measure" : "measurement unavailable"),
         "overview-live-disk-free", "performance-machine-storage-card")),
 
     // Host health, previously a separate tab.
@@ -1811,6 +1812,7 @@ function updateOverviewTrendCharts(forceCardId = "") {
 }
 
 function statCard(title, value, sub, valueId = "", performanceTarget = "") {
+  if (!can("server.performance.view")) performanceTarget = "";
   const valueAttrs = { class: "metric-value" };
   if (valueId) valueAttrs.id = valueId;
   const attrs = { class: "card metric" + (performanceTarget ? " overview-performance-card" : "") };
@@ -6840,7 +6842,7 @@ async function pageSettings(main) {
           makeThemeButton("system", "System"),
           makeThemeButton("dark", "Dark"),
           makeThemeButton("light", "Light"))))),
-    can("bots.manage") ? botsSettingsSection(bots) : null,
+    ...(can("bots.manage") ? [botsSettingsSection(bots)] : []),
     el("section", { class: "settings-page-section", "aria-labelledby": "about-settings-title" },
       settingsSectionHeading("about-settings-title", "About", "Installation details and service status."),
       el("div", { class: "card" },

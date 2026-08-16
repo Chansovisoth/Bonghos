@@ -31,6 +31,8 @@ func TestMemberIsLimitedToExactlyTheAllowedActions(t *testing.T) {
 		"/api/users",
 		"/api/activity",
 		"/api/host",
+		"/api/metrics/config",
+		"/api/metrics/storage",
 	}
 	for _, path := range forbiddenGET {
 		if status, body := c.do("GET", path, nil, nil); status != 403 {
@@ -84,6 +86,7 @@ func TestViewerIsReadOnly(t *testing.T) {
 	for _, path := range []string{
 		"/api/backups", "/api/files?path=.", "/api/configuration",
 		"/api/schedules", "/api/activity", "/api/host", "/api/users",
+		"/api/metrics/config", "/api/metrics/storage",
 	} {
 		if status, body := c.do("GET", path, nil, nil); status != 403 {
 			t.Errorf("GET %s as Viewer returned %d (%s), want 403", path, status, body)

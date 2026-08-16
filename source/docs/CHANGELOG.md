@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-16
+
 ### Added
 
 - `bonghos web start|stop|restart|status|logs|enable|disable` provides ordinary
@@ -102,6 +104,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Settings no longer renders a literal `null` below Theme for accounts that
+  cannot manage notification bots. The detailed Performance page, its
+  WebSocket topic, and its configuration/storage endpoints are now limited to
+  Owners and Admins instead of appearing for Members and Viewers.
 - When Minecraft stops, crashes, restarts, or leaves stale supervisor state,
   Bonghos now closes every active player session, reports zero online players,
   rejects stale Java PID and uptime data, and records the terminal lifecycle
@@ -529,7 +535,8 @@ Docker or any container runtime; billing or subscriptions; public registration;
 browser shell access; automatic router, firewall, port-forwarding or tunnel
 configuration; required telemetry.
 
-[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.2.0-rc.1...HEAD
+[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Chansovisoth/Bonghos/compare/v0.2.0-rc.1...v0.2.0
 [0.2.0-rc.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.1...v0.2.0-rc.1
 [0.1.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Chansovisoth/Bonghos/releases/tag/v0.1.0
