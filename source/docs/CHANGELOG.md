@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Java process memory no longer compares RSS to `-Xmx` as though the heap limit
+  capped the entire JVM. The meter now shows RSS as a share of machine memory
+  and presents `-Xms` and `-Xmx` separately as configured heap limits.
 - Overview now returns and renders performance, backup, player, and schedule
   details only when the signed-in role holds the matching permission. Live
   Overview telemetry uses a separate permission-gated WebSocket topic, and

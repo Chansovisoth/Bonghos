@@ -4575,13 +4575,13 @@ async function pagePerformance(main) {
     el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-memory-title" },
       el("div", { class: "performance-section-heading" },
         performanceSectionTitle("performance-memory-title", "Memory",
-          "Host physical memory, configured Java allocation, and current resident process memory.", "server-2-linear")),
+          "Host physical memory, Java process RSS, and configured Java heap limits.", "server-2-linear")),
       el("div", { class: "performance-meter-grid" },
         performanceMeter("Machine memory", "host-memory"),
-        performanceMeter("Java memory (RSS / -Xmx)", "allocated-memory")),
+        performanceMeter("Java process memory (RSS / machine)", "allocated-memory")),
       el("div", { class: "grid cols-2 performance-domain-charts" },
         performanceChartPanel("Machine memory", "Physical memory used by the host", "performance-chart-host-memory"),
-        performanceChartPanel("Java resident memory", "Process RSS compared with configured -Xmx", "performance-chart-rss"))),
+        performanceChartPanel("Java resident memory", "RSS includes heap and native memory; -Xmx limits only the heap", "performance-chart-rss"))),
 
     el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-storage-title" },
       el("div", { class: "performance-section-heading has-action" },
@@ -4821,8 +4821,11 @@ function updatePerformanceView(sample = latestPerformanceSample()) {
 
   updatePerformanceMeter("host-memory", hostUsed, hostTotal,
     `${fmtBytes(hostUsed)} / ${fmtBytes(hostTotal)} · ${fmtBytes(hostAvail)} available`);
-  updatePerformanceMeter("allocated-memory", rss, xmx,
-    xmx > 0 ? `${fmtBytes(rss)} / ${fmtBytes(xmx)} · ${fmtBytes(xms)} min (-Xms) · ${fmtBytes(xmx)} max (-Xmx)` : "No JVM allocation detected in project configuration");
+  const heapLimits = [];
+  if (xms > 0) heapLimits.push(`${fmtBytes(xms)} min heap (-Xms)`);
+  if (xmx > 0) heapLimits.push(`${fmtBytes(xmx)} max heap (-Xmx)`);
+  updatePerformanceMeter("allocated-memory", rss, hostTotal,
+    `${fmtBytes(rss)} resident · ${heapLimits.length ? heapLimits.join(" · ") : "configured heap limits not detected"}`);
 
   renderCPUCoreGrid(sample);
   renderPerformanceCharts();
@@ -4849,7 +4852,7 @@ function renderPerformanceCharts() {
       label: "Java resident memory and configured maximum over the last hour", min: 0, axisFormat: fmtBytes,
       series: [
         { label: "Java RSS", tone: "info", area: true, value: (s) => Number(s.rss_bytes), format: fmtBytes },
-        { label: "Configured -Xmx", tone: "warning", value: (s) => Number(s.jvm_xmx_bytes) || configuredXmx, format: fmtBytes },
+        { label: "Max heap (-Xmx)", tone: "warning", value: (s) => Number(s.jvm_xmx_bytes) || configuredXmx, format: fmtBytes },
       ],
     }],
   ];
