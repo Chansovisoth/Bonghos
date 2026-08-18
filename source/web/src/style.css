@@ -130,8 +130,6 @@ a:hover { color: var(--accent-strong); }
 .login-turnstile.hidden { display: none; }
 .login-turnstile > div { max-width: 100%; }
 .login-turnstile-status { margin: 0; text-align: center; }
-.login-turnstile-status.is-ready { color: var(--success); }
-.login-turnstile-status.is-error { color: var(--danger); }
 
 label, .field-label, .otp-label { display: flex; flex-direction: column; gap: var(--space-2); color: var(--muted); font-size: 0.78rem; font-weight: 700; }
 .check-row { flex-direction: row; align-items: center; gap: var(--space-3); }
