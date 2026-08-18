@@ -288,9 +288,15 @@ function offlineWifiIcon() {
   svg.setAttribute("focusable", "false");
   svg.innerHTML = `
     <path d="M0 0h24v24H0z" fill="none"/>
-    <path class="offline-wifi-band offline-wifi-band-inner" fill="currentColor" d="M12,21L15.6,16.2C14.6,15.45 13.35,15 12,15C10.65,15 9.4,15.45 8.4,16.2L12,21"/>
-    <path class="offline-wifi-band offline-wifi-band-middle" fill="currentColor" d="M12,9C9.3,9 6.81,9.89 4.8,11.4L6.6,13.8C8.1,12.67 9.97,12 12,12C14.03,12 15.9,12.67 17.4,13.8L19.2,11.4C17.19,9.89 14.7,9 12,9Z"/>
-    <path class="offline-wifi-band offline-wifi-band-outer" fill="currentColor" d="M12,3C7.95,3 4.21,4.34 1.2,6.6L3,9C5.5,7.12 8.62,6 12,6C15.38,6 18.5,7.12 21,9L22.8,6.6C19.79,4.34 16.05,3 12,3"/>`;
+    <path fill="currentColor" d="M12,21L15.6,16.2C14.6,15.45 13.35,15 12,15C10.65,15 9.4,15.45 8.4,16.2L12,21">
+      <animate attributeName="opacity" dur="1.55s" keyTimes="0;0.16129;0.80645;0.87097;1" repeatCount="indefinite" values="0;1;1;0;0"/>
+    </path>
+    <path fill="currentColor" d="M12,9C9.3,9 6.81,9.89 4.8,11.4L6.6,13.8C8.1,12.67 9.97,12 12,12C14.03,12 15.9,12.67 17.4,13.8L19.2,11.4C17.19,9.89 14.7,9 12,9Z">
+      <animate attributeName="opacity" dur="1.55s" keyTimes="0;0.16129;0.32258;0.80645;0.87097;1" repeatCount="indefinite" values="0;0;1;1;0;0"/>
+    </path>
+    <path fill="currentColor" d="M12,3C7.95,3 4.21,4.34 1.2,6.6L3,9C5.5,7.12 8.62,6 12,6C15.38,6 18.5,7.12 21,9L22.8,6.6C19.79,4.34 16.05,3 12,3">
+      <animate attributeName="opacity" dur="1.55s" keyTimes="0;0.32258;0.48387;0.80645;0.87097;1" repeatCount="indefinite" values="0;0;1;1;0;0"/>
+    </path>`;
   return svg;
 }
 
@@ -846,6 +852,8 @@ async function demoApi(path, opts = {}) {
     case "/roles/permissions": return demoRolePermissionsPayload();
     case "/passkeys": return DEMO_PASSKEYS.map((passkey) => ({ ...passkey }));
     case "/account/recovery-codes": return DEMO_RECOVERY_CODES.map((item) => ({ ...item }));
+    case "/auth/turnstile": return { enabled: false };
+    case "/security/turnstile": return { enabled: false, site_key: "", secret_configured: false };
     default: return {};
   }
 }
@@ -918,6 +926,7 @@ const S = {
   perfInternet: null,
   perfInternetHistory: [],
   perfSpeedTest: null,
+  turnstile: { enabled: false },
   overviewCPUTrend: "machine",
   overviewMemoryTrend: "java",
   overviewMaxPlayers: 20,
@@ -1195,6 +1204,123 @@ function closeMobileSidebar() {
   return true;
 }
 
+let loginTurnstileToken = "";
+let loginTurnstileWidget = null;
+let loginTurnstileSiteKey = "";
+let turnstileScriptPromise = null;
+
+function turnstileEnabled() {
+  return !DEMO_MODE && !!S.turnstile?.enabled && !!S.turnstile?.site_key;
+}
+
+function setLoginTurnstileStatus(message, tone = "") {
+  const status = $("#login-turnstile-status");
+  if (!status) return;
+  status.textContent = message;
+  status.className = "hint login-turnstile-status" + (tone ? ` is-${tone}` : "");
+}
+
+function syncLoginTurnstileActions() {
+  const waiting = turnstileEnabled() && !loginTurnstileToken;
+  const verify = $("#login-btn");
+  if (verify) verify.disabled = waiting;
+  updatePasskeyAvailability();
+}
+
+function loadTurnstileScript() {
+  if (window.turnstile) return Promise.resolve(window.turnstile);
+  if (turnstileScriptPromise) return turnstileScriptPromise;
+  turnstileScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => window.turnstile ? resolve(window.turnstile) : reject(new Error("Turnstile did not initialize"));
+    script.onerror = () => reject(new Error("Could not load Turnstile"));
+    document.head.append(script);
+  });
+  return turnstileScriptPromise;
+}
+
+function clearLoginTurnstileWidget() {
+  if (loginTurnstileWidget !== null && window.turnstile) {
+    try { window.turnstile.remove(loginTurnstileWidget); } catch {}
+  }
+  loginTurnstileWidget = null;
+  loginTurnstileSiteKey = "";
+  loginTurnstileToken = "";
+  const container = $("#login-turnstile-widget");
+  if (container) container.innerHTML = "";
+}
+
+async function prepareLoginTurnstile() {
+  const wrap = $("#login-turnstile");
+  if (!wrap) return;
+  const enabled = turnstileEnabled();
+  wrap.classList.toggle("hidden", !enabled);
+  if (!enabled) {
+    clearLoginTurnstileWidget();
+    syncLoginTurnstileActions();
+    return;
+  }
+  loginTurnstileToken = "";
+  setLoginTurnstileStatus("Checking browser…");
+  syncLoginTurnstileActions();
+  try {
+    const turnstile = await loadTurnstileScript();
+    const siteKey = S.turnstile.site_key;
+    if (loginTurnstileWidget !== null && loginTurnstileSiteKey !== siteKey) clearLoginTurnstileWidget();
+    if (loginTurnstileWidget === null) {
+      loginTurnstileSiteKey = siteKey;
+      loginTurnstileWidget = turnstile.render("#login-turnstile-widget", {
+        sitekey: siteKey,
+        action: "login",
+        theme: "auto",
+        appearance: "interaction-only",
+        callback: (token) => {
+          loginTurnstileToken = token;
+          setLoginTurnstileStatus("Browser verified", "ready");
+          syncLoginTurnstileActions();
+        },
+        "expired-callback": () => {
+          loginTurnstileToken = "";
+          setLoginTurnstileStatus("Checking browser…");
+          syncLoginTurnstileActions();
+        },
+        "error-callback": () => {
+          loginTurnstileToken = "";
+          setLoginTurnstileStatus("Security check could not load. Refresh and try again.", "error");
+          syncLoginTurnstileActions();
+        },
+      });
+    } else {
+      turnstile.reset(loginTurnstileWidget);
+    }
+  } catch {
+    setLoginTurnstileStatus("Security check could not load. Refresh and try again.", "error");
+    syncLoginTurnstileActions();
+  }
+}
+
+function consumeLoginTurnstileToken() {
+  if (!turnstileEnabled()) return "";
+  if (!loginTurnstileToken) throw new Error("Complete the security check.");
+  const token = loginTurnstileToken;
+  loginTurnstileToken = "";
+  syncLoginTurnstileActions();
+  return token;
+}
+
+function resetLoginTurnstile() {
+  if (!turnstileEnabled()) return;
+  loginTurnstileToken = "";
+  setLoginTurnstileStatus("Checking browser…");
+  if (loginTurnstileWidget !== null && window.turnstile) {
+    try { window.turnstile.reset(loginTurnstileWidget); } catch {}
+  }
+  syncLoginTurnstileActions();
+}
+
 sidebarToggle.addEventListener("click", () =>
   setSidebarOpen(!$("#app-view").classList.contains("sidebar-open")));
 $("#sidebar-scrim").addEventListener("click", closeMobileSidebar);
@@ -1210,13 +1336,14 @@ function showLogin() {
   $("#login-view").classList.remove("hidden");
   loginStep(1);
   updatePasskeyAvailability();
+  prepareLoginTurnstile();
 }
 
 function updatePasskeyAvailability() {
   const button = $("#login-passkey");
   if (!button) return;
   const available = DEMO_MODE || passkeysSupported();
-  button.disabled = !available;
+  button.disabled = !available || (turnstileEnabled() && !loginTurnstileToken);
   button.title = available ? "Use a passkey, another device, or a security key" : "Passkeys require a supported browser over HTTPS or localhost";
 }
 
@@ -1306,8 +1433,12 @@ async function boot() {
     setTimeout(() => toast("Demo mode uses local mock data. No server changes are made.", "ok"), 200);
     return;
   }
-  const c = await api("/auth/csrf");
+  const [c, turnstile] = await Promise.all([
+    api("/auth/csrf"),
+    api("/auth/turnstile").catch(() => ({ enabled: false })),
+  ]);
   csrfToken = c.csrf;
+  S.turnstile = turnstile || { enabled: false };
   try {
     S.me = await api("/auth/me");
     enterApp();
@@ -1338,7 +1469,10 @@ $("#login-passkey").addEventListener("click", async () => {
       return;
     }
     if (!passkeysSupported()) throw new Error("Passkeys require a supported browser over HTTPS or localhost.");
-    const started = await api("/auth/passkey/begin", { method: "POST", json: {} });
+    const turnstileToken = consumeLoginTurnstileToken();
+    const started = await api("/auth/passkey/begin", {
+      method: "POST", json: { turnstile_token: turnstileToken },
+    });
     const credential = await navigator.credentials.get({
       publicKey: passkeyRequestOptions(started.options.publicKey),
     });
@@ -1353,7 +1487,8 @@ $("#login-passkey").addEventListener("click", async () => {
     errorBox.textContent = passkeyError(error, "Passkey sign-in failed.");
     errorBox.classList.remove("hidden");
   } finally {
-    button.disabled = false;
+    resetLoginTurnstile();
+    updatePasskeyAvailability();
   }
 });
 
@@ -1379,10 +1514,12 @@ $("#login-form").addEventListener("submit", async (e) => {
   const btn = $("#login-btn"); btn.disabled = true;
   $("#login-error").classList.add("hidden");
   try {
+    const turnstileToken = consumeLoginTurnstileToken();
     S.me = await api("/auth/login", { method: "POST", json: {
       username: $("#login-user").value.trim(),
       password: $("#login-pass").value,
       code: currentLoginCode(),
+      turnstile_token: turnstileToken,
     }});
     const c = await api("/auth/csrf"); csrfToken = c.csrf;
     $("#login-pass").value = ""; $("#login-code").value = ""; $("#login-recovery").value = "";
@@ -1399,7 +1536,10 @@ $("#login-form").addEventListener("submit", async (e) => {
       syncOTPCells();
       $("#login-code").focus();
     }
-  } finally { btn.disabled = false; }
+  } finally {
+    resetLoginTurnstile();
+    syncLoginTurnstileActions();
+  }
 });
 
 $("#logout-btn").addEventListener("click", async () => {
@@ -6928,11 +7068,12 @@ function passkeyCard(passkeys, hasLocalPasskey) {
 async function pageSecurity(main) {
   const canViewActivity = can("activity.view");
   const canViewHost = can("host.view");
-  const [activity, host, passkeys, recoveryCodes] = await Promise.all([
+  const [activity, host, passkeys, recoveryCodes, turnstile] = await Promise.all([
     canViewActivity ? api("/activity").catch(() => []) : Promise.resolve([]),
     canViewHost ? api("/host").catch(() => null) : Promise.resolve(null),
     api("/passkeys").catch(() => []),
     api("/account/recovery-codes").catch(() => []),
+    S.me?.role === "owner" ? api("/security/turnstile").catch(() => null) : Promise.resolve(null),
   ]);
   const hasLocalPasskey = accountHasLocalPasskey(passkeys || []);
   const securityActivity = (activity || []).filter(isSecurityActivity).slice(0, 8);
@@ -6991,6 +7132,7 @@ async function pageSecurity(main) {
     ...passkeyCard(passkeys || [], hasLocalPasskey),
     securitySectionHead("Recovery codes", "One-time fallback codes. Their plaintext is shown only when generated and cannot be viewed again."),
     recoveryCodeCard(recoveryCodes || [], hasLocalPasskey),
+    ...(turnstile ? [turnstileSettingsSection(turnstile)] : []),
     ...(canViewActivity ? [securitySectionHead("Recent security activity", "Latest sign-in and account-management events.",
       el("button", { class: "btn ghost small", onclick: () => navigate("activity") }, solarIcon("history-linear"), "View all")),
     securityActivity.length
@@ -7554,6 +7696,71 @@ function botsSettingsSection(bots) {
           ? "Add a Telegram or Discord credential pair to .env.development, then restart the development server."
           : "Add a Telegram or Discord bot to receive server alerts."),
         DEMO_DEBUG_BOTS ? null : el("button", { class: "btn", onclick: () => botEditor(null, bots) }, "Add bot")));
+}
+
+function turnstileSettingsSection(config) {
+  let enabledValue = !!config.enabled;
+  const enabled = el("button", {
+    class: "bot-power" + (enabledValue ? " is-on" : ""),
+    type: "button",
+    "aria-pressed": String(enabledValue),
+    "aria-label": `${enabledValue ? "Turn off" : "Turn on"} login protection`,
+    onclick: () => {
+      enabledValue = !enabledValue;
+      enabled.classList.toggle("is-on", enabledValue);
+      enabled.setAttribute("aria-pressed", String(enabledValue));
+      enabled.setAttribute("aria-label", `${enabledValue ? "Turn off" : "Turn on"} login protection`);
+      enabled.querySelector(".bot-power-label").textContent = enabledValue ? "On" : "Off";
+    },
+  }, el("span", { class: "bot-power-track", "aria-hidden": "true" }, el("span", {})),
+  el("span", { class: "bot-power-label" }, enabledValue ? "On" : "Off"));
+  const siteKey = el("input", {
+    value: config.site_key || "", autocomplete: "off", spellcheck: "false",
+    placeholder: "Turnstile site key",
+  });
+  const secretKey = el("input", {
+    type: "password", autocomplete: "new-password", spellcheck: "false",
+    placeholder: config.secret_configured ? "Configured — leave blank to keep" : "Turnstile secret key",
+  });
+  const status = el("p", { class: "hint turnstile-settings-status" },
+    config.secret_configured ? "Secret key configured" : "Secret key not configured");
+  const save = el("button", { class: "btn primary", type: "button" }, "Save");
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    status.textContent = "Saving…";
+    try {
+      const payload = { enabled: enabledValue, site_key: siteKey.value.trim() };
+      if (secretKey.value.trim()) payload.secret_key = secretKey.value.trim();
+      const saved = await api("/security/turnstile", { method: "PUT", json: payload });
+      secretKey.value = "";
+      secretKey.placeholder = saved.secret_configured ? "Configured — leave blank to keep" : "Turnstile secret key";
+      status.textContent = saved.enabled ? "Turnstile enabled" : "Turnstile disabled";
+      S.turnstile = saved.enabled && saved.secret_configured
+        ? { enabled: true, site_key: saved.site_key }
+        : { enabled: false };
+      clearLoginTurnstileWidget();
+      toast(saved.enabled ? "Login protection enabled" : "Login protection saved", "ok");
+    } catch (error) {
+      status.textContent = error.message;
+      toast(error.message, "err");
+    } finally {
+      save.disabled = false;
+    }
+  });
+  return el("section", {},
+    securitySectionHead("Login protection", "Block automated sign-in attempts."),
+    el("div", { class: "card" },
+      el("div", { class: "settings-row" },
+        el("div", {},
+          el("h3", {}, "Cloudflare Turnstile (CAPTCHA)"),
+          el("p", { class: "muted" }, "Managed browser checks without member emails."),
+          el("p", { class: "hint" }, "After enabling, keep this session open and test sign-in in a private window.")),
+        el("div", { class: "turnstile-settings-form" },
+          el("div", { class: "turnstile-enabled-row" },
+            el("span", {}, "Enable on all sign-ins"), enabled),
+          el("label", {}, "Site key", siteKey),
+          el("label", {}, "Secret key", secretKey),
+          el("div", { class: "turnstile-settings-actions" }, status, save)))));
 }
 
 async function pageSettings(main) {

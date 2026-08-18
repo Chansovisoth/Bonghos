@@ -55,6 +55,26 @@ func TestRequestUsesHTTPS(t *testing.T) {
 	}
 }
 
+func TestSecurityHeadersAllowOnlyTurnstileChallengeOrigin(t *testing.T) {
+	a := &App{}
+	req := httptest.NewRequest(http.MethodGet, "http://panel.example/", nil)
+	response := httptest.NewRecorder()
+	a.secureHeaders(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(response, req)
+	csp := response.Header().Get("Content-Security-Policy")
+	for _, directive := range []string{
+		"script-src 'self' https://challenges.cloudflare.com",
+		"frame-src https://challenges.cloudflare.com",
+		"frame-ancestors 'none'",
+	} {
+		if !strings.Contains(csp, directive) {
+			t.Errorf("CSP missing %q: %s", directive, csp)
+		}
+	}
+	if strings.Contains(csp, "static.cloudflareinsights.com") {
+		t.Fatalf("CSP unexpectedly permits Cloudflare analytics: %s", csp)
+	}
+}
+
 func TestReadJSONRejectsTrailingValues(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"ok":true} {"extra":true}`))
 	var dst struct {

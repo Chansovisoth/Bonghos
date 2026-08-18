@@ -243,9 +243,17 @@ When Bonghos is placed behind a reverse proxy or tunnel, the operator is respons
 - Passkeys use WebAuthn challenge-response verification.
 - Login performs dummy verification work and returns non-enumerating errors.
 - Authentication endpoints and other sensitive operations are rate limited.
+- Optional Cloudflare Turnstile protects password and passkey sign-in without
+  requiring member email addresses. The public endpoint returns only the site
+  key; the secret is AES-256-GCM encrypted in SQLite and every token is checked
+  server-side against Siteverify, the `login` action, and the request hostname.
+  Only the immutable Owner role can change this setting. The local
+  `bonghos security turnstile disable` command provides lockout recovery.
 - Sessions are server-side; cookies use HttpOnly and SameSite protections.
 - State-changing browser requests require CSRF tokens.
-- Responses include a Content Security Policy and other security headers.
+- Responses include a Content Security Policy and other security headers. The
+  CSP permits scripts and frames from `https://challenges.cloudflare.com` only
+  for the optional Turnstile integration; other external scripts remain blocked.
 - File access uses canonical path containment rather than string-prefix checks.
 - File browsing is jailed to `<BONGHOS_HOME>/servers`. The servers root and
   non-project directories are browse-only; mutations require a recognized

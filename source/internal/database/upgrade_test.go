@@ -46,6 +46,9 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	if _, err := db.Exec(`DROP TABLE role_permission_profiles`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`DROP TABLE turnstile_settings`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`ALTER TABLE notification_bots DROP COLUMN dns_server`); err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +103,8 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if version, err := Version(upgraded); err != nil || version != 17 {
-		t.Fatalf("upgraded schema version = %d, %v; want 17", version, err)
+	if version, err := Version(upgraded); err != nil || version != 18 {
+		t.Fatalf("upgraded schema version = %d, %v; want 18", version, err)
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='passkeys'`).Scan(&table); err != nil {
 		t.Fatalf("passkeys migration was not applied: %v", err)
@@ -114,6 +117,9 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='role_permissions'`).Scan(&table); err != nil {
 		t.Fatalf("role-permission snapshot migration was not applied: %v", err)
+	}
+	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='turnstile_settings'`).Scan(&table); err != nil {
+		t.Fatalf("Turnstile settings migration was not applied: %v", err)
 	}
 	var recoveryCreatedAt string
 	if err := upgraded.QueryRow(`SELECT created_at FROM recovery_codes LIMIT 1`).Scan(&recoveryCreatedAt); err != sql.ErrNoRows {

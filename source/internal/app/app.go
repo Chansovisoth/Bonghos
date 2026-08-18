@@ -30,6 +30,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/scheduler"
 	"github.com/Chansovisoth/Bonghos/internal/security"
 	"github.com/Chansovisoth/Bonghos/internal/supervisor"
+	"github.com/Chansovisoth/Bonghos/internal/turnstile"
 	"github.com/Chansovisoth/Bonghos/internal/websocket"
 )
 
@@ -49,6 +50,7 @@ type App struct {
 	OpLock     *operations.Lock
 	Backups    *backup.Manager
 	Bots       *bot.Store
+	Turnstile  *turnstile.Service
 	BotNotify  *bot.Dispatcher
 	Sched      *scheduler.Scheduler
 	Hub        *websocket.Hub
@@ -160,6 +162,7 @@ func New(home string, webFS fs.FS) (*App, error) {
 		FreeSpaceReserve: cfg.FreeSpaceReserveMB << 20,
 	}
 	a.Bots = &bot.Store{DB: db, SecretKey: key}
+	a.Turnstile = &turnstile.Service{Store: &turnstile.Store{DB: db, SecretKey: key}}
 	a.BotNotify = &bot.Dispatcher{Store: a.Bots, Sender: bot.NewSender(), Logf: a.Logf}
 	a.Hub = websocket.NewHub()
 	a.Runner = newRunner(a)

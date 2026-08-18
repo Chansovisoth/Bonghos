@@ -130,6 +130,18 @@ ssh -L 8080:127.0.0.1:8080 user@your-server
 
 Then open <http://127.0.0.1:8080> locally. Bonghos does not configure routers, firewalls, reverse proxies, or tunnels for you.
 
+For a panel intentionally published through Cloudflare Tunnel, an Owner can
+enable Cloudflare Turnstile under **Security > Login protection**. Create a
+Managed Turnstile widget for the panel hostname, then enter its public site key
+and private secret key. Member accounts do not need email addresses. Bonghos
+encrypts the secret in its database and validates every password and passkey
+sign-in with Cloudflare. Keep the current Owner session open while testing a
+private window. If a bad configuration blocks login, run:
+
+```bash
+bonghos security turnstile disable
+```
+
 For a complete walkthrough, see [Tutorial.txt](Tutorial.txt).
 
 ## Updating
@@ -222,6 +234,13 @@ Run `bonghos help` or `./setup.sh --help` on the server for the current built-in
 | `bonghos user enable <username>` | Re-enable an account |
 | `bonghos user revoke-sessions <username>` | Sign an account out everywhere |
 | `bonghos user reset-password <username>` | Set a new password and revoke existing sessions |
+
+### Security
+
+| Command | Purpose |
+|---|---|
+| `bonghos security turnstile status` | Show whether Turnstile and its credentials are configured |
+| `bonghos security turnstile disable` | Disable Turnstile locally while retaining its saved credentials |
 
 ### Backups and portability
 

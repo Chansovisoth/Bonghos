@@ -28,8 +28,9 @@ func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	// --- session / auth -----------------------------------------------------
+	mux.HandleFunc("GET /api/auth/turnstile", a.handleTurnstilePublic)
 	mux.HandleFunc("POST /api/auth/login", a.handleLogin)
-	mux.HandleFunc("POST /api/auth/passkey/begin", a.handlePasskeyLoginBegin)
+	mux.HandleFunc("POST /api/auth/passkey/begin", a.handleTurnstilePasskeyLoginBegin)
 	mux.HandleFunc("POST /api/auth/passkey/finish", a.handlePasskeyLoginFinish)
 	mux.HandleFunc("POST /api/auth/logout", a.requireAuth(a.handleLogout))
 	mux.HandleFunc("GET /api/auth/me", a.requireAuth(a.handleMe))
@@ -169,6 +170,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/events", a.requirePerm(authorization.PermServerView, a.handleEvents))
 	mux.HandleFunc("GET /api/host", a.requirePerm(authorization.PermHostView, a.handleHost))
 	mux.HandleFunc("GET /api/version", a.handleVersion)
+	mux.HandleFunc("GET /api/security/turnstile", a.requireOwner(a.handleTurnstileSettings))
+	mux.HandleFunc("PUT /api/security/turnstile", a.requireOwner(a.handleTurnstileSettingsUpdate))
 
 	// --- websocket ----------------------------------------------------------
 	mux.HandleFunc("GET /api/ws", a.handleWS)
@@ -190,12 +193,16 @@ func (a *App) handleCSRF(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-		Code     string `json:"code"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		Code           string `json:"code"`
+		TurnstileToken string `json:"turnstile_token"`
 	}
 	if err := readJSON(r, &req, 1<<16); err != nil {
 		writeErr(w, 400, errors.New("invalid request"))
+		return
+	}
+	if !a.verifyTurnstileLogin(w, r, req.TurnstileToken) {
 		return
 	}
 	u, err := a.Auth.Login(req.Username, req.Password, req.Code, remoteIP(r))

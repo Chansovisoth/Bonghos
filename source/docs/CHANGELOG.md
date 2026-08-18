@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Owners can optionally protect every password and passkey sign-in with a
+  Cloudflare Turnstile Managed challenge without requiring member email
+  addresses. Widget secrets are encrypted at rest, tokens are validated
+  server-side against hostname and action, the strict CSP allows only
+  Cloudflare's challenge origin, and a local CLI command can disable a broken
+  configuration to recover from lockout.
 - Performance now includes shared host-side TCP, DNS, and HTTPS connectivity
   checks driven by the selected Performance update interval, failure-smoothed
   offline detection, and recent reliability history. Automatic checks run only

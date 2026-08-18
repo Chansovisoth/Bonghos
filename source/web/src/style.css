@@ -126,6 +126,12 @@ a:hover { color: var(--accent-strong); }
 .auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 .login-passkey-button { width: 100%; }
 #login-step-1, #login-step-2 { display: grid; gap: var(--space-4); }
+.login-turnstile { min-width: 0; display: grid; justify-items: center; gap: var(--space-2); }
+.login-turnstile.hidden { display: none; }
+.login-turnstile > div { max-width: 100%; }
+.login-turnstile-status { margin: 0; text-align: center; }
+.login-turnstile-status.is-ready { color: var(--success); }
+.login-turnstile-status.is-error { color: var(--danger); }
 
 label, .field-label, .otp-label { display: flex; flex-direction: column; gap: var(--space-2); color: var(--muted); font-size: 0.78rem; font-weight: 700; }
 .check-row { flex-direction: row; align-items: center; gap: var(--space-3); }
@@ -553,6 +559,10 @@ body.file-selection-dragging { cursor: default; user-select: none; }
 .field-row { display: grid; gap: var(--space-2); margin-bottom: var(--space-4); }
 .settings-row { display: grid; grid-template-columns: minmax(170px, 0.35fr) minmax(0, 0.65fr); gap: var(--space-5); padding: var(--space-4) 0; border-top: 1px solid var(--border); align-items: start; }
 .settings-row:first-child { border-top: none; padding-top: 0; }
+.turnstile-settings-form { display: grid; gap: var(--space-3); }
+.turnstile-enabled-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--text); font-size: 0.78rem; font-weight: 700; }
+.turnstile-settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); }
+.turnstile-settings-status { margin: 0 auto 0 0; }
 .settings-page-section + .settings-page-section { margin-top: var(--space-7); }
 .settings-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
 .settings-section-head h2 { margin: 0 0 var(--space-1); font-family: "Projekt Blackbird", var(--font-display); font-size: 2rem; font-weight: 400; line-height: 1; text-transform: uppercase; }
@@ -758,25 +768,6 @@ body.file-selection-dragging { cursor: default; user-select: none; }
 .offline-warning-copy { min-width: 0; display: grid; gap: 2px; }
 .offline-warning-copy strong { font-size: 0.86rem; }
 .offline-warning-copy .muted { font-size: 0.78rem; line-height: 1.4; }
-.offline-wifi-band { opacity: 0; animation-duration: 1.55s; animation-timing-function: linear; animation-iteration-count: infinite; }
-.offline-wifi-band-inner { animation-name: offline-wifi-inner; }
-.offline-wifi-band-middle { animation-name: offline-wifi-middle; }
-.offline-wifi-band-outer { animation-name: offline-wifi-outer; }
-@keyframes offline-wifi-inner {
-  0% { opacity: 0; }
-  16.129%, 80.645% { opacity: 1; }
-  87.097%, 100% { opacity: 0; }
-}
-@keyframes offline-wifi-middle {
-  0%, 16.129% { opacity: 0; }
-  32.258%, 80.645% { opacity: 1; }
-  87.097%, 100% { opacity: 0; }
-}
-@keyframes offline-wifi-outer {
-  0%, 32.258% { opacity: 0; }
-  48.387%, 80.645% { opacity: 1; }
-  87.097%, 100% { opacity: 0; }
-}
 
 .graph-card {
   padding-bottom: var(--space-2);

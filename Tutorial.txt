@@ -444,6 +444,27 @@
  and change bind_address. Understand the risk first: anyone who can reach that
  address can attempt to log in. Prefer the SSH tunnel.
 
+ If you deliberately publish Bonghos through Cloudflare Tunnel for server
+ members, you can block automated sign-in attempts without requiring member
+ email addresses:
+
+   1. In Cloudflare, create a Turnstile widget in Managed mode.
+   2. Allow the hostname used by your Bonghos panel.
+   3. Sign in as Owner and open Security > Login protection.
+   4. Paste the widget site key and secret key, then enable Turnstile.
+   5. Keep that Owner session open and test sign-in in a private window.
+
+ The site key is public. The secret key remains server-side and is encrypted
+ in the Bonghos database. Do not paste a Cloudflare account API key.
+
+ If an incorrect widget configuration prevents login, run locally on the
+ Bonghos server:
+
+     bonghos security turnstile disable
+
+ This disables the challenge while retaining the saved credentials for repair.
+ Cloudflare Tunnel itself remains the operator's responsibility.
+
 
 ===============================================================================
  14. CREATING A SERVER PROJECT

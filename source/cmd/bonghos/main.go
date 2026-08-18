@@ -36,6 +36,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/runtime/tmux"
 	"github.com/Chansovisoth/Bonghos/internal/security"
 	"github.com/Chansovisoth/Bonghos/internal/supervisor"
+	"github.com/Chansovisoth/Bonghos/internal/turnstile"
 )
 
 //go:embed all:webdist
@@ -87,6 +88,8 @@ func main() {
 		err = cmdService(*home, args)
 	case "user":
 		err = cmdUser(*home, args)
+	case "security":
+		err = cmdSecurity(*home, args)
 	case "version":
 		fmt.Println("bonghos", version)
 	case "help", "-h", "--help":
@@ -154,6 +157,11 @@ Accounts:
   user enable <username>    Re-enable an account
   user revoke-sessions <u>  Sign an account out everywhere
   user reset-password <u>   Set a new password and revoke sessions
+
+Security:
+  security turnstile status Show Turnstile login-protection status
+  security turnstile disable
+                            Disable Turnstile if login is unavailable
 
 Backups:
   backup <type>             Create a backup (world|full|configuration)
@@ -1115,4 +1123,40 @@ func cmdUser(home string, args []string) error {
 		return fmt.Errorf("unknown user verb %q", args[0])
 	}
 	return nil
+}
+
+func cmdSecurity(home string, args []string) error {
+	if len(args) != 2 || args[0] != "turnstile" {
+		return errors.New("usage: bonghos security turnstile <status|disable>")
+	}
+	a, err := app.New(home, nil)
+	if err != nil {
+		return err
+	}
+	defer a.Close()
+	current, err := a.Turnstile.Store.Config()
+	if err != nil {
+		return err
+	}
+	switch args[1] {
+	case "status":
+		state := "disabled"
+		if current.Enabled {
+			state = "enabled"
+		}
+		fmt.Println("Turnstile:", state)
+		fmt.Println("Site key configured:", current.SiteKey != "")
+		fmt.Println("Secret key configured:", current.SecretConfigured)
+		return nil
+	case "disable":
+		if _, err := a.Turnstile.Store.Update(turnstile.Update{
+			Enabled: false, SiteKey: current.SiteKey,
+		}); err != nil {
+			return err
+		}
+		fmt.Println("Turnstile login protection disabled. Saved credentials were retained.")
+		return nil
+	default:
+		return fmt.Errorf("unknown Turnstile verb %q", args[1])
+	}
 }

@@ -75,7 +75,8 @@ func (a *App) secureHeaders(next http.Handler) http.Handler {
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(self), publickey-credentials-get=(self)")
 		h.Set("Content-Security-Policy",
 			"default-src 'self'; img-src 'self' data: https://minotar.net https://cdn.discordapp.com; style-src 'self' 'unsafe-inline'; "+
-				"script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'none'")
+				"script-src 'self' https://challenges.cloudflare.com; connect-src 'self' ws: wss:; "+
+				"frame-src https://challenges.cloudflare.com; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -137,6 +138,17 @@ func (a *App) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), ctxUser, u)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+func (a *App) requireOwner(next http.HandlerFunc) http.HandlerFunc {
+	return a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		u := currentUser(r)
+		if u == nil || u.Role != authorization.RoleOwner {
+			writeErr(w, http.StatusForbidden, errors.New("owner access required"))
+			return
+		}
+		next(w, r)
+	})
 }
 
 func (a *App) sessionUser(r *http.Request) (*auth.User, error) {

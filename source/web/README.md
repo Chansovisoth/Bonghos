@@ -2,7 +2,9 @@
 
 The frontend is an intentionally dependency-free vanilla JavaScript single-page
 application: no framework, no bundler, no npm install. This keeps the single
-binary reproducible offline and eliminates the entire JS supply chain.
+binary reproducible offline and keeps the default UI free of runtime frontend
+dependencies. When an Owner explicitly enables Cloudflare Turnstile, the login
+page alone loads Cloudflare's challenge script from `challenges.cloudflare.com`.
 
 Source files live in `web/src/`. "Building" the frontend is a copy:
 
