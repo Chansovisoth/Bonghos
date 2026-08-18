@@ -389,6 +389,8 @@ func (r *Runner) attachConsole() {
 					}
 				case "line":
 					r.app.handleConsoleLine(m.Line, true)
+				case "internal_line":
+					r.app.handleInternalConsoleLine(m.Line)
 				case "status":
 					r.app.broadcastStatus()
 				}
@@ -459,7 +461,16 @@ func (a *App) handleConsoleLine(line string, live bool) {
 			a.notePhase(event, msg)
 		}
 	}
+	a.handleParsedConsoleLine(line, live)
+}
 
+// handleInternalConsoleLine consumes supervisor bookkeeping output without
+// adding it to WebSocket or persisted Console history.
+func (a *App) handleInternalConsoleLine(line string) {
+	a.handleParsedConsoleLine(line, false)
+}
+
+func (a *App) handleParsedConsoleLine(line string, live bool) {
 	ev := minecraft.ParseLogLine(line)
 	if ev == nil {
 		return

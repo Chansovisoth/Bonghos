@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Performance now includes shared host-side TCP, DNS, and HTTPS connectivity
+  checks driven by the selected Performance update interval, failure-smoothed
+  offline detection, and recent reliability history. Automatic checks run only
+  while Performance is open. A separately authorized manual
+  Cloudflare speed test reports approximate download and upload Mbps only after
+  a bandwidth-impact warning is confirmed; it is serialized, audited, and
+  never runs automatically.
+- Owners can configure persisted permissions for the Admin, Member, and Viewer
+  roles from a new **Role permissions** manager on the Users page. Owner access
+  remains immutable. Admins receive role-management access only when an Owner
+  grants it, may edit Member and Viewer only, and cannot grant capabilities
+  they do not hold. The server-provided catalog defines assignment limits and
+  prerequisites; customized roles use fail-closed snapshots, revision checks
+  prevent lost updates, exact changes are audited, and affected live sessions
+  are refreshed immediately. Viewer remains structurally read-only: only view
+  permissions can be selected, while action and management permissions are
+  disabled in the editor and rejected by the API.
+- Accounts with no server or administration permission retain access to a
+  focused Account page, personal security, and appearance settings.
+
+### Fixed
+
+- Overview now returns and renders performance, backup, player, and schedule
+  details only when the signed-in role holds the matching permission. Live
+  Overview telemetry uses a separate permission-gated WebSocket topic, and
+  historical metrics require `server.performance.view` as well.
+- Role-permission drafts survive role-tab changes, unchanged saves no longer
+  create revisions or disconnect users, and delegated managers cannot apply a
+  misleading partial default profile.
+- Accounts with backup-view access no longer see verify, protect, or delete
+  controls unless they also hold backup-management access.
+- Bonghos's periodic internal `list` command and player-count reply no longer
+  appear in either the live Console stream or its persisted page history.
+  Player tracking still receives the reply, while an operator-issued `list`
+  remains visible.
+
 ## [0.2.0] - 2026-08-16
 
 ### Added

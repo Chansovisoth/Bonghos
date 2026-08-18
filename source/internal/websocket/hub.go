@@ -1,7 +1,7 @@
 // Package websocket implements the authenticated hub. Connections exist only
 // while authenticated pages are open; everything important continues without
-// them. Topics map to pages: overview, console, performance, players,
-// servers, backups, schedules.
+// them. Topics map to pages: overview, overview_performance, console,
+// performance, players, servers, backups, schedules.
 package websocket
 
 import (
@@ -48,7 +48,7 @@ type client struct {
 	topicIntervals map[string]time.Duration
 	lastTopicSent  map[string]time.Time
 	userID         int64
-	canUse         func(topic string) bool // per-role topic authorization
+	canUse         func(topic string) bool // effective role-permission authorization
 	mu             sync.Mutex
 	onInput        func(topic string, data json.RawMessage)
 }
@@ -177,7 +177,7 @@ func (h *Hub) broadcastDueAt(topic, typ string, data any, fallback time.Duration
 }
 
 // Serve upgrades an already-authenticated request. canUse gates topics by
-// the user's role (e.g. Members cannot subscribe to console).
+// the user's effective role permissions.
 func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, userID int64,
 	canUse func(topic string) bool, stillAuthorized func() bool,
 	onCommand func(command string)) {
@@ -237,7 +237,7 @@ func (c *client) readLoop(h *Hub, onCommand func(string)) {
 		case "subscribe":
 			if c.canUse == nil || c.canUse(msg.Topic) {
 				interval := time.Duration(0)
-				if (msg.Topic == "performance" || msg.Topic == "overview") && msg.IntervalSeconds > 0 {
+				if (msg.Topic == "performance" || msg.Topic == "overview_performance") && msg.IntervalSeconds > 0 {
 					seconds := msg.IntervalSeconds
 					if seconds < 1 {
 						seconds = 1

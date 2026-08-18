@@ -151,11 +151,24 @@ func (a *App) sessionUser(r *http.Request) (*auth.User, error) {
 func (a *App) requirePerm(p authorization.Permission, next http.HandlerFunc) http.HandlerFunc {
 	return a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		u := currentUser(r)
-		if u == nil || !authorization.Has(u.Role, p) {
+		if u == nil || !a.hasPermission(u.Role, p) {
 			writeErr(w, http.StatusForbidden, errors.New("permission denied"))
 			return
 		}
 		next(w, r)
+	})
+}
+
+func (a *App) requireAnyPerm(permissions []authorization.Permission, next http.HandlerFunc) http.HandlerFunc {
+	return a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		u := currentUser(r)
+		for _, permission := range permissions {
+			if u != nil && a.hasPermission(u.Role, permission) {
+				next(w, r)
+				return
+			}
+		}
+		writeErr(w, http.StatusForbidden, errors.New("permission denied"))
 	})
 }
 

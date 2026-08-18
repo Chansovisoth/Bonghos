@@ -156,12 +156,15 @@ Updates preserve `servers/`, `backups/`, `bonghos.toml`, `secret.key`, `bonghos.
 
 ## Accounts and authorization
 
-There is no public registration. Setup creates the first Owner; an Owner or Admin invites other users through single-use activation links.
+There is no public registration. Setup creates the first Owner. By default,
+Owners and Admins invite other users through single-use activation links;
+delegated `users.manage` access follows the fixed role hierarchy.
 
 | Capability | Owner | Admin | Member | Viewer |
 |---|:---:|:---:|:---:|:---:|
 | View status and players | Yes | Yes | Yes | Yes |
 | View detailed Performance page | Yes | Yes | No | No |
+| Run a manual internet speed test | Yes | Yes | No | No |
 | Start, stop, and restart | Yes | Yes | Yes | No |
 | View console | Yes | Yes | No | Yes |
 | Use console | Yes | Yes | No | No |
@@ -172,9 +175,37 @@ There is no public registration. Setup creates the first Owner; an Owner or Admi
 | Create backups, restore, and manage schedules | Yes | Yes | No | No |
 | Manage notification bots | Yes | Yes | No | No |
 | Manage users | Yes | Limited | No | No |
-| Manage host, security, and portability settings | Yes | No | No | No |
+| Manage role permissions | Yes | No | No | No |
+| View activity and host/service details | Yes | Yes | No | No |
+| Manage personal security and appearance | Yes | Yes | Yes | Yes |
 
-Admins cannot create, modify, demote, or delete Owners. Users cannot raise their own role. The final active Owner cannot be disabled, demoted, or deleted. These rules are enforced in backend authorization checks, not only hidden in the UI.
+These are defaults. The Users page includes a persisted role-permission manager
+for Admin, Member, and Viewer. Owner permissions are fixed and cannot be
+changed. An Owner may grant `roles.manage` to Admin; an authorized Admin may
+then edit Member and Viewer only and cannot grant a permission the Admin does
+not hold. Viewer is structurally read-only: its profile may contain only view
+permissions, while all operational and management permissions are disabled in
+the editor and rejected by the API. User administration follows the same
+hierarchy, so delegated managers act only on lower roles. The final active
+Owner cannot be disabled,
+demoted, or deleted. All of these rules are enforced in backend authorization
+checks, not only hidden in the UI.
+
+The backend owns the authoritative permission catalog with labels, assignment limits,
+and prerequisites. For example, using the console requires console visibility,
+and managing players requires player visibility. A customized role is stored as
+an explicit allow/deny snapshot in SQLite migration
+`0017_role_permission_profiles.sql`; newly introduced permissions therefore
+remain denied until deliberately granted. Each role profile has a revision, so
+simultaneous edits fail with HTTP `409` instead of silently overwriting another
+administrator's changes. Successful edits record exact grants and revocations
+in the audit log and disconnect affected live WebSocket sessions.
+
+Overview is permission-filtered rather than treated as a shortcut around the
+catalog. Basic `server.view` access returns project and lifecycle status;
+performance samples and history, backup metadata, player details, and schedule
+metadata require their corresponding permissions. Live Overview telemetry uses
+its own performance-authorized WebSocket topic.
 
 Every account enrolls in TOTP. Recovery codes are one-use fallback credentials, stored as hashes and shown in plaintext only when generated. Passkeys use WebAuthn and are scoped to the site origin on which they were registered.
 
@@ -189,6 +220,18 @@ ssh -L 8080:127.0.0.1:8080 user@your-server
 ```
 
 The panel can report whether Minecraft appears to be listening locally, but local listening does not prove that a game port is reachable from the public internet.
+
+While an authorized operator has the Performance page open, its selected
+update interval drives lightweight TCP connection checks against Cloudflare
+and Google plus DNS and HTTPS diagnostics. A single failed round is reported
+as degraded; Bonghos reports offline only after three consecutive rounds where
+neither target is reachable. The backend refreshes one shared snapshot only
+when it is stale, so additional dashboards reuse the result instead of
+multiplying outbound probes. Leaving Performance stops automatic Internet
+checks. The separate manual speed test uses Cloudflare's public speed-test endpoints and
+transfers up to about 53 MB across its download and upload rounds. It never
+runs automatically, requires `server.performance.test`, permits only one test
+at a time, and may briefly reduce bandwidth available to a running server.
 
 When Bonghos is placed behind a reverse proxy or tunnel, the operator is responsible for TLS, stable origin configuration, trusted proxy settings, access policy, and upload limits. WebAuthn passkeys are bound by browser standards to their relying-party ID and origin; changing the panel's hostname or IP can require registering another passkey at the new origin.
 

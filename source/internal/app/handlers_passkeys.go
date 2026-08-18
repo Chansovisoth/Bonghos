@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Chansovisoth/Bonghos/internal/auth"
-	"github.com/Chansovisoth/Bonghos/internal/authorization"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 )
@@ -349,6 +348,6 @@ func (a *App) handlePasskeyLoginFinish(w http.ResponseWriter, r *http.Request) {
 	a.audit(u.ID, u.Username, "login_passkey", rpID, "", remoteIP(r))
 	writeJSON(w, 200, map[string]any{
 		"id": u.ID, "username": u.Username, "role": u.Role,
-		"permissions": authorization.Permissions(u.Role),
+		"permissions": a.permissions(u.Role),
 	})
 }

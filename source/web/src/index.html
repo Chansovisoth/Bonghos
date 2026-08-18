@@ -86,6 +86,15 @@
     <nav id="nav"></nav>
     <div class="sidebar-foot">
       <div id="whoami" class="muted"></div>
+      <label id="demo-role-control" class="demo-role-control hidden" for="demo-role-select">
+        <span>Demo role</span>
+        <select id="demo-role-select" aria-label="Change demo user role">
+          <option value="owner">Owner</option>
+          <option value="admin">Admin</option>
+          <option value="member">Member</option>
+          <option value="viewer">Viewer</option>
+        </select>
+      </label>
       <div class="sidebar-foot-actions">
         <button id="logout-btn" class="btn ghost">Sign out</button>
         <button class="btn ghost icon-button theme-toggle" type="button" data-theme-toggle></button>

@@ -1,8 +1,11 @@
 package supervisor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSanitizeLineStripsANSIColour(t *testing.T) {
@@ -121,27 +124,34 @@ func TestHistorySurvivesOneEnormousLine(t *testing.T) {
 
 // Bonghos polls "list" every few seconds for the player count. That reply must
 // not fill the operator's console.
-func TestInternalCommandRepliesAreSuppressed(t *testing.T) {
-	s := &Supervisor{subs: map[chan string]bool{}}
-
-	if err := s.SendInternalCommand("list"); err == nil {
-		t.Log("SendCommand failed as expected without a running process")
+func TestInternalCommandEchoAndReplyAreSuppressedInEitherOrder(t *testing.T) {
+	orders := map[string][]string{
+		"echo then reply": {"list", "There are 0 of a max of 10 players online:"},
+		"reply then echo": {"There are 0 of a max of 10 players online:", "list"},
 	}
-	// Suppression is armed even though the send itself could not reach a
-	// process in this test.
-	if !s.suppressed("There are 0 of a max of 10 players online") {
-		t.Error("the list reply was not suppressed")
-	}
-	// Once the reply is seen, suppression stops, so an operator typing the
-	// same command sees their own output.
-	if s.suppressed("There are 3 of a max of 10 players online: a, b, c") {
-		t.Error("suppression persisted past the reply it was armed for")
+	for name, lines := range orders {
+		t.Run(name, func(t *testing.T) {
+			s := runningCommandTestSupervisor(t)
+			if err := s.SendInternalCommand("list"); err != nil {
+				t.Fatalf("SendInternalCommand: %v", err)
+			}
+			for _, line := range lines {
+				if !s.suppressed(line) {
+					t.Errorf("internal output was not suppressed: %q", line)
+				}
+			}
+			if s.suppressed("There are 3 of a max of 10 players online: a, b, c") {
+				t.Error("suppression persisted after both echo and reply arrived")
+			}
+		})
 	}
 }
 
 func TestOrdinaryOutputIsNeverSuppressed(t *testing.T) {
-	s := &Supervisor{subs: map[chan string]bool{}}
-	_ = s.SendInternalCommand("list")
+	s := runningCommandTestSupervisor(t)
+	if err := s.SendInternalCommand("list"); err != nil {
+		t.Fatalf("SendInternalCommand: %v", err)
+	}
 	for _, line := range []string{
 		"[12:00:00] [Server thread/INFO]: Done (18.431s)!",
 		"[12:00:01] [Server thread/WARN]: Something went wrong",
@@ -150,6 +160,129 @@ func TestOrdinaryOutputIsNeverSuppressed(t *testing.T) {
 		if s.suppressed(line) {
 			t.Errorf("ordinary output was hidden from the console: %q", line)
 		}
+	}
+}
+
+func TestOperatorListCancelsInternalSuppression(t *testing.T) {
+	s := runningCommandTestSupervisor(t)
+	if err := s.SendInternalCommand("list"); err != nil {
+		t.Fatalf("SendInternalCommand: %v", err)
+	}
+	if err := s.SendCommand("list"); err != nil {
+		t.Fatalf("SendCommand: %v", err)
+	}
+	for _, line := range []string{
+		"list",
+		"There are 2 of a max of 10 players online: Alex, Steve",
+	} {
+		if s.suppressed(line) {
+			t.Errorf("operator output was hidden: %q", line)
+		}
+	}
+}
+
+func TestInternalPollDoesNotOvertakeOperatorList(t *testing.T) {
+	s := runningCommandTestSupervisor(t)
+	if err := s.SendCommand("list"); err != nil {
+		t.Fatalf("SendCommand: %v", err)
+	}
+	if err := s.SendInternalCommand("list"); err != nil {
+		t.Fatalf("SendInternalCommand: %v", err)
+	}
+	for _, line := range []string{
+		"list",
+		"There are 2 of a max of 10 players online: Alex, Steve",
+	} {
+		if s.suppressed(line) {
+			t.Errorf("operator output was hidden by a following poll: %q", line)
+		}
+	}
+}
+
+func TestInternalOutputIsParsedButNotStoredAsConsoleHistory(t *testing.T) {
+	serverDir := t.TempDir()
+	consoleRead, consoleWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commandRead, commandWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		consoleRead.Close()
+		consoleWrite.Close()
+		commandRead.Close()
+		commandWrite.Close()
+	})
+
+	s := &Supervisor{
+		cfg:   Config{ServerDir: serverDir},
+		state: StateRunning,
+		tty:   commandWrite,
+		subs:  map[chan string]bool{},
+	}
+	parsed := make(chan string, 3)
+	s.OnLine(func(line string) { parsed <- line })
+	internalLines, cancelInternal := s.SubscribeInternal()
+	defer cancelInternal()
+	if err := s.SendInternalCommand("list"); err != nil {
+		t.Fatalf("SendInternalCommand: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.readConsole(consoleRead)
+		close(done)
+	}()
+	for _, line := range []string{
+		"[16:56:43] [Server thread/INFO]: There are 0 of a max of 10 players online:",
+		"list",
+		"[16:56:44] [Server thread/INFO]: Saved the game",
+	} {
+		if _, err := consoleWrite.WriteString(line + "\n"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	consoleWrite.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("readConsole did not finish")
+	}
+
+	for i := 0; i < 3; i++ {
+		select {
+		case <-parsed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the parser did not receive every console line")
+		}
+	}
+	for _, want := range []string{"players online", "list"} {
+		select {
+		case line := <-internalLines:
+			if !strings.Contains(line, want) {
+				t.Fatalf("internal line = %q, want it to contain %q", line, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("bookkeeping subscriber did not receive %q", want)
+		}
+	}
+	history, _, cancel := s.Subscribe()
+	cancel()
+	if len(history) != 1 || !strings.Contains(history[0], "Saved the game") {
+		t.Fatalf("console history = %q, want only the ordinary server line", history)
+	}
+	logData, err := os.ReadFile(filepath.Join(serverDir, "logs", "bonghos-console.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logText := string(logData)
+	if strings.Contains(logText, "players online") || strings.Contains(logText, "\nlist\n") {
+		t.Fatalf("internal polling leaked into the console log: %q", logText)
+	}
+	if !strings.Contains(logText, "Saved the game") {
+		t.Fatalf("ordinary server output is missing from the console log: %q", logText)
 	}
 }
 
@@ -163,5 +296,22 @@ func TestUnknownCommandsAreNotSuppressible(t *testing.T) {
 	}
 	if s.suppressed("Made attacker a server operator") {
 		t.Error("the reply to an arbitrary command was hidden")
+	}
+}
+
+func runningCommandTestSupervisor(t *testing.T) *Supervisor {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		r.Close()
+		w.Close()
+	})
+	return &Supervisor{
+		state: StateRunning,
+		tty:   w,
+		subs:  map[chan string]bool{},
 	}
 }

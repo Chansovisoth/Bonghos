@@ -13,6 +13,7 @@ func TestWebsocketTopicAuthorization(t *testing.T) {
 		allowed bool
 	}{
 		{authorization.RoleViewer, "overview", true},
+		{authorization.RoleViewer, "overview_performance", false},
 		{authorization.RoleViewer, "performance", false},
 		{authorization.RoleViewer, "console", true},
 		{authorization.RoleViewer, "console_use", false},
@@ -24,6 +25,7 @@ func TestWebsocketTopicAuthorization(t *testing.T) {
 		{authorization.RoleAdmin, "schedules", true},
 		{authorization.RoleAdmin, "activity", true},
 		{authorization.RoleAdmin, "performance", true},
+		{authorization.RoleAdmin, "overview_performance", true},
 		{authorization.RoleOwner, "activity", true},
 		{authorization.RoleOwner, "unknown", false},
 	}

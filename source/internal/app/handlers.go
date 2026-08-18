@@ -52,12 +52,14 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/account/recovery-codes/regenerate", a.requireAuth(a.handleRecoveryCodeRegenerate))
 
 	// --- users --------------------------------------------------------------
-	mux.HandleFunc("GET /api/users", a.requirePerm(authorization.PermUsersManage, a.handleUserList))
+	mux.HandleFunc("GET /api/users", a.requireAnyPerm([]authorization.Permission{authorization.PermUsersManage, authorization.PermRolesManage}, a.handleUserList))
 	mux.HandleFunc("POST /api/users/invite", a.requirePerm(authorization.PermUsersManage, a.handleUserInvite))
 	mux.HandleFunc("POST /api/users/{id}/role", a.requirePerm(authorization.PermUsersManage, a.handleUserRole))
 	mux.HandleFunc("POST /api/users/{id}/disable", a.requirePerm(authorization.PermUsersManage, a.handleUserDisable))
 	mux.HandleFunc("POST /api/users/{id}/revoke-sessions", a.requirePerm(authorization.PermUsersManage, a.handleUserRevoke))
 	mux.HandleFunc("DELETE /api/users/{id}", a.requirePerm(authorization.PermUsersManage, a.handleUserDelete))
+	mux.HandleFunc("GET /api/roles/permissions", a.requirePerm(authorization.PermRolesManage, a.handleRolePermissions))
+	mux.HandleFunc("PUT /api/roles/{role}/permissions", a.requirePerm(authorization.PermRolesManage, a.handleRolePermissionsUpdate))
 
 	// --- notification bots -------------------------------------------------
 	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermBotsManage, a.handleBotList))
@@ -112,9 +114,12 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/players/action", a.requirePerm(authorization.PermPlayersManage, a.handlePlayerAction))
 
 	// --- monitoring ---------------------------------------------------------
-	mux.HandleFunc("GET /api/metrics", a.requirePerm(authorization.PermServerView, a.handleMetrics))
+	mux.HandleFunc("GET /api/metrics", a.requirePerm(authorization.PermPerformanceView, a.handleMetrics))
 	mux.HandleFunc("GET /api/metrics/config", a.requirePerm(authorization.PermPerformanceView, a.handleMetricsConfig))
 	mux.HandleFunc("GET /api/metrics/storage", a.requirePerm(authorization.PermPerformanceView, a.handleMetricsStorage))
+	mux.HandleFunc("GET /api/metrics/internet", a.requirePerm(authorization.PermPerformanceView, a.handleMetricsInternet))
+	mux.HandleFunc("POST /api/metrics/internet/refresh", a.requirePerm(authorization.PermPerformanceView, a.handleRefreshMetricsInternet))
+	mux.HandleFunc("POST /api/metrics/internet/speed-test", a.requirePerm(authorization.PermPerformanceTest, a.handleInternetSpeedTest))
 	mux.HandleFunc("GET /api/overview", a.requirePerm(authorization.PermServerView, a.handleOverview))
 
 	// --- files --------------------------------------------------------------
@@ -157,12 +162,12 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/schedules/{id}/history", a.requirePerm(authorization.PermSchedulesManage, a.handleScheduleHistory))
 
 	// --- activity / host ----------------------------------------------------
-	mux.HandleFunc("GET /api/activity", a.requirePerm(authorization.PermConfigManage, a.handleActivity))
+	mux.HandleFunc("GET /api/activity", a.requirePerm(authorization.PermActivityView, a.handleActivity))
 	// The server's own timeline. Unlike the audit trail this is what the
 	// server did rather than what a person did, so anyone who can see the
 	// dashboard can see it.
 	mux.HandleFunc("GET /api/events", a.requirePerm(authorization.PermServerView, a.handleEvents))
-	mux.HandleFunc("GET /api/host", a.requirePerm(authorization.PermConfigManage, a.handleHost))
+	mux.HandleFunc("GET /api/host", a.requirePerm(authorization.PermHostView, a.handleHost))
 	mux.HandleFunc("GET /api/version", a.handleVersion)
 
 	// --- websocket ----------------------------------------------------------
@@ -212,7 +217,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	a.audit(u.ID, u.Username, "login_success", "", "", remoteIP(r))
 	writeJSON(w, 200, map[string]any{
 		"id": u.ID, "username": u.Username, "role": u.Role,
-		"permissions": authorization.Permissions(u.Role),
+		"permissions": a.permissions(u.Role),
 	})
 }
 
@@ -232,7 +237,7 @@ func (a *App) handleMe(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	writeJSON(w, 200, map[string]any{
 		"id": u.ID, "username": u.Username, "role": u.Role,
-		"permissions": authorization.Permissions(u.Role),
+		"permissions": a.permissions(u.Role),
 	})
 }
 
@@ -322,8 +327,8 @@ func (a *App) handleUserInvite(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errors.New("role must be Admin, Member or Viewer"))
 		return
 	}
-	if role == authorization.RoleAdmin && u.Role != authorization.RoleOwner {
-		writeErr(w, 403, errors.New("only an Owner can invite an Admin"))
+	if !authorization.CanInviteRole(u.Role, role) {
+		writeErr(w, 403, errors.New("cannot invite a user at that role"))
 		return
 	}
 	inv, err := a.Auth.CreateInvitation(u.ID, role, 72*time.Hour)
@@ -815,6 +820,7 @@ func (a *App) handleCommand(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
 	st, ps := a.Runner.State()
 	out := map[string]any{"state": st, "version": Version}
 	if ip := localLANIPv4(a.Cfg.BindAddress); ip != "" {
@@ -832,14 +838,23 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 			out["max_players"] = props["max-players"]
 		}
 	}
-	out["sample"] = a.collectSample()
+	if a.hasPermission(u.Role, authorization.PermPerformanceView) {
+		out["sample"] = a.collectSample()
+	}
 
 	// last backup
 	if inst, err := a.activeInstance(); err == nil {
-		if list, err := a.Backups.List(inst.ID); err == nil && len(list) > 0 {
-			out["last_backup"] = list[0]
+		if a.hasPermission(u.Role, authorization.PermBackupsView) {
+			if list, err := a.Backups.List(inst.ID); err == nil && len(list) > 0 {
+				out["last_backup"] = list[0]
+			}
 		}
-		if scheds, err := a.Sched.List(inst.ID); err == nil {
+		if a.hasPermission(u.Role, authorization.PermSchedulesManage) {
+			scheds, err := a.Sched.List(inst.ID)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, err)
+				return
+			}
 			var next *time.Time
 			for _, s := range scheds {
 				if !s.Enabled || s.NextRunAt == "" {
@@ -1010,26 +1025,38 @@ func (a *App) handleActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func websocketTopicAllowed(role authorization.Role, topic string) bool {
+	permission, ok := websocketTopicPermission(topic)
+	return ok && authorization.Has(role, permission)
+}
+
+func websocketTopicPermission(topic string) (authorization.Permission, bool) {
 	switch topic {
 	case "overview", "servers":
-		return authorization.Has(role, authorization.PermServerView)
+		return authorization.PermServerView, true
+	case "overview_performance":
+		return authorization.PermPerformanceView, true
 	case "performance":
-		return authorization.Has(role, authorization.PermPerformanceView)
+		return authorization.PermPerformanceView, true
 	case "console":
-		return authorization.Has(role, authorization.PermConsoleView)
+		return authorization.PermConsoleView, true
 	case "console_use":
-		return authorization.Has(role, authorization.PermConsoleUse)
+		return authorization.PermConsoleUse, true
 	case "players":
-		return authorization.Has(role, authorization.PermPlayersView)
+		return authorization.PermPlayersView, true
 	case "backups":
-		return authorization.Has(role, authorization.PermBackupsView)
+		return authorization.PermBackupsView, true
 	case "schedules":
-		return authorization.Has(role, authorization.PermSchedulesManage)
+		return authorization.PermSchedulesManage, true
 	case "activity":
-		return authorization.Has(role, authorization.PermConfigManage)
+		return authorization.PermActivityView, true
 	default:
-		return false
+		return "", false
 	}
+}
+
+func (a *App) websocketTopicAllowed(role authorization.Role, topic string) bool {
+	permission, ok := websocketTopicPermission(topic)
+	return ok && a.hasPermission(role, permission)
 }
 
 // handleWS upgrades the authenticated websocket.
@@ -1039,17 +1066,26 @@ func (a *App) handleWS(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, errors.New("authentication required"))
 		return
 	}
-	canUse := func(topic string) bool { return websocketTopicAllowed(u.Role, topic) }
+	permissionRevision, err := a.rolePermissionRevision(u.Role)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	canUse := func(topic string) bool { return a.websocketTopicAllowed(u.Role, topic) }
 	cookie, _ := r.Cookie(sessionCookie)
 	stillAuthorized := func() bool {
 		if cookie == nil || cookie.Value == "" {
 			return false
 		}
 		current, err := a.Auth.ValidateSession(cookie.Value)
-		return err == nil && current.ID == u.ID && current.Role == u.Role
+		if err != nil || current.ID != u.ID || current.Role != u.Role {
+			return false
+		}
+		currentRevision, err := a.rolePermissionRevision(current.Role)
+		return err == nil && currentRevision == permissionRevision
 	}
 	onCommand := func(cmd string) {
-		if !authorization.Has(u.Role, authorization.PermConsoleUse) {
+		if !a.hasPermission(u.Role, authorization.PermConsoleUse) {
 			return
 		}
 		cmd = strings.TrimSpace(cmd)

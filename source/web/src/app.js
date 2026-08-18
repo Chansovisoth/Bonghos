@@ -35,6 +35,9 @@ const INLINE_SOLAR_ICONS = {
   "storage-refresh": {
     body: '<path d="M0 0h24v24H0z" fill="none"/><path fill="currentColor" d="M12.077 19q-2.931 0-4.966-2.033q-2.034-2.034-2.034-4.964t2.034-4.966T12.077 5q1.783 0 3.339.847q1.555.847 2.507 2.365V5h1v5.23h-5.23v-1h3.7q-.782-1.495-2.198-2.363T12.077 6q-2.5 0-4.25 1.75T6.077 12t1.75 4.25t4.25 1.75q1.925 0 3.475-1.1t2.175-2.9h1.062q-.662 2.246-2.514 3.623T12.077 19"/>',
   },
+  "global-linear": {
+    body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.25 2.46 3.4 5.46 3.4 9S14.25 18.54 12 21M12 3C9.75 5.46 8.6 8.46 8.6 12s1.15 6.54 3.4 9"/></g>',
+  },
   "wrap-text": {
     body: '<g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M4 7h16M4 17h5m-5-5h13.5a2.5 2.5 0 0 1 2.5 2.5v0a2.5 2.5 0 0 1-2.5 2.5h-5"/><path d="M15 15.5L12.5 17l2.5 1.5z"/></g>',
   },
@@ -333,14 +336,14 @@ function closeActiveModal() {
   return true;
 }
 
-function modal(title, bodyNodes, actions, onClose = null) {
+function modal(title, bodyNodes, actions, onClose = null, modalClass = "") {
   const host = $("#modal-host");
   modalRestoreFocus = document.activeElement;
   modalOnClose = onClose;
   host.innerHTML = "";
   const close = closeActiveModal;
   const m = el("div", { class: "overlay", onclick: (e) => { if (e.target === m) close(); } },
-    el("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": title },
+    el("div", { class: `modal${modalClass ? " " + modalClass : ""}`, role: "dialog", "aria-modal": "true", "aria-label": title },
       el("h2", {}, title),
       ...bodyNodes,
       el("div", { class: "actions" },
@@ -422,15 +425,55 @@ const DEMO_PARAMS = new URLSearchParams(location.search);
 const DEMO_MODE = DEMO_PARAMS.has("demo");
 const DEMO_VIEW = (DEMO_PARAMS.get("demo") || "app").toLowerCase();
 const DEMO_DEBUG_BOTS = DEMO_MODE && DEMO_PARAMS.has("debug-bots");
-const DEMO_PERMS = [
-  "server.view", "server.performance.view", "server.start", "server.stop", "server.restart", "server.force_stop",
-  "server.console.view", "server.console.use", "server.players.view", "server.players.manage",
-  "server.files.manage", "server.configuration.manage", "server.icon.manage",
-  "server.import.manage", "server.backups.view", "server.backups.create",
-  "server.backups.restore", "server.schedules.manage", "users.manage",
-  "bots.manage", "security.manage", "host.manage", "portability.manage",
-];
-const DEMO_ME = { id: 1, username: "demo-owner", role: "owner", permissions: DEMO_PERMS };
+const DEMO_ROLES = ["owner", "admin", "member", "viewer"];
+const requestedDemoRole = (DEMO_PARAMS.get("demo-role") || "owner").toLowerCase();
+const DEMO_INITIAL_ROLE = DEMO_ROLES.includes(requestedDemoRole) ? requestedDemoRole : "owner";
+const DEMO_VIEW_ASSIGNABLE_ROLES = ["admin", "member", "viewer"];
+const DEMO_ACTION_ASSIGNABLE_ROLES = ["admin", "member"];
+const DEMO_PERMISSION_CATALOG = [
+  ["server.view", "Access", "View server", "See Overview, Servers, and live status.", [], DEMO_VIEW_ASSIGNABLE_ROLES],
+  ["server.performance.view", "Access", "View performance", "Open machine and Java performance telemetry.", ["server.view"], DEMO_VIEW_ASSIGNABLE_ROLES],
+  ["server.performance.test", "Access", "Test internet speed", "Run a manual bandwidth test that can temporarily affect connected players.", ["server.performance.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.start", "Lifecycle", "Start server", "Start the active Minecraft server.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.stop", "Lifecycle", "Stop server", "Request a clean server shutdown.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.restart", "Lifecycle", "Restart server", "Stop and start the active server.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.force_stop", "Lifecycle", "Force stop server", "Immediately terminate a stuck server process.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.console.view", "Console and players", "View console", "Read server console output.", ["server.view"], DEMO_VIEW_ASSIGNABLE_ROLES],
+  ["server.console.use", "Console and players", "Use console", "Send unrestricted Minecraft server commands.", ["server.console.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.players.view", "Console and players", "View players", "See online and known players.", ["server.view"], DEMO_VIEW_ASSIGNABLE_ROLES],
+  ["server.players.manage", "Console and players", "Manage players", "Kick, ban, whitelist, or grant operator access to players.", ["server.players.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.files.manage", "Server files and configuration", "Manage files", "Read, upload, edit, move, and delete project files.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.configuration.manage", "Server files and configuration", "Manage configuration", "Change launch settings and server properties.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.icon.manage", "Server files and configuration", "Manage server icons", "Upload or remove project icons.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.import.manage", "Server files and configuration", "Manage projects", "Import, duplicate, reset, or delete server projects.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.backups.view", "Backups and automation", "View backups", "See backups and their storage location.", ["server.view"], DEMO_VIEW_ASSIGNABLE_ROLES],
+  ["server.backups.create", "Backups and automation", "Manage backups", "Create, verify, protect, and delete backups.", ["server.backups.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.backups.restore", "Backups and automation", "Restore backups", "Replace server data from a backup.", ["server.backups.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["server.schedules.manage", "Backups and automation", "Manage schedules", "Create and run lifecycle, console, and backup automation.", ["server.view", "server.start", "server.stop", "server.restart", "server.console.use", "server.backups.create"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["activity.view", "People and integrations", "View activity", "Review account and server administration history.", [], DEMO_VIEW_ASSIGNABLE_ROLES],
+  ["users.manage", "People and integrations", "Manage users", "Invite users and manage lower-role accounts and sessions.", [], ["admin", "member"]],
+  ["roles.manage", "People and integrations", "Manage role permissions", "Configure permissions for lower roles.", [], ["admin"]],
+  ["bots.manage", "People and integrations", "Manage notification bots", "Configure Discord and Telegram bots.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
+  ["host.view", "System", "View host", "See Bonghos installation, listener, and service details.", [], DEMO_VIEW_ASSIGNABLE_ROLES],
+].map(([id, group, label, description, requires, assignable_roles]) => ({ id, group, label, description, requires, assignable_roles }));
+const DEMO_PERMS = DEMO_PERMISSION_CATALOG.map(({ id }) => id);
+const DEMO_ROLE_DEFAULTS = {
+  owner: [...DEMO_PERMS],
+  admin: DEMO_PERMS.filter((permission) => permission !== "roles.manage"),
+  member: ["server.view", "server.start", "server.stop", "server.restart", "server.players.view"],
+  viewer: ["server.view", "server.players.view", "server.console.view"],
+};
+const DEMO_ROLE_PERMISSIONS = Object.fromEntries(
+  Object.entries(DEMO_ROLE_DEFAULTS).map(([role, permissions]) => [role, [...permissions]]));
+const DEMO_ME = {
+  id: 1,
+  username: "demo-user",
+  role: DEMO_INITIAL_ROLE,
+  permissions: [...DEMO_ROLE_PERMISSIONS[DEMO_INITIAL_ROLE]],
+};
+const DEMO_ROLE_REVISIONS = { owner: 0, admin: 0, member: 0, viewer: 0 };
+const DEMO_ROLE_CUSTOMIZED = { owner: false, admin: false, member: false, viewer: false };
+const demoUserSnapshot = () => ({ ...DEMO_ME, permissions: [...DEMO_ME.permissions] });
 const DEMO_SERVERS = [
   { id: 1, slug: "bio1", display_name: "Bio1 Survival - Long Local Demo Server Name", provider: "curseforge", modloader: "neoforge", modloader_version: "21.1.228", minecraft_version: "1.21.1", source_type: "direct-url", server_directory: "servers/minecraft-java/modded/bio1", external_directory: false, startup_script: "run.sh", restart_policy: "on-failure", autostart_enabled: true, created_at: new Date(Date.now() - 30 * 86400000).toISOString(), updated_at: new Date(Date.now() - 2 * 3600000).toISOString(), demo_icon: "demo-server-bio1.png" },
   { id: 2, slug: "creative-lab", display_name: "Creative Lab", provider: "modrinth", modloader: "fabric", modloader_version: "0.16.10", minecraft_version: "1.21.1", source_type: "archive-upload", server_directory: "servers/minecraft-java/modded/creative-lab", external_directory: false, created_at: new Date(Date.now() - 12 * 86400000).toISOString(), updated_at: new Date(Date.now() - 86400000).toISOString(), demo_icon: "demo-server-creative-lab.png" },
@@ -522,12 +565,12 @@ async function demoApi(path, opts = {}) {
     return developmentBotApi(clean, opts);
   }
   if (method !== "GET") {
-    if (clean === "/auth/login") return DEMO_ME;
+    if (clean === "/auth/login") return demoUserSnapshot();
     if (clean === "/account/reauth/password") return { action_token: "demo-account-action" };
     if (clean === "/account/password") return { ok: true };
     if (clean === "/account/totp/begin") return {
       setup_token: "demo-totp-setup", secret: DEMO_INVITE_SECRET,
-      uri: `otpauth://totp/Bonghos:demo-owner?secret=${DEMO_INVITE_SECRET}&issuer=Bonghos`,
+      uri: `otpauth://totp/Bonghos:demo-user?secret=${DEMO_INVITE_SECRET}&issuer=Bonghos`,
       qr_svg: DEMO_INVITE_QR,
     };
     if (clean === "/account/totp/finish") {
@@ -562,6 +605,23 @@ async function demoApi(path, opts = {}) {
     if (clean === "/server/command") {
       S.consoleLines.push("> " + ((opts.json && opts.json.command) || ""));
       return { ok: true };
+    }
+    if (method === "POST" && clean === "/metrics/internet/speed-test") {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      return {
+        tested_at: new Date().toISOString(), provider: "Cloudflare", latency_ms: 36.8,
+        download_mbps: 286.4, upload_mbps: 91.7,
+        download_bytes: 37 * 1024 * 1024, upload_bytes: 16 * 1024 * 1024, duration_ms: 4820,
+      };
+    }
+    const rolePermissionsMatch = clean.match(/^\/roles\/(admin|member|viewer)\/permissions$/);
+    if (method === "PUT" && rolePermissionsMatch) {
+      const role = rolePermissionsMatch[1];
+      if (Number(opts.json?.revision) !== DEMO_ROLE_REVISIONS[role]) throw new Error("Role permissions changed elsewhere; reload and try again");
+      DEMO_ROLE_PERMISSIONS[role] = [...new Set(opts.json?.permissions || [])];
+      DEMO_ROLE_REVISIONS[role]++;
+      DEMO_ROLE_CUSTOMIZED[role] = true;
+      return demoRolePermissionsPayload();
     }
     if (clean === "/servers/slug-preview") {
       const name = (opts.json && opts.json.name) || "server";
@@ -654,7 +714,7 @@ async function demoApi(path, opts = {}) {
   }
   switch (clean) {
     case "/auth/csrf": return { csrf: "demo-csrf-token" };
-    case "/auth/me": return DEMO_ME;
+    case "/auth/me": return demoUserSnapshot();
     case `/invitations/${DEMO_INVITE_TOKEN}`: return { role: "admin" };
     case "/bots": return DEMO_BOTS.map((bot) => ({ ...bot }));
     case "/version": return { version: "0.2.0-demo" };
@@ -700,6 +760,27 @@ async function demoApi(path, opts = {}) {
         server_dir_bytes: sample.server_dir_bytes,
         backup_dir_bytes: sample.backup_dir_bytes,
         system_dir_bytes: sample.system_dir_bytes,
+      };
+    }
+    case "/metrics/internet":
+    case "/metrics/internet/refresh": {
+      const checkedAt = new Date().toISOString();
+      const connectionLatency = 18 + Math.sin(Date.now() / 5000) * 4;
+      const httpsLatency = 32 + Math.sin(Date.now() / 9000) * 7;
+      return {
+        collected_at: checkedAt, status: "online",
+        connection_latency_ms: connectionLatency, connection_successful_targets: 2, connection_total_targets: 2,
+        connection_targets: [
+          { name: "Cloudflare", reachable: true, latency_ms: connectionLatency - 1 },
+          { name: "Google", reachable: true, latency_ms: connectionLatency + 1 },
+        ],
+        consecutive_failures: 0, reliability_successful: 10, reliability_total: 10,
+        diagnostics_collected_at: checkedAt, dns_ok: true, dns_ms: 8.4,
+        latency_ms: httpsLatency, successful_targets: 2, total_targets: 2,
+        targets: [
+          { name: "Cloudflare", reachable: true, latency_ms: httpsLatency - 2 },
+          { name: "Google", reachable: true, latency_ms: httpsLatency + 2 },
+        ],
       };
     }
     case "/players": return { players: [
@@ -753,19 +834,37 @@ async function demoApi(path, opts = {}) {
     ];
     case "/operations": return [];
     case "/activity": return [
-      { at: new Date(Date.now() - 4 * 60000).toISOString(), username: "demo-owner", action: "login_success", target: "", detail: "", remote_addr: "192.168.1.24" },
-      { at: new Date(Date.now() - 12 * 60000).toISOString(), username: "demo-owner", action: "backup_created", target: "bio1", detail: "full_server verified" },
-      { at: new Date(Date.now() - 46 * 60000).toISOString(), username: "demo-owner", action: "configuration_saved", target: "user_jvm_args.txt", detail: "-Xmx changed to 6G" },
+      { at: new Date(Date.now() - 4 * 60000).toISOString(), username: "demo-user", action: "login_success", target: "", detail: "", remote_addr: "192.168.1.24" },
+      { at: new Date(Date.now() - 12 * 60000).toISOString(), username: "demo-user", action: "backup_created", target: "bio1", detail: "full_server verified" },
+      { at: new Date(Date.now() - 46 * 60000).toISOString(), username: "demo-user", action: "configuration_saved", target: "user_jvm_args.txt", detail: "-Xmx changed to 6G" },
     ];
     case "/users": return [
-      { ID: 1, Username: "demo-owner", Role: "owner", Disabled: false },
+      { ID: DEMO_ME.id, Username: DEMO_ME.username, Role: DEMO_ME.role, Disabled: false },
       { ID: 2, Username: "admin", Role: "admin", Disabled: false },
       { ID: 3, Username: "viewer", Role: "viewer", Disabled: true },
     ];
+    case "/roles/permissions": return demoRolePermissionsPayload();
     case "/passkeys": return DEMO_PASSKEYS.map((passkey) => ({ ...passkey }));
     case "/account/recovery-codes": return DEMO_RECOVERY_CODES.map((item) => ({ ...item }));
     default: return {};
   }
+}
+
+function demoRolePermissionsPayload() {
+  return {
+    catalog: DEMO_PERMISSION_CATALOG.map((definition) => ({
+      ...definition,
+      requires: [...definition.requires],
+      assignable_roles: [...definition.assignable_roles],
+    })),
+    roles: Object.fromEntries(["owner", "admin", "member", "viewer"].map((role) => [role, {
+      permissions: [...DEMO_ROLE_PERMISSIONS[role]],
+      defaults: [...DEMO_ROLE_DEFAULTS[role]],
+      editable: role !== "owner",
+      revision: DEMO_ROLE_REVISIONS[role],
+      customized: DEMO_ROLE_CUSTOMIZED[role],
+    }])),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -784,7 +883,11 @@ async function api(path, opts = {}) {
   if (res.status === 401) { showLogin(); throw new Error("Session expired — please sign in again."); }
   let data = null;
   try { data = await res.json(); } catch { /* empty */ }
-  if (!res.ok) throw new Error((data && data.error) || res.statusText);
+  if (!res.ok) {
+    const error = new Error((data && data.error) || res.statusText);
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
 
@@ -812,6 +915,9 @@ const S = {
   commandHistoryAt: -1,
   perf: [],
   perfStorage: null,
+  perfInternet: null,
+  perfInternetHistory: [],
+  perfSpeedTest: null,
   overviewCPUTrend: "machine",
   overviewMemoryTrend: "java",
   overviewMaxPlayers: 20,
@@ -825,6 +931,39 @@ const S = {
   uptimeBase: null,
 };
 const can = (p) => S.me && S.me.permissions && S.me.permissions.includes(p);
+const canAny = (...permissions) => permissions.some(can);
+
+function syncCurrentUserUI() {
+  if (!S.me) return;
+  $("#whoami").textContent = `${esc(S.me.username)} · ${esc(S.me.role)}`;
+  const control = $("#demo-role-control");
+  const select = $("#demo-role-select");
+  control?.classList.toggle("hidden", !DEMO_MODE);
+  if (select && DEMO_MODE) select.value = S.me.role;
+}
+
+function changeDemoUserRole(role) {
+  if (!DEMO_MODE || !DEMO_ROLES.includes(role) || role === S.me?.role) return;
+  closeActiveModal();
+  DEMO_ME.role = role;
+  DEMO_ME.permissions = [...DEMO_ROLE_PERMISSIONS[role]];
+  S.me = demoUserSnapshot();
+
+  const url = new URL(location.href);
+  if (role === "owner") url.searchParams.delete("demo-role");
+  else url.searchParams.set("demo-role", role);
+  history.replaceState(null, "", url);
+
+  syncCurrentUserUI();
+  buildNav();
+  if (!can("server.players.view")) S.onlinePlayerCount = null;
+  navigate(pageAllowed(S.page) ? S.page : defaultPage(), { replaceHash: true });
+  refreshPlayerCount();
+  toast(`Demo user is now ${capitalizeFirst(role)}.`, "ok");
+}
+
+$("#demo-role-select")?.addEventListener("change", (event) =>
+  changeDemoUserRole(event.currentTarget.value));
 
 function setUptimeBaseline(sample) {
   const seconds = Number(sample?.uptime_seconds);
@@ -858,7 +997,7 @@ setInterval(updateUptimeDisplay, 1000);
 // ---------------------------------------------------------------------------
 let wsRetry = 1000;
 // Topics that stay subscribed for the whole session.
-const BASE_TOPICS = ["overview", "servers", "backups"];
+const BASE_TOPICS = ["overview", "overview_performance", "servers", "backups"];
 const OVERVIEW_INTERVAL_SECONDS = 4;
 // Heavier per-page topics, subscribed only while that page is open so Bonghos
 // does not broadcast console lines or metrics to a browser that is not showing
@@ -876,6 +1015,11 @@ const PERFORMANCE_INTERVAL_OPTIONS = [1, 2, 3, 5, 10, 30, 60];
 let demoOverviewTimer = null;
 let demoPerformanceTimer = null;
 let performanceStorageRequest = 0;
+let performanceStorageShowPercentage = false;
+let performanceInternetRequest = 0;
+let performanceInternetTimer = null;
+let performanceInternetAbort = null;
+let performanceSpeedAbort = null;
 let navigationJumpStartTimer = null;
 let navigationJumpTimer = null;
 
@@ -895,9 +1039,15 @@ function performanceSubscription() {
 }
 
 function baseTopicSubscription(topic) {
-  return topic === "overview"
+  return topic === "overview_performance"
     ? { action: "subscribe", topic, interval_seconds: OVERVIEW_INTERVAL_SECONDS }
     : { action: "subscribe", topic };
+}
+
+function baseTopicAllowed(topic) {
+  if (topic === "overview_performance") return can("server.performance.view");
+  if (topic === "backups") return can("server.backups.view");
+  return can("server.view");
 }
 
 function wsSend(obj) {
@@ -911,6 +1061,10 @@ function wsSend(obj) {
 // syncPageSubscription unsubscribes the previous page topic and subscribes the
 // new one. Base topics are untouched.
 function syncPageSubscription(page) {
+  if (page !== "performance") {
+    stopPerformanceInternetPolling();
+    cancelPerformanceSpeedTest();
+  }
   const next = PAGE_TOPICS[page] || null;
   if (next === currentPageTopic) {
     if (next === "performance") wsSend(performanceSubscription());
@@ -931,11 +1085,29 @@ function connectWS() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${proto}//${location.host}/api/ws`);
   S.ws = ws;
-  ws.onopen = () => {
+  ws.onopen = async () => {
     wsRetry = 1000;
+    try {
+      const me = await api("/auth/me");
+      const changed = me.role !== S.me.role || JSON.stringify(me.permissions || []) !== JSON.stringify(S.me.permissions || []);
+      S.me = me;
+      syncCurrentUserUI();
+      if (changed) {
+        closeActiveModal();
+        buildNav();
+        if (!pageAllowed(S.page)) {
+          navigate(defaultPage(), { replaceHash: true });
+        } else {
+          renderPage();
+        }
+      }
+    } catch {
+      showLogin();
+      return;
+    }
     // Always-on topics: status and long-running operations must keep arriving
     // whatever page is open, so an import or backup started elsewhere is seen.
-    BASE_TOPICS.forEach((topic) => wsSend(baseTopicSubscription(topic)));
+    BASE_TOPICS.filter(baseTopicAllowed).forEach((topic) => wsSend(baseTopicSubscription(topic)));
     // Server-side subscriptions were lost with the old connection, so forget
     // what we think is subscribed and re-send for the current page.
     currentPageTopic = null;
@@ -965,7 +1137,7 @@ function handleEvent(m) {
     markLifecyclePendingSettled(S.status.state);
     renderStatusPill();
     if (S.page === "overview" && !S.lifecyclePending) renderPage();
-  } else if (type === "sample" && topic === "overview") {
+  } else if (type === "sample" && topic === "overview_performance") {
     updateSidebarLiveStats(data);
     if (S.page !== "overview") return;
     appendPerformanceSample(data);
@@ -1030,6 +1202,8 @@ mobileNavQuery.addEventListener("change", (event) => { if (!event.matches) setSi
 
 function showLogin() {
   setSidebarOpen(false);
+  stopPerformanceInternetPolling();
+  cancelPerformanceSpeedTest();
   S.me = null;
   if (S.ws) try { S.ws.close(); } catch {}
   $("#app-view").classList.add("hidden");
@@ -1120,11 +1294,11 @@ async function boot() {
     if (DEMO_VIEW === "login") {
       showLogin();
       $("#login-form > .muted").textContent = "Demo sign-in · use any non-empty credentials and authenticator code.";
-      $("#login-user").value = "demo-owner";
+      $("#login-user").value = "demo-user";
       $("#login-pass").value = "demo-password";
       return;
     }
-    S.me = DEMO_ME;
+    S.me = demoUserSnapshot();
     S.status = { state: "running" };
     S.consoleLines = [...DEMO_CONSOLE];
     S.perf = [...DEMO_METRICS];
@@ -1158,7 +1332,7 @@ $("#login-passkey").addEventListener("click", async () => {
   button.disabled = true;
   try {
     if (DEMO_MODE) {
-      S.me = DEMO_ME;
+      S.me = demoUserSnapshot();
       enterApp();
       toast("Demo passkey sign-in completed locally.", "ok");
       return;
@@ -1236,7 +1410,7 @@ $("#logout-btn").addEventListener("click", async () => {
 function enterApp() {
   $("#login-view").classList.add("hidden");
   $("#app-view").classList.remove("hidden");
-  $("#whoami").textContent = `${S.me.username} · ${S.me.role}`;
+  syncCurrentUserUI();
   buildNav();
   refreshPlayerCount();
   connectWS();
@@ -1256,17 +1430,18 @@ const PAGES = [
   { section: "Manage", id: "configuration", label: "Configuration", icon: "tuning-2-linear", perm: "server.configuration.manage" },
   { section: "Manage", id: "backups", label: "Backups", icon: "archive-down-minimlistic-linear", perm: "server.backups.view" },
   { section: "Manage", id: "schedules", label: "Schedules", icon: "calendar-linear", perm: "server.schedules.manage" },
-  { section: "System", id: "activity", label: "Activity", icon: "history-linear", perm: "server.configuration.manage" },
-  { section: "System", id: "users", label: "Users", icon: "users-group-two-rounded-linear", perm: "users.manage" },
-  { section: "System", id: "security", label: "Security", icon: "shield-keyhole-linear", perm: "server.view" },
-  { section: "System", id: "settings", label: "Settings", icon: "settings-linear", perm: "server.view" },
+  { section: "System", id: "activity", label: "Activity", icon: "history-linear", perm: "activity.view" },
+  { section: "System", id: "users", label: "Users", icon: "users-group-two-rounded-linear", anyPerm: ["users.manage", "roles.manage"] },
+  { section: "Account", id: "account", label: "Account", icon: "users-group-rounded-linear", fallbackOnly: true, accountPage: true },
+  { section: "Account", id: "security", label: "Security", icon: "shield-keyhole-linear", accountPage: true },
+  { section: "Account", id: "settings", label: "Settings", icon: "settings-linear", accountPage: true },
 ];
 
 function buildNav() {
   const nav = $("#nav"); nav.innerHTML = "";
   let lastSection = "";
   for (const page of PAGES) {
-    if (page.perm && !can(page.perm)) continue;
+    if (!pageAvailable(page)) continue;
     if (page.section !== lastSection) {
       nav.append(el("div", { class: "nav-section" }, page.section));
       lastSection = page.section;
@@ -1322,11 +1497,25 @@ async function refreshOverviewPlayers() {
 
 function pageAllowed(page) {
   const entry = PAGES.find((p) => p.id === page);
-  return !!entry && (!entry.perm || can(entry.perm));
+  return !!entry && pageAvailable(entry);
 }
 
 function defaultPage() {
-  return (PAGES.find((p) => !p.perm || can(p.perm)) || PAGES[0]).id;
+  if (!hasPrimaryPage()) return "account";
+  return (PAGES.find((page) => !page.fallbackOnly && !page.accountPage && basePageAvailable(page)) || PAGES.find(pageAvailable) || PAGES[0]).id;
+}
+
+function pageAvailable(page) {
+  if (page.fallbackOnly) return !hasPrimaryPage();
+  return basePageAvailable(page);
+}
+
+function basePageAvailable(page) {
+  return (!page.perm || can(page.perm)) && (!page.anyPerm || canAny(...page.anyPerm));
+}
+
+function hasPrimaryPage() {
+  return PAGES.some((page) => !page.fallbackOnly && !page.accountPage && basePageAvailable(page));
 }
 
 function hashPage() {
@@ -1535,6 +1724,7 @@ async function renderPage() {
       case "servers": return await pageServers(main);
       case "activity": return await pageActivity(main);
       case "users": return await pageUsers(main);
+      case "account": return pageAccount(main);
       case "security": return await pageSecurity(main);
       case "settings": return await pageSettings(main);
     }
@@ -1606,21 +1796,28 @@ async function pageOverview(main) {
   const d = await api("/overview");
   S.status = { state: d.state, detail: d.supervisor };
   renderStatusPill();
+  const showPerformance = can("server.performance.view");
+  const showPlayers = can("server.players.view");
+  const showBackups = can("server.backups.view");
+  const showSchedules = can("server.schedules.manage");
   const s = d.sample || {};
-  setUptimeBaseline(s);
+  if (showPerformance) setUptimeBaseline(s);
+  else S.uptimeBase = null;
   const inst = d.instance;
 
   // Health, host and trends live here together. Knowing whether the server is
   // healthy should not require visiting three tabs.
   let host = null, events = [], history = [], players = null;
-  try { host = await api("/host"); } catch {}
+  if (showPerformance && can("host.view")) try { host = await api("/host"); } catch {}
   try { events = (await api("/events?limit=25")).events || []; } catch {}
-  try { history = await api("/metrics?hours=1") || []; } catch {}
-  try { players = (await api("/players")).players || []; } catch {}
+  if (showPerformance) try { history = await api("/metrics?hours=1") || []; } catch {}
+  if (showPlayers) try { players = (await api("/players")).players || []; } catch {}
   if (players) setOnlinePlayerCount(players);
   S.perf = [];
-  history.forEach(appendPerformanceSample);
-  appendPerformanceSample(s);
+  if (showPerformance) {
+    history.forEach(appendPerformanceSample);
+    appendPerformanceSample(s);
+  }
 
   const hostMemTotal = Number(s.host_mem_total || host?.mem_total) || 0;
   const hostMemAvailable = Number(s.host_mem_avail || host?.mem_available) || 0;
@@ -1633,23 +1830,46 @@ async function pageOverview(main) {
   const onlineCount = players ? onlinePlayers.length : Number(s.online_players || 0);
   const maxPlayers = Number(d.max_players || s.max_players || 20);
   S.overviewMaxPlayers = maxPlayers;
+  const summaryCards = [serverStatusCard(d.state, inst)];
+  if (showPerformance) {
+    summaryCards.push(
+      statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
+    );
+  }
+  if (showPlayers) summaryCards.push(playerSummaryCard(onlinePlayers, onlineCount, maxPlayers));
+  if (showPerformance) {
+    summaryCards.push(statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
+      diskTotal > 0 ? "of " + fmtBytes(diskTotal) : "Visit Performance to measure",
+      "overview-live-disk-free", "performance-machine-storage-card"));
+  }
+  const projectDetails = [
+    el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
+    el("dt", {}, "LAN IP"), el("dd", {},
+      d.lan_ip ? el("button", {
+        class: "copy-value mono", type: "button", title: "Copy LAN IP",
+        "aria-label": `Copy LAN IP ${d.lan_ip}`,
+        onclick: () => copyText(d.lan_ip, "LAN IP copied"),
+      }, el("span", {}, d.lan_ip), solarIcon("copy-linear")) : "—"),
+    el("dt", {}, "Port"), el("dd", {}, d.port || "25565"),
+    el("dt", {}, "Modloader"), el("dd", {}, inst?.modloader || "unknown"),
+    el("dt", {}, "Startup script"), el("dd", { class: "mono" }, inst?.startup_script || "not selected"),
+    el("dt", {}, "Restart policy"), el("dd", {}, inst?.restart_policy || "never"),
+    el("dt", {}, "Autostart"), el("dd", {}, inst?.autostart_enabled ? "enabled" : "disabled"),
+  ];
+  if (showBackups) projectDetails.push(
+    el("dt", {}, "Last backup"), el("dd", {}, d.last_backup ? fmtTime(d.last_backup.created_at) : "none yet"));
+  if (showSchedules) projectDetails.push(
+    el("dt", {}, "Next schedule"), el("dd", {}, d.next_schedule_at ? fmtTime(d.next_schedule_at) : "none"));
 
-  main.innerHTML = "";
-  main.append(
+  const overviewSections = [
     pageHeader(inst ? inst.display_name : "Overview", "Server state, resource pressure, backups, and recent events for the active project.", [
       lifecycleButtons(true),
     ]),
 
     // What is happening right now.
-    el("div", { class: "grid cols-4 overview-stat-grid" },
-      serverStatusCard(d.state, inst),
-      statCard("Uptime", currentUptimeSeconds() === null ? "—" : fmtDur(currentUptimeSeconds()), s.java_pid ? "Java PID " + s.java_pid : "not running", "uptime-value"),
-      playerSummaryCard(onlinePlayers, onlineCount, maxPlayers),
-      statCard("Disk free", diskTotal > 0 ? fmtBytes(diskFree) : "—",
-        diskTotal > 0 ? "of " + fmtBytes(diskTotal)
-          : (can("server.performance.view") ? "Visit Performance to measure" : "measurement unavailable"),
-        "overview-live-disk-free", "performance-machine-storage-card")),
-
+    el("div", { class: "grid cols-4 overview-stat-grid" }, ...summaryCards),
+  ];
+  if (showPerformance) overviewSections.push(
     // Host health, previously a separate tab.
     el("div", { class: "grid cols-4 flow-section overview-stat-grid" },
       statCard("CPU", Number.isFinite(hostCPU) ? hostCPU.toFixed(1) + "%" : "—", "whole-machine average",
@@ -1665,8 +1885,8 @@ async function pageOverview(main) {
     // Trends, previously the Performance tab.
     el("div", { class: "grid cols-2 flow-section" },
       overviewCPUTrendCard(),
-      overviewMemoryTrendCard()),
-
+      overviewMemoryTrendCard()));
+  overviewSections.push(
     el("div", { class: "grid cols-2 flow-section" },
       // The timeline: what the server did, in its own words.
       el("div", { class: "card" },
@@ -1677,24 +1897,9 @@ async function pageOverview(main) {
 
       el("div", { class: "card" },
         el("h3", {}, "Project"),
-        inst ? el("dl", { class: "kv" },
-          el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
-          el("dt", {}, "LAN IP"), el("dd", {},
-            d.lan_ip ? el("button", {
-              class: "copy-value mono", type: "button", title: "Copy LAN IP",
-              "aria-label": `Copy LAN IP ${d.lan_ip}`,
-              onclick: () => copyText(d.lan_ip, "LAN IP copied"),
-            }, el("span", {}, d.lan_ip), solarIcon("copy-linear")) : "—"),
-          el("dt", {}, "Port"), el("dd", {}, d.port || "25565"),
-          el("dt", {}, "Modloader"), el("dd", {}, inst.modloader || "unknown"),
-          el("dt", {}, "Startup script"), el("dd", { class: "mono" }, inst.startup_script || "not selected"),
-          el("dt", {}, "Restart policy"), el("dd", {}, inst.restart_policy || "never"),
-          el("dt", {}, "Autostart"), el("dd", {}, inst.autostart_enabled ? "enabled" : "disabled"),
-          el("dt", {}, "Last backup"), el("dd", {},
-            d.last_backup ? fmtTime(d.last_backup.created_at) : "none yet"),
-          el("dt", {}, "Next schedule"), el("dd", {},
-            d.next_schedule_at ? fmtTime(d.next_schedule_at) : "none"))
+        inst ? el("dl", { class: "kv" }, ...projectDetails)
             : el("p", { class: "muted" }, "No active project selected."))));
+  main.replaceChildren(...overviewSections);
 }
 
 async function copyText(value, successMessage) {
@@ -2282,6 +2487,21 @@ function playerNameMCProfileURL(uuid, username = "") {
   const name = String(username || "").trim();
   if (!/^[A-Za-z0-9_]{1,16}$/.test(name)) return "";
   return `https://namemc.com/profile/${encodeURIComponent(name)}`;
+}
+
+function pageAccount(main) {
+  main.innerHTML = "";
+  main.append(
+    pageHeader("Account", "Personal security and appearance remain available without a primary workspace page."),
+    el("div", { class: "card account-no-access-card" },
+      solarIcon("shield-keyhole-linear"),
+      el("div", {},
+        el("h3", {}, "No primary workspace assigned"),
+        el("p", { class: "muted" }, `The ${capitalizeFirst(S.me.role)} role currently has no server, activity, or user-management page. An Owner can change the role configuration.`)),
+      el("div", { class: "actions" },
+        el("button", { class: "btn ghost", onclick: () => navigate("security") }, "Account security"),
+        el("button", { class: "btn ghost", onclick: () => navigate("settings") }, "Appearance"))),
+  );
 }
 
 function getPlayerFaceUrl(username, size = 64) {
@@ -3418,7 +3638,7 @@ async function pageConfiguration(main) {
   };
   const propInputs = {};
   const propRows = commonProps.filter((k) => k in props).map((k) => {
-    const current = String(props[k]);
+    const current = esc(props[k]);
     let v;
     if (propertyOptions[k]) {
       const options = [...propertyOptions[k]];
@@ -3772,7 +3992,7 @@ function backupActions(backup) {
   if (can("server.backups.restore")) actions.push({
     label: "Restore", icon: "archive-down-minimlistic-linear", run: () => restoreBackup(backup),
   });
-  actions.push(
+  if (can("server.backups.create")) actions.push(
     { label: "Check", title: "Check whether this backup is readable and unchanged", icon: "file-magnifying-glass", run: async () => {
       try {
         await api(`/backups/${backup.backup_id}/verify`, { method: "POST", json: {} });
@@ -3789,6 +4009,8 @@ function backupActions(backup) {
         try { await api(`/backups/${backup.backup_id}`, { method: "DELETE" }); renderPage(); }
         catch (error) { toast(error.message, "err"); }
       }) });
+
+  if (!actions.length) return el("span", { class: "muted" }, "View only");
 
   const desktop = el("div", { class: "row-actions desktop-row-actions" },
     ...actions.map((action) => el("button", {
@@ -4129,6 +4351,8 @@ async function pagePerformance(main) {
   ]);
   S.perf = [];
   S.perfStorage = null;
+  S.perfInternet = null;
+  S.perfInternetHistory = [];
   (history || []).forEach(appendPerformanceSample);
   const current = overview?.sample;
   if (current) {
@@ -4209,13 +4433,38 @@ async function pagePerformance(main) {
           "aria-label": "Refresh",
           onclick: refreshPerformanceStorage,
         }, solarIcon("storage-refresh"))),
-      el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })));
+      el("div", { class: "performance-storage-visual", id: "performance-storage-visual" })),
+
+    el("section", { class: "performance-domain flow-section", "aria-labelledby": "performance-internet-title" },
+      el("div", { class: "performance-section-heading has-action" },
+        performanceSectionTitle("performance-internet-title", "Internet",
+          "Checks follow the update interval while this page is open. Speed tests are manual.", "global-linear"),
+        el("button", {
+          class: "btn ghost icon-button performance-storage-refresh",
+          id: "performance-internet-refresh",
+          type: "button",
+          title: "Refresh connectivity",
+          "aria-label": "Refresh connectivity",
+          onclick: () => refreshInternetConnectivity(true),
+        }, solarIcon("storage-refresh"))),
+      el("div", { class: "performance-domain-readouts performance-internet-readouts" },
+        performanceReadout("Connectivity", "performance-internet-status", "Checking from the Bonghos host"),
+        performanceReadout("Connection", "performance-internet-latency", "Average TCP connection time"),
+        performanceReadout("DNS", "performance-internet-dns", "System resolver lookup time"),
+        performanceReadout("HTTPS", "performance-internet-https", "Average diagnostic round trip"),
+        performanceReadout("Reliability", "performance-internet-reliability", "Successful checks from the latest 10")),
+      el("div", { class: "performance-internet-targets metric-note", id: "performance-internet-targets" }, "Checking Internet connectivity…"),
+      el("div", { class: "grid cols-2 performance-domain-charts performance-internet-details" },
+        performanceChartPanel("Connection latency", "Shared checks at the selected update interval", "performance-chart-internet-latency"),
+        internetSpeedTestPanel())));
 
   syncPageSubscription("performance");
   updatePerformanceView(current || latestPerformanceSample());
   renderStorageVisual();
+  renderInternetVisual();
   activatePendingPerformanceTarget();
   refreshPerformanceStorage();
+  startPerformanceInternetPolling();
 }
 
 function formatInterval(seconds) {
@@ -4228,6 +4477,7 @@ function setPerformanceInterval(seconds) {
   wsSend(performanceSubscription());
   syncDemoPerformanceStream();
   updatePerformanceFreshness();
+  if (S.page === "performance") startPerformanceInternetPolling();
 }
 
 async function refreshPerformanceMetrics() {
@@ -4322,7 +4572,7 @@ function performanceChartPanel(title, description, id) {
 
 function setNodeText(id, value) {
   const node = $("#" + id);
-  if (node) node.textContent = value;
+  if (node) node.textContent = esc(value);
 }
 
 function activatePendingPerformanceTarget() {
@@ -4531,6 +4781,9 @@ function renderStorageVisual(sample = S.perfStorage) {
       title: "Machine filesystem",
       description: "Filesystem containing Bonghos",
       total: diskTotal,
+      centerTotal: diskUsed,
+      centerLabel: "used",
+      centerToggle: true,
       timestamp,
       emptyMessage: "Filesystem capacity is not available.",
       segments: [
@@ -4543,6 +4796,8 @@ function renderStorageVisual(sample = S.perfStorage) {
       title: "Bonghos",
       description: "Servers, backups, system files, and other managed data",
       total: bonghosTotal,
+      centerTotal: bonghosTotal,
+      centerLabel: "used",
       timestamp,
       emptyMessage: "Bonghos storage size is not available.",
       segments: [
@@ -4555,7 +4810,258 @@ function renderStorageVisual(sample = S.perfStorage) {
   activatePendingPerformanceTarget();
 }
 
-function storageDonutChart({ id = "", title, description, total, segments, timestamp, emptyMessage }) {
+function internetSpeedTestPanel() {
+  const allowed = can("server.performance.test");
+  return el("div", { class: "card performance-chart-panel performance-speed-test-panel" },
+    el("div", { class: "performance-chart-heading performance-speed-test-heading" },
+      el("div", {},
+        el("h3", {}, "Manual speed test"),
+        el("p", { class: "metric-note" }, "Estimated WAN throughput between this host and Cloudflare.")),
+      el("button", {
+        class: "btn primary performance-speed-test-button",
+        id: "performance-speed-test-button",
+        type: "button",
+        disabled: allowed ? null : "",
+        title: allowed ? "Run speed test" : "Your role cannot run Internet speed tests",
+        onclick: confirmInternetSpeedTest,
+      }, solarIcon("play-linear"), "Test")),
+    el("div", { class: "performance-speed-results" },
+      performanceReadout("Download", "performance-speed-download", "Not tested"),
+      performanceReadout("Upload", "performance-speed-upload", "Not tested")),
+    el("div", { class: "performance-speed-test-detail metric-note", id: "performance-speed-test-detail" },
+      allowed
+        ? "Manual only · transfers up to about 53 MB · results are approximate"
+        : "Requires the Test internet speed permission."));
+}
+
+function confirmInternetSpeedTest() {
+  confirmModal(
+    "Test Internet speed",
+    "This test transfers up to about 53 MB through Cloudflare and may temporarily slow a running Minecraft server.",
+    "Run test",
+    runInternetSpeedTest,
+    false,
+  );
+}
+
+async function runInternetSpeedTest() {
+  if (S.page !== "performance" || !can("server.performance.test")) return;
+  stopPerformanceInternetPolling();
+  cancelPerformanceSpeedTest();
+  const controller = new AbortController();
+  performanceSpeedAbort = controller;
+  const button = $("#performance-speed-test-button");
+  const detail = $("#performance-speed-test-detail");
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.replaceChildren(solarIcon("storage-refresh"), "Testing…");
+  }
+  if (detail) detail.textContent = "Testing download and upload throughput from the Bonghos host…";
+  setNodeText("performance-speed-download", "Testing…");
+  setNodeText("performance-speed-upload", "Waiting…");
+  try {
+    S.perfSpeedTest = await api("/metrics/internet/speed-test", {
+      method: "POST", json: { confirm: true }, signal: controller.signal,
+    });
+    if (S.page !== "performance") return;
+    renderInternetSpeedResult();
+    toast("Internet speed test completed", "ok");
+  } catch (error) {
+    if (S.page !== "performance") return;
+    setNodeText("performance-speed-download", "Failed");
+    setNodeText("performance-speed-upload", "Failed");
+    if (detail) detail.textContent = error.message;
+    toast("Internet speed test failed: " + error.message, "err");
+  } finally {
+    if (performanceSpeedAbort === controller) performanceSpeedAbort = null;
+    if (S.page !== "performance") return;
+    const currentButton = $("#performance-speed-test-button");
+    if (currentButton) {
+      currentButton.disabled = !can("server.performance.test");
+      currentButton.classList.remove("is-loading");
+      currentButton.replaceChildren(solarIcon("play-linear"), "Test again");
+    }
+    startPerformanceInternetPolling();
+  }
+}
+
+function cancelPerformanceSpeedTest() {
+  if (!performanceSpeedAbort) return;
+  performanceSpeedAbort.abort();
+  performanceSpeedAbort = null;
+}
+
+function renderInternetSpeedResult(result = S.perfSpeedTest) {
+  if (!result) return;
+  setNodeText("performance-speed-download", formatMbps(result.download_mbps));
+  setNodeText("performance-speed-upload", formatMbps(result.upload_mbps));
+  setNodeText("performance-speed-download-note", `${fmtBytes(result.download_bytes)} transferred`);
+  setNodeText("performance-speed-upload-note", `${fmtBytes(result.upload_bytes)} transferred`);
+  const detail = $("#performance-speed-test-detail");
+  if (detail) {
+    detail.textContent = `${result.provider || "Remote edge"} · ${Number(result.latency_ms || 0).toFixed(1)} ms latency · ${formatDurationMilliseconds(result.duration_ms)} · ${fmtTime(result.tested_at)}`;
+  }
+}
+
+function formatMbps(value) {
+  const speed = Number(value);
+  if (!Number.isFinite(speed) || speed < 0) return "—";
+  const digits = speed >= 100 ? 0 : speed >= 10 ? 1 : 2;
+  return `${speed.toFixed(digits)} Mbps`;
+}
+
+function formatDurationMilliseconds(value) {
+  const milliseconds = Math.max(0, Number(value) || 0);
+  return milliseconds >= 1000 ? `${(milliseconds / 1000).toFixed(1)} s` : `${Math.round(milliseconds)} ms`;
+}
+
+function startPerformanceInternetPolling() {
+  stopPerformanceInternetPolling();
+  if (S.page !== "performance") return;
+  refreshInternetConnectivity();
+  performanceInternetTimer = setInterval(
+    refreshInternetConnectivity,
+    S.perfIntervalSeconds * 1000,
+  );
+}
+
+function stopPerformanceInternetPolling() {
+  if (performanceInternetTimer) clearInterval(performanceInternetTimer);
+  performanceInternetTimer = null;
+  if (performanceInternetAbort) performanceInternetAbort.abort();
+  performanceInternetAbort = null;
+  performanceInternetRequest++;
+}
+
+async function refreshInternetConnectivity(manual = false) {
+  if (S.page !== "performance") return;
+  if (!manual && performanceInternetAbort) return;
+  if (manual) stopPerformanceInternetPolling();
+  const controller = manual ? null : new AbortController();
+  if (controller) performanceInternetAbort = controller;
+  const request = ++performanceInternetRequest;
+  const button = $("#performance-internet-refresh");
+  if (manual && button) {
+    button.disabled = true;
+    button.classList.add("is-loading");
+  }
+  try {
+    const endpoint = manual
+      ? "/metrics/internet/refresh"
+      : `/metrics/internet?interval_seconds=${S.perfIntervalSeconds}`;
+    const snapshot = await api(endpoint, manual ? { method: "POST" } : { signal: controller.signal });
+    if (request !== performanceInternetRequest || S.page !== "performance") return;
+    S.perfInternet = snapshot;
+    const previous = S.perfInternetHistory[S.perfInternetHistory.length - 1];
+    if (!previous || previous.collected_at !== snapshot.collected_at) {
+      S.perfInternetHistory.push(snapshot);
+      S.perfInternetHistory = S.perfInternetHistory.slice(-120);
+    }
+    renderInternetVisual();
+  } catch (error) {
+    if (request !== performanceInternetRequest || S.page !== "performance") return;
+    if (manual) toast("Connectivity refresh failed: " + error.message, "err");
+    const targets = $("#performance-internet-targets");
+    if (targets && !S.perfInternet) targets.textContent = "Connectivity could not be checked.";
+  } finally {
+    if (controller && performanceInternetAbort === controller) performanceInternetAbort = null;
+    if (request !== performanceInternetRequest || S.page !== "performance") return;
+    const currentButton = $("#performance-internet-refresh");
+    if (currentButton) {
+      currentButton.disabled = false;
+      currentButton.classList.remove("is-loading");
+    }
+    if (manual) startPerformanceInternetPolling();
+  }
+}
+
+function renderInternetVisual(snapshot = S.perfInternet) {
+  const chart = $("#performance-chart-internet-latency");
+  if (!snapshot) {
+    if (chart) chart.replaceChildren(el("div", { class: "performance-chart-empty" }, "Waiting for a connectivity check."));
+    renderInternetSpeedResult();
+    return;
+  }
+  const status = String(snapshot.status || "checking").toLowerCase();
+  const connectionSuccessful = Number(snapshot.connection_successful_targets || 0);
+  const connectionTotal = Number(snapshot.connection_total_targets || 0);
+  const failureCount = Number(snapshot.consecutive_failures || 0);
+  setNodeText("performance-internet-status", capitalizeFirst(status));
+  setNodeText("performance-internet-status-note", status === "checking"
+    ? "Waiting for the first TCP check"
+    : connectionSuccessful === 0 && failureCount > 0 && status !== "offline"
+      ? `Retrying · ${failureCount}/3 failed checks`
+      : `${connectionSuccessful}/${connectionTotal} TCP targets reachable`);
+  setNodeText("performance-internet-latency", connectionSuccessful ? `${Number(snapshot.connection_latency_ms || 0).toFixed(1)} ms` : "—");
+  setNodeText("performance-internet-latency-note", "TCP connection time from the Bonghos host");
+
+  const diagnosticsReady = Boolean(snapshot.diagnostics_collected_at);
+  setNodeText("performance-internet-dns", diagnosticsReady
+    ? snapshot.dns_ok ? `${Number(snapshot.dns_ms || 0).toFixed(1)} ms` : "Failed"
+    : "Checking");
+  setNodeText("performance-internet-dns-note", !diagnosticsReady
+    ? "Waiting for DNS and HTTPS diagnostics"
+    : snapshot.dns_ok ? "System resolver is responding" : "Check the host DNS configuration");
+  const httpsSuccessful = Number(snapshot.successful_targets || 0);
+  const httpsTotal = Number(snapshot.total_targets || 0);
+  setNodeText("performance-internet-https", diagnosticsReady
+    ? httpsSuccessful ? `${Number(snapshot.latency_ms || 0).toFixed(1)} ms` : "Failed"
+    : "Checking");
+  setNodeText("performance-internet-https-note", diagnosticsReady
+    ? `${httpsSuccessful}/${httpsTotal} diagnostic targets reachable`
+    : "Follows the selected update interval");
+
+  const reliabilitySuccessful = Number(snapshot.reliability_successful || 0);
+  const reliabilityTotal = Number(snapshot.reliability_total || 0);
+  setNodeText("performance-internet-reliability", reliabilityTotal ? `${reliabilitySuccessful}/${reliabilityTotal}` : "—");
+  setNodeText("performance-internet-reliability-note", reliabilityTotal
+    ? `${Math.round(reliabilitySuccessful / reliabilityTotal * 100)}% reachable`
+    : "Waiting for checks");
+
+  const statusValue = $("#performance-internet-status");
+  if (statusValue) statusValue.dataset.status = status;
+  const targetDetail = $("#performance-internet-targets");
+  if (targetDetail) {
+    const connectionTargets = (snapshot.connection_targets || []).map((target) => target.reachable
+      ? `${target.name} ${Number(target.latency_ms || 0).toFixed(1)} ms`
+      : `${target.name} ${internetErrorLabel(target.error)}`);
+    const httpsTargets = (snapshot.targets || []).map((target) => target.reachable
+      ? `${target.name} ${Number(target.latency_ms || 0).toFixed(1)} ms`
+      : `${target.name} ${internetErrorLabel(target.error)}`);
+    const connectionText = connectionTargets.length ? `TCP: ${connectionTargets.join(" · ")}` : "TCP: checking";
+    const diagnosticsText = diagnosticsReady
+      ? `HTTPS: ${httpsTargets.join(" · ")} · Diagnostics ${fmtTime(snapshot.diagnostics_collected_at)}`
+      : "HTTPS: checking";
+    targetDetail.textContent = `${connectionText} · ${diagnosticsText}`;
+  }
+  if (chart) {
+    const latencyHistory = S.perfInternetHistory.filter((entry) =>
+      entry.connection_successful_targets > 0 && Number.isFinite(Number(entry.connection_latency_ms)));
+    chart.replaceChildren(timeSeriesChart(latencyHistory, {
+      label: "Connection latency history",
+      min: 0,
+      floorMax: 50,
+      axisFormat: (value) => `${Math.round(value)} ms`,
+      series: [{
+        label: "Latency", tone: status === "offline" ? "warning" : "accent", area: true,
+        value: (entry) => Number(entry.connection_latency_ms), format: (value) => `${value.toFixed(1)} ms`,
+      }],
+    }));
+  }
+  renderInternetSpeedResult();
+}
+
+function internetErrorLabel(code) {
+  switch (code) {
+    case "timeout": return "timed out";
+    case "dns_failed": return "DNS failed";
+    case "connection_failed": return "unreachable";
+    default: return String(code || "failed").replace(/^http_/, "HTTP ");
+  }
+}
+
+function storageDonutChart({ id = "", title, description, total, centerTotal = total, centerLabel = "total", centerToggle = false, segments, timestamp, emptyMessage }) {
   const attrs = { class: "card performance-storage-panel" };
   if (id) attrs.id = id;
   const heading = el("div", { class: "performance-chart-heading" },
@@ -4564,21 +5070,29 @@ function storageDonutChart({ id = "", title, description, total, segments, times
     el("div", { class: "performance-chart-empty" }, emptyMessage));
 
   const svg = svgElement("svg", { class: "performance-donut", viewBox: "0 0 240 240", role: "img", "aria-label": `${title} distribution` });
-  const centerValue = el("strong", { class: "mono" }, fmtBytes(total));
-  const centerLabel = el("span", {}, "total");
+  const centerValue = el("strong", { class: "mono" });
+  const centerCaption = el("span", {}, centerLabel);
+  let centerControl = null;
   const detail = el("div", { class: "performance-donut-detail mono" }, `${fmtBytes(total)} total · ${fmtTime(timestamp)}`);
   let offset = 0;
   const entries = [];
   let activeEntry = null;
-  const showTotal = () => {
+  const showSummary = () => {
     activeEntry = null;
     entries.forEach((entry) => {
       if (entry.circle) svg.append(entry.circle);
       entry.circle?.classList.remove("is-active");
       entry.row.classList.remove("is-active");
     });
-    centerValue.textContent = fmtBytes(total);
-    centerLabel.textContent = "total";
+    const showPercentage = centerToggle && performanceStorageShowPercentage;
+    centerValue.textContent = showPercentage ? `${(centerTotal / total * 100).toFixed(1)}%` : fmtBytes(centerTotal);
+    centerCaption.textContent = centerLabel;
+    if (centerControl) {
+      const action = showPercentage ? "Show used space" : "Show percentage used";
+      centerControl.setAttribute("aria-label", action);
+      centerControl.setAttribute("title", action);
+      centerControl.setAttribute("aria-pressed", String(showPercentage));
+    }
     detail.textContent = `${fmtBytes(total)} total · ${fmtTime(timestamp)}`;
   };
   const showEntry = (entry) => {
@@ -4593,7 +5107,7 @@ function storageDonutChart({ id = "", title, description, total, segments, times
       candidate.row.classList.toggle("is-active", active);
     });
     centerValue.textContent = fmtBytes(entry.segment.value);
-    centerLabel.textContent = entry.segment.label;
+    centerCaption.textContent = entry.segment.label;
     detail.textContent = `${entry.segment.label}: ${fmtBytes(entry.segment.value)} (${(entry.segment.value / total * 100).toFixed(1)}%) · ${fmtTime(timestamp)}`;
   };
   segments.forEach((segment) => {
@@ -4616,10 +5130,10 @@ function storageDonutChart({ id = "", title, description, total, segments, times
     const entry = { segment, circle, row };
     entries.push(entry);
     row.addEventListener("pointerenter", () => showEntry(entry));
-    row.addEventListener("pointerleave", showTotal);
+    row.addEventListener("pointerleave", showSummary);
     [row, circle].filter(Boolean).forEach((target) => {
       target.addEventListener("focus", () => showEntry(entry));
-      target.addEventListener("blur", showTotal);
+      target.addEventListener("blur", showSummary);
     });
   });
   // The active SVG slice is re-appended for correct paint order. Delegating
@@ -4630,16 +5144,28 @@ function storageDonutChart({ id = "", title, description, total, segments, times
   svg.addEventListener("pointermove", (event) => {
     const entry = entries.find((candidate) => candidate.circle === event.target);
     if (entry) showEntry(entry);
-    else if (activeEntry && !entryHasVisibleFocus(activeEntry)) showTotal();
+    else if (activeEntry && !entryHasVisibleFocus(activeEntry)) showSummary();
   });
   svg.addEventListener("pointerleave", () => {
     const focused = entries.find(entryHasVisibleFocus);
     if (focused) showEntry(focused);
-    else showTotal();
+    else showSummary();
   });
+  if (centerToggle) {
+    centerControl = el("button", {
+      class: "performance-donut-center-toggle",
+      type: "button",
+      onclick: () => {
+        performanceStorageShowPercentage = !performanceStorageShowPercentage;
+        showSummary();
+      },
+    }, centerValue, centerCaption);
+  }
+  showSummary();
   return el("div", attrs, heading,
     el("div", { class: "performance-donut-layout" },
-      el("div", { class: "performance-donut-plot" }, svg, el("div", { class: "performance-donut-center" }, centerValue, centerLabel)),
+      el("div", { class: "performance-donut-plot" }, svg,
+        el("div", { class: "performance-donut-center" }, centerControl || centerValue, centerControl ? null : centerCaption)),
       el("div", { class: "performance-donut-legend" }, ...entries.map((entry) => entry.row), detail)));
 }
 
@@ -5664,6 +6190,208 @@ async function pageActivity(main) {
 }
 
 // ----- users -----------------------------------------------------------------
+function groupedPermissionCatalog(catalog) {
+  const groups = new Map();
+  for (const definition of catalog || []) {
+    if (!groups.has(definition.group)) groups.set(definition.group, []);
+    groups.get(definition.group).push(definition);
+  }
+  return [...groups.entries()];
+}
+
+const ROLE_PERMISSION_DESCRIPTIONS = {
+  owner: "Full access is permanent. Owner permissions cannot be changed.",
+  admin: "Runs and manages Bonghos. Only an Owner can change this role.",
+  member: "Operates the server with permissions granted by an Owner or authorized Admin.",
+  viewer: "Read-only. Viewer can receive view permissions only.",
+};
+const ROLE_RANK = { owner: 4, admin: 3, member: 2, viewer: 1 };
+
+async function manageRolePermissions() {
+  let data;
+  try { data = await api("/roles/permissions"); }
+  catch (error) { return toast(error.message, "err"); }
+
+  const roleOrder = ["owner", "admin", "member", "viewer"];
+  let activeRole = roleOrder.find((role) => data.roles?.[role]?.editable) || "owner";
+  const roleTabs = el("div", { class: "role-permission-tabs", role: "tablist", "aria-label": "Roles" });
+  const permissionPane = el("div", { class: "role-permission-pane" });
+  let saveButton = null;
+  const drafts = Object.fromEntries(roleOrder.map((role) =>
+    [role, new Set(data.roles?.[role]?.permissions || [])]));
+
+  const samePermissionSelection = (left, right) => {
+    if (left.size !== right.size) return false;
+    return [...left].every((permission) => right.has(permission));
+  };
+  const roleIsDirty = (role) => !samePermissionSelection(
+    drafts[role], new Set(data.roles?.[role]?.permissions || []));
+  const captureActiveDraft = () => {
+    const inputs = [...permissionPane.querySelectorAll("input[data-permission]")];
+    if (!inputs.length) return;
+    drafts[activeRole] = new Set(inputs.filter((input) => input.checked)
+      .map((input) => input.dataset.permission));
+  };
+  const updateDraftState = () => {
+    const roleInfo = data.roles[activeRole];
+    const editable = !!roleInfo?.editable;
+    const dirty = editable && roleIsDirty(activeRole);
+    const stateTag = permissionPane.querySelector(".role-permission-state-tag");
+    if (stateTag) stateTag.textContent = dirty
+      ? "Unsaved"
+      : (!editable ? "Fixed" : roleInfo.customized ? `Customized · r${roleInfo.revision}` : "Defaults");
+    if (saveButton) {
+      saveButton.disabled = !dirty;
+      setButtonLabel(saveButton, `Save ${capitalizeFirst(activeRole)}`);
+    }
+  };
+
+  const permissionInput = (permission) => permissionPane.querySelector(`input[data-permission="${CSS.escape(permission)}"]`);
+  const applyDependencyChange = (changed, definitions) => {
+    const byID = new Map(definitions.map((definition) => [definition.id, definition]));
+    if (changed.checked) {
+      const requirePermission = (permission, seen = new Set()) => {
+        if (seen.has(permission)) return true;
+        seen.add(permission);
+        const input = permissionInput(permission);
+        if (!input) return false;
+        if (input.disabled && !input.checked) return false;
+        for (const required of byID.get(permission)?.requires || []) {
+          if (!requirePermission(required, seen)) return false;
+        }
+        input.checked = true;
+        return true;
+      };
+      if (!requirePermission(changed.dataset.permission)) {
+        changed.checked = false;
+        toast("This permission requires access that cannot be granted by your account.", "err");
+      }
+      return;
+    }
+    const removeDependents = (permission, seen = new Set()) => {
+      if (seen.has(permission)) return;
+      seen.add(permission);
+      for (const definition of definitions) {
+        if (!(definition.requires || []).includes(permission)) continue;
+        const input = permissionInput(definition.id);
+        if (input && !input.disabled) input.checked = false;
+        removeDependents(definition.id, seen);
+      }
+    };
+    removeDependents(changed.dataset.permission);
+  };
+
+  const draw = () => {
+    const roleInfo = data.roles[activeRole];
+    const selected = drafts[activeRole] || new Set(roleInfo.permissions || []);
+    const defaults = new Set(roleInfo.defaults || []);
+    const editable = !!roleInfo.editable;
+    const definitions = data.catalog || [];
+    const groups = groupedPermissionCatalog(definitions);
+    const canUseDefaults = S.me.role === "owner" || [...defaults].every((permission) =>
+      can(permission) || selected.has(permission));
+    roleTabs.querySelectorAll("button").forEach((button) => {
+      const current = button.dataset.role === activeRole;
+      button.classList.toggle("active", current);
+      button.setAttribute("aria-selected", String(current));
+    });
+    permissionPane.replaceChildren(
+      el("div", { class: "role-permission-heading" },
+        el("div", {},
+          el("div", { class: "role-permission-title-row" },
+            el("h3", {}, capitalizeFirst(activeRole)),
+            el("span", { class: "tag role-permission-state-tag" })),
+          el("p", { class: "muted" }, ROLE_PERMISSION_DESCRIPTIONS[activeRole])),
+        editable ? el("button", {
+          class: "btn ghost role-defaults-button", type: "button",
+          disabled: canUseDefaults ? null : "disabled",
+          title: canUseDefaults ? "Restore the shipped permission choices" : "You do not hold every permission required by this role's defaults",
+          onclick: () => {
+          permissionPane.querySelectorAll("input[data-permission]").forEach((input) => {
+            if (!input.disabled) input.checked = defaults.has(input.dataset.permission);
+          });
+          captureActiveDraft();
+          updateDraftState();
+          },
+        }, "Use defaults") : el("span")),
+      ...groups.map(([group, permissions]) => el("section", { class: "role-permission-group" },
+        el("h4", {}, group),
+        el("div", { class: "role-permission-options" }, ...permissions.map((definition) => {
+          const permission = definition.id;
+          const actorCanGrant = S.me.role === "owner" || can(permission) || selected.has(permission);
+          const allowedForRole = (definition.assignable_roles || []).includes(activeRole);
+          const disabled = !editable || !actorCanGrant || !allowedForRole;
+          let disabledReason = "";
+          if (!editable) disabledReason = "Owner permissions are fixed.";
+          else if (!allowedForRole) disabledReason = `This permission cannot be assigned to ${capitalizeFirst(activeRole)}.`;
+          else if (!actorCanGrant) disabledReason = "You cannot grant a permission you do not have.";
+          const prerequisites = (definition.requires || []).map((required) =>
+            definitions.find((candidate) => candidate.id === required)?.label || required);
+          return el("label", {
+            class: `check-row role-permission-option${disabled ? " is-disabled" : ""}`,
+            title: disabledReason || null,
+          },
+            el("input", {
+              type: "checkbox", checked: selected.has(permission) ? "" : null,
+              disabled: disabled ? "" : null, "data-permission": permission,
+              onchange(event) {
+                applyDependencyChange(event.currentTarget, definitions);
+                captureActiveDraft();
+                updateDraftState();
+              },
+            }),
+            el("span", {},
+              el("strong", {}, definition.label),
+              el("small", {}, definition.description),
+              prerequisites.length ? el("small", { class: "role-permission-requires" }, `Requires: ${prerequisites.join(", ")}`) : null));
+        })))));
+    updateDraftState();
+  };
+
+  roleTabs.append(...roleOrder.map((role) => el("button", {
+    class: "role-permission-tab", type: "button", role: "tab", "data-role": role,
+    onclick: () => { captureActiveDraft(); activeRole = role; draw(); },
+  }, capitalizeFirst(role))));
+
+  modal("Role permissions", [
+    el("p", { class: "role-permission-intro" }, "Choose what each role can do in Bonghos. Changes apply to every user with that role."),
+    el("div", { class: "role-permission-manager" }, roleTabs, permissionPane),
+    el("p", { class: "hint role-permission-footnote" }, "Drafts stay available while you switch roles. Closing this window discards unsaved drafts. Affected users reconnect only after a saved change."),
+  ], [
+    ["Close", "ghost", (close) => close()],
+    ["Save permissions", "primary", async () => {
+      if (!data.roles[activeRole]?.editable) return;
+      captureActiveDraft();
+      if (!roleIsDirty(activeRole)) return;
+      saveButton.disabled = true;
+      try {
+        const permissions = [...drafts[activeRole]];
+        const revision = data.roles[activeRole].revision;
+        data = await api(`/roles/${activeRole}/permissions`, { method: "PUT", json: { permissions, revision } });
+        drafts[activeRole] = new Set(data.roles[activeRole].permissions || []);
+        toast(`${capitalizeFirst(activeRole)} permissions saved`, "ok");
+        draw();
+      } catch (error) {
+        if (error.status === 409 || /changed elsewhere/i.test(error.message)) {
+          try {
+            data = await api("/roles/permissions");
+            drafts[activeRole] = new Set(data.roles[activeRole].permissions || []);
+          }
+          catch { /* Keep the current view if refresh also fails. */ }
+          toast("Role permissions changed elsewhere. The latest settings were loaded; review and save again.", "err");
+          draw();
+          return;
+        }
+        toast(error.message, "err");
+        draw();
+      }
+    }],
+  ], null, "role-permissions-modal");
+  saveButton = [...document.querySelectorAll(".role-permissions-modal .actions .btn")]
+    .find((button) => button.textContent.trim() === "Save permissions");
+  draw();
+}
+
 async function pageUsers(main) {
   const users = await api("/users");
   main.innerHTML = "";
@@ -5715,7 +6443,8 @@ async function pageUsers(main) {
   main.append(
     pageHeader("Users", "Accounts, roles, invitations, sessions, and final-Owner protection.", [
       el("div", { class: "page-search-filter-controls" }, search, filter),
-      el("button", { class: "btn primary", onclick: inviteUser }, "Invite user"),
+      can("roles.manage") ? el("button", { class: "btn ghost", onclick: manageRolePermissions }, solarIcon("shield-keyhole-linear"), "Role permissions") : null,
+      can("users.manage") ? el("button", { class: "btn primary", onclick: inviteUser }, "Invite user") : null,
     ]),
     el("div", { class: "table-wrap users-table" },
       el("table", {},
@@ -5726,6 +6455,10 @@ async function pageUsers(main) {
 
 function userActions(user) {
   if (user.ID === S.me.id) return el("span", { class: "muted" }, "you");
+  if (!can("users.manage")) return el("span", { class: "muted" }, "View only");
+  if (S.me.role !== "owner" && ROLE_RANK[S.me.role] <= ROLE_RANK[user.Role]) {
+    return el("span", { class: "muted" }, "Protected");
+  }
   const toggleDisabled = async () => {
     try { await api(`/users/${user.ID}/disable`, { method: "POST", json: { disabled: !user.Disabled } }); renderPage(); }
     catch (error) { toast(error.message, "err"); }
@@ -5754,8 +6487,10 @@ function userActions(user) {
 }
 
 function inviteUser() {
+  const availableRoles = [["admin", "Admin"], ["member", "Member"], ["viewer", "Viewer"]]
+    .filter(([value]) => S.me.role === "owner" || ROLE_RANK[value] < ROLE_RANK[S.me.role]);
   const role = el("select", {},
-    ...[["admin", "Admin"], ["member", "Member"], ["viewer", "Viewer"]].map(([v, r]) => el("option", { value: v }, r)));
+    ...availableRoles.map(([v, r]) => el("option", { value: v }, r)));
   modal("Invite user", [
     el("div", { class: "field-row" }, el("label", {}, "Role", role),
       el("span", { class: "hint" }, "The invitation link is valid for 72 hours and works once. The new user sets their own password and authenticator during activation.")),
@@ -5776,8 +6511,10 @@ function inviteUser() {
 }
 
 function changeRole(u) {
+  const availableRoles = [["owner", "Owner"], ["admin", "Admin"], ["member", "Member"], ["viewer", "Viewer"]]
+    .filter(([value]) => S.me.role === "owner" || ROLE_RANK[value] < ROLE_RANK[S.me.role]);
   const role = el("select", {},
-    ...[["owner", "Owner"], ["admin", "Admin"], ["member", "Member"], ["viewer", "Viewer"]]
+    ...availableRoles
       .map(([v, r]) => el("option", { value: v, selected: v === u.Role ? "" : null }, r)));
   modal("Change role", [el("div", { class: "field-row" }, el("label", {}, u.Username, role))], [
     ["Cancel", "ghost", (c) => c()],
@@ -6189,10 +6926,11 @@ function passkeyCard(passkeys, hasLocalPasskey) {
 }
 
 async function pageSecurity(main) {
-  const canViewSystemSecurity = can("server.configuration.manage");
+  const canViewActivity = can("activity.view");
+  const canViewHost = can("host.view");
   const [activity, host, passkeys, recoveryCodes] = await Promise.all([
-    canViewSystemSecurity ? api("/activity").catch(() => []) : Promise.resolve([]),
-    canViewSystemSecurity ? api("/host").catch(() => null) : Promise.resolve(null),
+    canViewActivity ? api("/activity").catch(() => []) : Promise.resolve([]),
+    canViewHost ? api("/host").catch(() => null) : Promise.resolve(null),
     api("/passkeys").catch(() => []),
     api("/account/recovery-codes").catch(() => []),
   ]);
@@ -6253,7 +6991,7 @@ async function pageSecurity(main) {
     ...passkeyCard(passkeys || [], hasLocalPasskey),
     securitySectionHead("Recovery codes", "One-time fallback codes. Their plaintext is shown only when generated and cannot be viewed again."),
     recoveryCodeCard(recoveryCodes || [], hasLocalPasskey),
-    ...(canViewSystemSecurity ? [securitySectionHead("Recent security activity", "Latest sign-in and account-management events.",
+    ...(canViewActivity ? [securitySectionHead("Recent security activity", "Latest sign-in and account-management events.",
       el("button", { class: "btn ghost small", onclick: () => navigate("activity") }, solarIcon("history-linear"), "View all")),
     securityActivity.length
       ? el("div", { class: "table-wrap security-activity-table" },
@@ -6822,7 +7560,7 @@ async function pageSettings(main) {
   const [version, rawBots, host] = await Promise.all([
     api("/version").catch(() => ({ version: "unknown" })),
     can("bots.manage") ? api("/bots") : Promise.resolve([]),
-    can("server.configuration.manage") ? api("/host").catch(() => null) : Promise.resolve(null),
+    can("host.view") ? api("/host").catch(() => null) : Promise.resolve(null),
   ]);
   const bots = Array.isArray(rawBots) ? rawBots : [];
   const makeThemeButton = (value, label) => el("button", {

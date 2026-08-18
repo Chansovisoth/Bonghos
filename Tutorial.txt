@@ -929,7 +929,7 @@
  33. CREATING ADDITIONAL BONGHOS ACCOUNTS
 ===============================================================================
 
- There is no public sign-up. Owners and Admins invite people.
+ There is no public sign-up. Owners and Admins invite people by default.
 
  In the Web UI: Administration -> Users -> Invite User. Choose a role, and you
  get a one-time activation link to send to that person.
@@ -973,7 +973,7 @@
  An Admin cannot modify, delete, demote or create an Owner, and cannot raise
  their own role.
 
- MEMBER — exactly five things, nothing more:
+ MEMBER — starts with five things:
 
      view server status
      start server
@@ -981,13 +981,46 @@
      restart server
      view the player list
 
- A Member cannot use the console, send commands, manage players, view or edit
- files, change any settings, force stop, touch backups or schedules, manage
- users, or import anything.
+ By default, a Member cannot use the console, send commands, manage players,
+ view or edit files, change any settings, force stop, touch backups or
+ schedules, manage users, or import anything.
 
- VIEWER — read-only. Dashboard, status, player list and read-only console
- logs. Changes nothing. The detailed Performance page is limited to Owners
+ VIEWER — always read-only. Viewer can receive only view permissions, such as
+ Dashboard, status, player list, read-only console logs, Performance, backups,
+ activity, and host details. Operational and management permissions stay
+ unavailable. The detailed Performance page starts enabled only for Owners
  and Admins.
+
+ The Performance page's Internet section checks TCP connectivity, DNS, and
+ HTTPS at the selected Performance update interval. Bonghos reuses one shared
+ result across open dashboards, stops automatic checks when nobody has the
+ Performance page open, and requires three consecutive complete failures
+ before it reports Offline. Its speed test is separate and manual:
+ press Test, read the bandwidth warning, then confirm.
+ The test transfers up to about 53 MB through Cloudflare and can temporarily
+ reduce bandwidth available to players. "Test internet speed" is a separate
+ action permission and is never available to Viewer.
+
+ These are the default permissions. An Owner can open Users -> Role
+ permissions to configure Admin, Member, and Viewer. For Viewer, non-view
+ options are disabled. Owner permissions are permanent and cannot be edited.
+
+ Role permission management is initially Owner-only. An Owner may grant
+ "Manage role permissions" to Admin. That Admin may then edit Member and
+ Viewer, but cannot edit Admin or Owner and cannot grant a permission the
+ Admin does not already have. "Manage users" follows the same hierarchy: a
+ delegated manager can act only on lower roles.
+
+ Changes apply to every account with the selected role. Bonghos refreshes
+ affected live connections so the new permissions are loaded immediately.
+ Some permissions require another permission; the editor selects or clears
+ those prerequisites together, and the backend validates them again. Use the
+ "Use defaults" button to restore the shipped choices before saving.
+
+ Customized roles are saved as a complete permission snapshot. A permission
+ added by a later Bonghos update stays off for customized roles until someone
+ explicitly grants it. If two administrators edit the same role, the second
+ save is rejected and the latest settings are loaded for review.
 
  These limits are enforced by the backend, not merely hidden in the interface.
  Nobody can grant themselves extra permissions.

@@ -6,9 +6,9 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/authorization"
 )
 
-// The specification pins Member down to exactly five capabilities. These are
-// enforced in the backend, not merely hidden in the interface, so they are
-// asserted against the real HTTP API rather than the permission table.
+// The shipped Member role starts with exactly five capabilities. These
+// defaults are enforced in the backend, not merely hidden in the interface,
+// so they are asserted against the real HTTP API rather than only the table.
 func TestMemberIsLimitedToExactlyTheAllowedActions(t *testing.T) {
 	env := newTestEnv(t)
 	secret := env.createUser("member", "correct horse battery", authorization.RoleMember)
@@ -31,8 +31,10 @@ func TestMemberIsLimitedToExactlyTheAllowedActions(t *testing.T) {
 		"/api/users",
 		"/api/activity",
 		"/api/host",
+		"/api/metrics?hours=1",
 		"/api/metrics/config",
 		"/api/metrics/storage",
+		"/api/metrics/internet",
 	}
 	for _, path := range forbiddenGET {
 		if status, body := c.do("GET", path, nil, nil); status != 403 {
@@ -53,6 +55,8 @@ func TestMemberIsLimitedToExactlyTheAllowedActions(t *testing.T) {
 		{"/api/schedules", map[string]any{"name": "x", "schedule_type": "daily"}},
 		{"/api/users/invite", map[string]string{"role": "viewer"}},
 		{"/api/players/action", map[string]string{"action": "kick", "player": "Steve"}},
+		{"/api/metrics/internet/refresh", nil},
+		{"/api/metrics/internet/speed-test", map[string]any{}},
 	}
 	for _, tc := range forbiddenPOST {
 		if status, body := c.do("POST", tc.path, tc.body, nil); status != 403 {
@@ -74,7 +78,7 @@ func TestViewerIsReadOnly(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		"/api/server/start", "/api/server/stop", "/api/server/restart",
+		"/api/server/start", "/api/server/stop", "/api/server/restart", "/api/metrics/internet/refresh", "/api/metrics/internet/speed-test",
 	} {
 		if status, body := c.do("POST", path, map[string]any{}, nil); status != 403 {
 			t.Errorf("POST %s as Viewer returned %d (%s), want 403", path, status, body)
@@ -86,7 +90,8 @@ func TestViewerIsReadOnly(t *testing.T) {
 	for _, path := range []string{
 		"/api/backups", "/api/files?path=.", "/api/configuration",
 		"/api/schedules", "/api/activity", "/api/host", "/api/users",
-		"/api/metrics/config", "/api/metrics/storage",
+		"/api/metrics?hours=1",
+		"/api/metrics/config", "/api/metrics/storage", "/api/metrics/internet",
 	} {
 		if status, body := c.do("GET", path, nil, nil); status != 403 {
 			t.Errorf("GET %s as Viewer returned %d (%s), want 403", path, status, body)

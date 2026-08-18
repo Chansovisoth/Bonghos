@@ -25,7 +25,7 @@ For implementation details, security design, data layout, development instructio
 - Browse and edit server files, properties, icons, and startup settings; copy or move selections safely between managed projects
 - Connect up to two Telegram and two Discord bots for selected server and player notifications; Owners and Admins choose up to three destinations per bot with `/bonghos here`
 - Reconcile player sessions, Java PID, uptime, and Overview counts immediately when Minecraft stops, crashes, or restarts
-- Invite users with Owner, Admin, Member, or Viewer access
+- Invite users with Owner, Admin, Member, or Viewer access and configure Admin, Member, and Viewer permissions
 - Protect accounts with mandatory TOTP, recovery codes, and optional passkeys
 - Move the self-contained Bonghos runtime to another disk or Linux machine
 

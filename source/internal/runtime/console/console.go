@@ -24,7 +24,7 @@ const maxFrame = 64 * 1024
 
 // Message types exchanged on the socket.
 type Message struct {
-	Type    string   `json:"type"` // hello | history | line | status | command | internal_command | error | ok
+	Type    string   `json:"type"` // hello | history | line | internal_line | status | command | internal_command | error | ok
 	Line    string   `json:"line,omitempty"`
 	Lines   []string `json:"lines,omitempty"`
 	State   string   `json:"state,omitempty"`
@@ -192,6 +192,8 @@ func (s *Server) handle(conn net.Conn) {
 
 	history, lines, cancel := s.Sup.Subscribe()
 	defer cancel()
+	internalLines, cancelInternal := s.Sup.SubscribeInternal()
+	defer cancelInternal()
 
 	writeFrame(conn, &Message{Type: "status", State: string(s.Sup.State())})
 
@@ -257,6 +259,14 @@ func (s *Server) handle(conn net.Conn) {
 			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := writeFrame(conn, &Message{Type: "line", Line: line}); err != nil {
 				return // slow or dead client: disconnect without blocking Minecraft
+			}
+		case line, ok := <-internalLines:
+			if !ok {
+				return
+			}
+			conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := writeFrame(conn, &Message{Type: "internal_line", Line: line}); err != nil {
+				return
 			}
 		}
 	}

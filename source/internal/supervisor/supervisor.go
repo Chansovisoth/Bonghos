@@ -92,19 +92,24 @@ type Supervisor struct {
 	crashTimes []time.Time
 
 	// console fan-out
-	subMu       sync.Mutex
-	subs        map[chan string]bool
-	history     []string // bounded recent console history
-	historySize int      // approximate bytes held in history
+	subMu        sync.Mutex
+	subs         map[chan string]bool
+	internalSubs map[chan string]bool
+	history      []string // bounded recent console history
+	historySize  int      // approximate bytes held in history
 
 	// Commands Bonghos issues for its own bookkeeping (player polling) are
 	// hidden from the user-facing console: their echo and reply are still
-	// parsed and logged, but repeating "There are 0 of a max of 10 players
-	// online" every twelve seconds buries whatever the operator was reading.
-	suppressMu    sync.Mutex
-	suppressUntil time.Time
-	suppressRe    *regexp.Regexp
-	suppressEcho  string
+	// parsed, but repeating "There are 0 of a max of 10 players online" every
+	// twelve seconds buries whatever the operator was reading.
+	suppressMu           sync.Mutex
+	suppressUntil        time.Time
+	suppressRe           *regexp.Regexp
+	suppressEcho         string
+	suppressEchoPending  bool
+	suppressReplyPending bool
+	visibleCommand       string
+	visibleUntil         time.Time
 
 	onLine  func(line string) // log-parser hook
 	onState func(s State, ps PersistedState)
@@ -130,7 +135,12 @@ func New(cfg Config) *Supervisor {
 	if cfg.MaxCrashLoop <= 0 {
 		cfg.MaxCrashLoop = 5
 	}
-	return &Supervisor{cfg: cfg, state: StateStopped, subs: map[chan string]bool{}}
+	return &Supervisor{
+		cfg:          cfg,
+		state:        StateStopped,
+		subs:         map[chan string]bool{},
+		internalSubs: map[chan string]bool{},
+	}
 }
 
 func (s *Supervisor) OnLine(fn func(string))                 { s.onLine = fn }
@@ -327,23 +337,27 @@ func (s *Supervisor) readConsole(tty *os.File) {
 	sc := bufio.NewScanner(tty)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
-		// The raw PTY text goes to the log file so nothing is lost for
-		// debugging, but everything the UI sees is sanitized: escape
-		// sequences are meaningless outside a terminal and would otherwise
-		// be stored in the history buffer and rendered in the browser.
+		// Everything the UI sees is sanitized: escape sequences are
+		// meaningless outside a terminal and would otherwise be stored in the
+		// history buffer and rendered in the browser.
 		raw := sc.Text()
-		if logFile != nil {
-			fmt.Fprintln(logFile, SanitizeLine(raw))
-		}
 		line := SanitizeLine(raw)
 		if line == "" && strings.TrimSpace(raw) != "" {
 			continue // the line was entirely control sequences
 		}
-		// Parsing happens for every line; only the console stream is filtered.
+		// Parsing happens for every line. Internal bookkeeping output is kept
+		// out of both the live stream and bonghos-console.log because that log
+		// is the durable history source used by the Console page.
 		if s.onLine != nil {
 			s.onLine(line)
 		}
-		if !s.suppressed(line) {
+		hidden := s.suppressed(line)
+		if !hidden && logFile != nil {
+			fmt.Fprintln(logFile, line)
+		}
+		if hidden {
+			s.broadcastInternal(line)
+		} else {
 			s.broadcast(line)
 		}
 		// running detection: "Done (12.3s)!" from the server
@@ -375,6 +389,19 @@ func (s *Supervisor) broadcast(line string) {
 	s.subMu.Unlock()
 }
 
+// broadcastInternal delivers bookkeeping output to structured consumers such
+// as player tracking without adding it to operator history or visible output.
+func (s *Supervisor) broadcastInternal(line string) {
+	s.subMu.Lock()
+	for ch := range s.internalSubs {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+	s.subMu.Unlock()
+}
+
 // Subscribe returns recent history plus a live channel; call the cancel func
 // when the client disconnects.
 func (s *Supervisor) Subscribe() (history []string, ch chan string, cancel func()) {
@@ -390,24 +417,36 @@ func (s *Supervisor) Subscribe() (history []string, ch chan string, cancel func(
 	}
 }
 
+// SubscribeInternal receives non-display bookkeeping lines. These lines are
+// intentionally excluded from Subscribe history and its visible stream.
+func (s *Supervisor) SubscribeInternal() (ch chan string, cancel func()) {
+	ch = make(chan string, 32)
+	s.subMu.Lock()
+	if s.internalSubs == nil {
+		s.internalSubs = map[chan string]bool{}
+	}
+	s.internalSubs[ch] = true
+	s.subMu.Unlock()
+	return ch, func() {
+		s.subMu.Lock()
+		delete(s.internalSubs, ch)
+		s.subMu.Unlock()
+	}
+}
+
 // SendInternalCommand issues a command Bonghos needs for its own bookkeeping
 // and hides its echo and reply from the user-facing console for a short
-// window. The output is still written to the log file and still passed to the
-// log parser, so player tracking is unaffected.
+// window. The output is still passed to the log parser, so player tracking is
+// unaffected, but is omitted from the operator-facing console log and stream.
 func (s *Supervisor) SendInternalCommand(cmd string) error {
-	cmd = strings.TrimSpace(cmd)
+	cmd = cleanConsoleCommand(cmd)
 	reply, ok := internalReplies[cmd]
 	if !ok {
 		// Only known bookkeeping commands may be hidden. Anything else is
 		// treated as an ordinary command so nothing can be issued invisibly.
 		return s.SendCommand(cmd)
 	}
-	s.suppressMu.Lock()
-	s.suppressUntil = time.Now().Add(5 * time.Second)
-	s.suppressRe = reply
-	s.suppressEcho = cmd
-	s.suppressMu.Unlock()
-	return s.SendCommand(cmd)
+	return s.sendCommand(cmd, reply)
 }
 
 // internalReplies maps a bookkeeping command to the reply it produces. Keeping
@@ -422,31 +461,58 @@ func (s *Supervisor) suppressed(line string) bool {
 	s.suppressMu.Lock()
 	defer s.suppressMu.Unlock()
 	if s.suppressUntil.IsZero() || time.Now().After(s.suppressUntil) {
+		s.clearSuppressionLocked()
 		return false
 	}
 	trimmed := strings.TrimSpace(line)
-	// The terminal echoes the command itself before the server replies.
-	if s.suppressEcho != "" && (trimmed == s.suppressEcho || strings.HasSuffix(trimmed, "> "+s.suppressEcho)) {
+	// PTYs and server launchers do not agree on whether the command echo or
+	// reply arrives first, so track and hide each independently.
+	if s.suppressEchoPending && s.suppressEcho != "" && (trimmed == s.suppressEcho || strings.HasSuffix(trimmed, "> "+s.suppressEcho)) {
+		s.suppressEchoPending = false
+		s.finishSuppressionLocked()
 		return true
 	}
-	if s.suppressRe != nil && s.suppressRe.MatchString(line) {
-		// The reply has arrived; stop suppressing so a command the operator
-		// types themselves is never hidden.
-		s.suppressUntil = time.Time{}
+	if s.suppressReplyPending && s.suppressRe != nil && s.suppressRe.MatchString(line) {
+		s.suppressReplyPending = false
+		s.finishSuppressionLocked()
 		return true
 	}
 	return false
 }
 
+func (s *Supervisor) finishSuppressionLocked() {
+	if !s.suppressEchoPending && !s.suppressReplyPending {
+		s.clearSuppressionLocked()
+	}
+}
+
+func (s *Supervisor) clearSuppressionLocked() {
+	s.suppressUntil = time.Time{}
+	s.suppressRe = nil
+	s.suppressEcho = ""
+	s.suppressEchoPending = false
+	s.suppressReplyPending = false
+}
+
 // SendCommand forwards a Minecraft console command. Input is rejected while
 // the server is not running/starting; a Linux shell is never reachable.
 func (s *Supervisor) SendCommand(cmd string) error {
-	cmd = strings.TrimSpace(strings.Map(func(r rune) rune {
+	return s.sendCommand(cleanConsoleCommand(cmd), nil)
+}
+
+func cleanConsoleCommand(cmd string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' {
 			return -1
 		}
 		return r
 	}, cmd))
+}
+
+// sendCommand writes one already-sanitized command. A non-nil reply marks an
+// internal bookkeeping command; an ordinary command with the same text
+// cancels pending suppression so an operator's explicit `list` stays visible.
+func (s *Supervisor) sendCommand(cmd string, reply *regexp.Regexp) error {
 	if cmd == "" {
 		return errors.New("empty command")
 	}
@@ -458,7 +524,39 @@ func (s *Supervisor) SendCommand(cmd string) error {
 	if s.tty == nil {
 		return errors.New("console not attached")
 	}
+	s.suppressMu.Lock()
+	if reply != nil {
+		if s.visibleCommand == cmd && time.Now().Before(s.visibleUntil) {
+			// The operator's recent command provides the same player update. Do
+			// not send a duplicate poll that could hide their echo or reply.
+			s.suppressMu.Unlock()
+			return nil
+		}
+		s.suppressUntil = time.Now().Add(5 * time.Second)
+		s.suppressRe = reply
+		s.suppressEcho = cmd
+		s.suppressEchoPending = true
+		s.suppressReplyPending = true
+	} else if _, bookkeepingCommand := internalReplies[cmd]; bookkeepingCommand {
+		// The operator takes priority if they issue the same command while a
+		// bookkeeping response is still pending. A short visibility lease also
+		// prevents the next poll from overtaking their server reply.
+		s.clearSuppressionLocked()
+		s.visibleCommand = cmd
+		s.visibleUntil = time.Now().Add(5 * time.Second)
+	}
+	s.suppressMu.Unlock()
 	_, err := s.tty.WriteString(cmd + "\n")
+	if err != nil {
+		s.suppressMu.Lock()
+		if reply != nil {
+			s.clearSuppressionLocked()
+		} else if s.visibleCommand == cmd {
+			s.visibleCommand = ""
+			s.visibleUntil = time.Time{}
+		}
+		s.suppressMu.Unlock()
+	}
 	return err
 }
 

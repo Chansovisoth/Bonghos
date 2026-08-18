@@ -60,8 +60,11 @@ type App struct {
 	consoleMu               sync.Mutex
 	consoleHistory          []string
 	Collector               *monitoring.Collector
+	InternetTester          *monitoring.InternetTester
+	InternetMonitor         *monitoring.InternetMonitor
 	storageMu               sync.RWMutex
 	storageSnapshot         monitoring.StorageSnapshot
+	internetSpeedMu         sync.Mutex
 	uploadMu                sync.Mutex
 	botLifecycleMu          sync.Mutex
 	botSawOnline            bool
@@ -161,6 +164,8 @@ func New(home string, webFS fs.FS) (*App, error) {
 	a.Hub = websocket.NewHub()
 	a.Runner = newRunner(a)
 	a.Collector = monitoring.NewCollector()
+	a.InternetTester = monitoring.NewInternetTester()
+	a.InternetMonitor = monitoring.NewInternetMonitor(a.InternetTester)
 	a.Sched = &scheduler.Scheduler{DB: db, Exec: &executor{app: a}, Log: a.Logf}
 
 	a.Operations.OnUpdate(func(op *operations.Operation) {
@@ -283,12 +288,12 @@ func (a *App) metricsLoop(ctx context.Context) {
 		case <-pruneT.C:
 			monitoring.Prune(a.DB, time.Duration(a.Cfg.MetricsRetentionDays)*24*time.Hour)
 		case now := <-pulse.C:
-			// Temporarily collect faster when a live Overview/sidebar or open
-			// Performance view asks for a more responsive feed. Persisted history
+			// Temporarily collect faster when an authorized live Overview/sidebar
+			// or open Performance view asks for a more responsive feed. Persisted history
 			// stays on the configured cadence so live dashboards do not multiply
 			// database writes.
 			effective := historyInterval
-			for _, topic := range []string{"overview", "performance"} {
+			for _, topic := range []string{"overview_performance", "performance"} {
 				if a.Hub.SubscriberCount(topic) == 0 {
 					continue
 				}
@@ -309,7 +314,7 @@ func (a *App) metricsLoop(ctx context.Context) {
 			}
 			lastSampleAt = now
 			a.Hub.BroadcastDue("performance", "sample", s, historyInterval)
-			a.Hub.BroadcastDue("overview", "sample", s, historyInterval)
+			a.Hub.BroadcastDue("overview_performance", "sample", s, historyInterval)
 		}
 	}
 }
