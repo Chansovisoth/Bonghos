@@ -179,9 +179,11 @@ func TestCustomizedRoleIsAnExplicitSnapshot(t *testing.T) {
 	c.mustLogin("owner", "correct horse battery", ownerSecret)
 
 	defaults := authorization.Permissions(authorization.RoleMember)
+	customized := append([]string(nil), defaults...)
+	customized = append(customized, string(authorization.PermConsoleView))
 	var payload rolePermissionsTestPayload
-	if status, body := putRolePermissions(c, "member", defaults, 0, &payload); status != 200 {
-		t.Fatalf("saving defaults = %d (%s), want 200", status, body)
+	if status, body := putRolePermissions(c, "member", customized, 0, &payload); status != 200 {
+		t.Fatalf("saving customized permissions = %d (%s), want 200", status, body)
 	}
 	var count int
 	if err := env.app.DB.QueryRow(`SELECT COUNT(*) FROM role_permissions WHERE role='member'`).Scan(&count); err != nil {
