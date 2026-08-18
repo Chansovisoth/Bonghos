@@ -13,8 +13,9 @@ func TestGeneratedUnitsQuotePathsAndApplyPortableHardening(t *testing.T) {
 	bin := home + `/system/bin/bonghos`
 	control := ControlPlaneUnit(home, bin)
 	minecraft := MinecraftUnit(home, bin, 90)
+	playit := PlayitUnit(home, bin)
 
-	for _, unit := range []string{control, minecraft} {
+	for _, unit := range []string{control, minecraft, playit} {
 		for _, want := range []string{
 			`Environment="BONGHOS_HOME=/srv/Bonghos Server/100%% ready"`,
 			`WorkingDirectory=/srv/Bonghos\x20Server/100%%\x20ready`,
@@ -36,6 +37,12 @@ func TestGeneratedUnitsQuotePathsAndApplyPortableHardening(t *testing.T) {
 	}
 	if !strings.Contains(minecraft, "Restart=on-failure\nRestartSec=5s") {
 		t.Error("Minecraft unit must not restart after an intentional clean stop")
+	}
+	if !strings.Contains(playit, "playit-agent\nRestart=on-failure") {
+		t.Error("Playit unit must run the managed-agent command and restart after failures")
+	}
+	if strings.Contains(playit, "\n[Install]\n") {
+		t.Error("Playit service must only be started on demand")
 	}
 	// ProtectControlGroups, ProtectKernelModules and ProtectKernelTunables
 	// implicitly alter the capability bounding set. Some restricted Linux
@@ -72,14 +79,18 @@ func TestGeneratedUnitsPassSystemdAnalyze(t *testing.T) {
 
 	controlPath := filepath.Join(t.TempDir(), ServiceControlPlane)
 	minecraftPath := filepath.Join(t.TempDir(), ServiceMinecraft)
+	playitPath := filepath.Join(t.TempDir(), ServicePlayit)
 	if err := os.WriteFile(controlPath, []byte(ControlPlaneUnit(root, bin)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(minecraftPath, []byte(MinecraftUnit(root, bin, 90)), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(playitPath, []byte(PlayitUnit(root, bin)), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	cmd := exec.Command(analyze, "verify", controlPath, minecraftPath)
+	cmd := exec.Command(analyze, "verify", controlPath, minecraftPath, playitPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("systemd-analyze verify: %v\n%s", err, out)
 	}

@@ -1,0 +1,25 @@
+# Optional Bonghos-managed Playit.gg agent USER service (reference template).
+#
+# Generated automatically by `bonghos service install` / `bonghos service repair`
+# and installed to ~/.config/systemd/user/bonghos-playit.service. Bonghos starts
+# it only after Playit is enabled and linked in Settings.
+
+[Unit]
+Description=Bonghos Managed Playit.gg Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+Environment="BONGHOS_HOME=<resolved-root>"
+WorkingDirectory=<resolved-root>
+ExecStart="<resolved-root>/system/bin/bonghos" --home "<resolved-root>" playit-agent
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+
+# No [Install] section: the Bonghos control plane starts this service only when
+# the integration remains enabled. The official playitd executable is used;
+# Bonghos does not replace an existing system-wide Playit service or container.

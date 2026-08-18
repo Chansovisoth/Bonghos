@@ -459,13 +459,14 @@ const DEMO_PERMISSION_CATALOG = [
   ["activity.view", "People and integrations", "View activity", "Review account and server administration history.", [], DEMO_VIEW_ASSIGNABLE_ROLES],
   ["users.manage", "People and integrations", "Manage users", "Invite users and manage lower-role accounts and sessions.", [], ["admin", "member"]],
   ["roles.manage", "People and integrations", "Manage role permissions", "Configure permissions for lower roles.", [], ["admin"]],
+  ["playit.manage", "People and integrations", "Manage Playit.gg", "Configure the public Minecraft tunnel and Playit agent.", ["server.view"], ["admin"]],
   ["bots.manage", "People and integrations", "Manage notification bots", "Configure Discord and Telegram bots.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
   ["host.view", "System", "View host", "See Bonghos installation, listener, and service details.", [], DEMO_VIEW_ASSIGNABLE_ROLES],
 ].map(([id, group, label, description, requires, assignable_roles]) => ({ id, group, label, description, requires, assignable_roles }));
 const DEMO_PERMS = DEMO_PERMISSION_CATALOG.map(({ id }) => id);
 const DEMO_ROLE_DEFAULTS = {
   owner: [...DEMO_PERMS],
-  admin: DEMO_PERMS.filter((permission) => permission !== "roles.manage"),
+  admin: DEMO_PERMS.filter((permission) => permission !== "roles.manage" && permission !== "playit.manage"),
   member: ["server.view", "server.start", "server.stop", "server.restart", "server.players.view"],
   viewer: ["server.view", "server.players.view", "server.console.view"],
 };
@@ -488,6 +489,12 @@ const DEMO_BOTS = [
   { id: 1, name: "Server alerts", provider: "telegram", destination_id: "-1001234567890", destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, thread_id: 23, thread_name: "Server alerts" }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png" }], discovered_destinations: [{ id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", discovered_at: new Date(Date.now() - 21 * 86400000).toISOString() }, { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png", discovered_at: new Date(Date.now() - 14 * 86400000).toISOString() }, { id: "-1005555555555", name: "Build Team", type: "supergroup", discovered_at: new Date(Date.now() - 2 * 86400000).toISOString() }], enabled: true, notify_server_started: true, notify_server_stopped: true, notify_player_joined: true, notify_player_left: true, token_configured: true },
   { id: 2, name: "Staff channel", provider: "discord", dns_server: "", destination_id: "123456789012345678", destinations: [{ id: "123456789012345678", name: "bot-spam", type: "channel", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo" }], discovered_destinations: [{ id: "223456789012345678", name: "Bonghos Community", type: "guild", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo", discovered_at: new Date(Date.now() - 18 * 86400000).toISOString() }, { id: "323456789012345678", name: "Creative Server", type: "guild", guild_id: "323456789012345678", guild_name: "Creative Server", discovered_at: new Date(Date.now() - 5 * 86400000).toISOString() }], enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
 ];
+let DEMO_PLAYIT = {
+  enabled: false, account_mode: "account", management_mode: "none",
+  secret_configured: false, agent_id: "", tunnel_id: "", public_address: "",
+  local_port: 25565, claim_pending: false, claim_url: "", agent_online: false,
+  account_status: "", tunnel_status: "", detections: [], daemon_available: true, managed_state: "inactive", notice: "",
+};
 const DEMO_TELEGRAM_GROUPS = [
   { id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, topics: [{ id: 23, name: "Server alerts" }, { id: 91, name: "Admin chat" }] },
   { id: "-1009876543210", name: "Players", type: "supergroup", photo_url: "/demo-server-creative-lab.png" },
@@ -612,6 +619,35 @@ async function demoApi(path, opts = {}) {
       S.consoleLines.push("> " + ((opts.json && opts.json.command) || ""));
       return { ok: true };
     }
+    if (method === "PUT" && clean === "/playit") {
+      DEMO_PLAYIT = { ...DEMO_PLAYIT, ...opts.json };
+      if (!DEMO_PLAYIT.enabled) DEMO_PLAYIT.management_mode = "none";
+      return { ...DEMO_PLAYIT };
+    }
+    if (method === "POST" && clean === "/playit/claim") {
+      DEMO_PLAYIT = {
+        ...DEMO_PLAYIT, enabled: true, management_mode: "bonghos",
+        account_mode: opts.json?.account_mode || "account", claim_pending: true,
+        claim_url: "https://playit.gg/claim/b0a605de00",
+      };
+      return { ...DEMO_PLAYIT };
+    }
+    if (method === "POST" && clean === "/playit/claim/poll") {
+      DEMO_PLAYIT = {
+        ...DEMO_PLAYIT, claim_pending: false, claim_url: "", secret_configured: true,
+        agent_id: "7c66e87b-demo-agent", agent_online: true, managed_state: "active",
+        account_status: DEMO_PLAYIT.account_mode === "guest" ? "guest" : "verified",
+      };
+      return { state: "complete", config: { ...DEMO_PLAYIT } };
+    }
+    if (method === "POST" && clean === "/playit/tunnel") {
+      DEMO_PLAYIT = {
+        ...DEMO_PLAYIT, tunnel_id: "12d5b7c0-demo-tunnel",
+        public_address: "bonghos-demo.gl.joinmc.link:25565", tunnel_status: "configured",
+      };
+      return { ...DEMO_PLAYIT };
+    }
+    if (method === "POST" && clean === "/playit/refresh") return { ...DEMO_PLAYIT };
     if (method === "POST" && clean === "/metrics/internet/speed-test") {
       await new Promise((resolve) => setTimeout(resolve, 900));
       return {
@@ -723,15 +759,17 @@ async function demoApi(path, opts = {}) {
     case "/auth/me": return demoUserSnapshot();
     case `/invitations/${DEMO_INVITE_TOKEN}`: return { role: "admin" };
     case "/bots": return DEMO_BOTS.map((bot) => ({ ...bot }));
-    case "/version": return { version: "0.2.0-demo" };
+    case "/playit": return { ...DEMO_PLAYIT };
+    case "/version": return { version: "0.3.0-rc.1-demo" };
     case "/servers": return { servers: DEMO_SERVERS, active_id: 1 };
     case "/server/status": return S.status;
     case "/server/console/history": return { lines: DEMO_CONSOLE.slice(-CONSOLE_LINE_LIMIT), limit: CONSOLE_LINE_LIMIT, source: "demo" };
     case "/overview": return {
       state: S.status.state,
-      version: "0.2.0-demo",
+      version: "0.3.0-rc.1-demo",
       instance: DEMO_SERVERS[0],
       motd: "A precise Bonghos local demo",
+      playit_address: DEMO_PLAYIT.enabled ? DEMO_PLAYIT.public_address : "",
       lan_ip: "192.168.1.42",
       port: "25565",
       max_players: "20",
@@ -746,7 +784,7 @@ async function demoApi(path, opts = {}) {
       mem_total: 32 * 1024 * 1024 * 1024, mem_available: 18 * 1024 * 1024 * 1024,
       disk_total: 512 * 1024 * 1024 * 1024, disk_free: 186 * 1024 * 1024 * 1024,
       load1: 0.82, systemd: true, service_bonghos: "active", service_minecraft: "running",
-      version: "0.2.0-demo",
+      version: "0.3.0-rc.1-demo",
       note: "Demo data only. Local listening does not prove public accessibility.",
     };
     case "/events": return { events: [
@@ -1984,6 +2022,13 @@ async function pageOverview(main) {
   }
   const projectDetails = [
     el("dt", {}, "MOTD"), el("dd", {}, d.motd || "—"),
+    ...(d.playit_address ? [
+      el("dt", {}, "Playit IP"), el("dd", {}, el("button", {
+        class: "copy-value mono", type: "button", title: "Copy Playit IP",
+        "aria-label": `Copy Playit IP ${d.playit_address}`,
+        onclick: () => copyText(d.playit_address, "Playit IP copied"),
+      }, el("span", {}, d.playit_address), solarIcon("copy-linear"))),
+    ] : []),
     el("dt", {}, "LAN IP"), el("dd", {},
       d.lan_ip ? el("button", {
         class: "copy-value mono", type: "button", title: "Copy LAN IP",
@@ -7700,6 +7745,220 @@ function settingsServiceCard(title, unit, description, rawState, systemdAvailabl
     el("p", { class: "muted" }, description));
 }
 
+function playitState(config) {
+  if (!config.enabled) return "Off";
+  if (config.agent_online && config.public_address) return "Online";
+  if (config.claim_pending) return "Waiting for approval";
+  if (config.management_mode === "external") return "External agent";
+  if (config.secret_configured && config.managed_state === "failed") return "Agent failed";
+  if (config.secret_configured && config.managed_state === "inactive") return "Agent stopped";
+  if (config.secret_configured) return "Agent linked";
+  return "Setup required";
+}
+
+function playitSettingsSection(initialConfig) {
+  const config = { account_mode: "account", management_mode: "none", local_port: 25565, detections: [], ...initialConfig };
+  const section = el("section", { class: "settings-page-section", "aria-labelledby": "playit-settings-title" });
+  let polling = false;
+
+  const savePreference = async (updates) => {
+    const payload = {
+      enabled: updates.enabled ?? config.enabled,
+      account_mode: updates.account_mode ?? config.account_mode,
+      management_mode: updates.management_mode ?? config.management_mode,
+      public_address: updates.public_address ?? config.public_address ?? "",
+      local_port: Number(updates.local_port ?? config.local_port ?? 25565),
+    };
+    const saved = await api("/playit", { method: "PUT", json: payload });
+    Object.assign(config, saved, updates);
+    render();
+    return saved;
+  };
+
+  const pollClaim = async (automatic = false) => {
+    if (polling || !config.claim_pending) return;
+    polling = true;
+    try {
+      while (config.claim_pending && document.body.contains(section)) {
+        const result = await api("/playit/claim/poll", { method: "POST", json: {} });
+        if (result.state === "complete") {
+          Object.assign(config, result.config || {}, { claim_pending: false, claim_url: "" });
+          toast("Playit.gg agent linked", "ok");
+          render();
+          return;
+        }
+        if (result.state === "rejected") {
+          config.claim_pending = false;
+          toast("Playit.gg setup was not approved", "err");
+          render();
+          return;
+        }
+        if (!automatic) {
+          toast("Waiting for approval on Playit.gg", "ok");
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    } catch (error) {
+      if (!automatic) toast(error.message, "err");
+    } finally {
+      polling = false;
+    }
+  };
+
+  const beginClaim = async (button) => {
+    button.disabled = true;
+    try {
+      const started = await api("/playit/claim", { method: "POST", json: { account_mode: config.account_mode } });
+      Object.assign(config, started);
+      render();
+    } catch (error) {
+      toast(error.message, "err");
+      button.disabled = false;
+    }
+  };
+
+  const render = () => {
+    section.innerHTML = "";
+    const state = playitState(config);
+    const power = el("button", {
+      class: "bot-power playit-power" + (config.enabled ? " is-on" : ""), type: "button",
+      "aria-pressed": String(!!config.enabled),
+      "aria-label": `${config.enabled ? "Turn off" : "Turn on"} Playit.gg`,
+      onclick: async () => {
+        power.disabled = true;
+        try {
+          await savePreference({
+            enabled: !config.enabled,
+            management_mode: config.enabled ? "none" : (config.management_mode === "external" ? "external" : "bonghos"),
+          });
+          toast(config.enabled ? "Playit.gg enabled" : "Playit.gg disabled", "ok");
+        } catch (error) {
+          toast(error.message, "err");
+          power.disabled = false;
+        }
+      },
+    }, el("span", { class: "bot-power-track", "aria-hidden": "true" }, el("span", {})),
+    el("span", { class: "bot-power-label" }, config.enabled ? "On" : "Off"));
+
+    section.append(settingsSectionHeading(
+      "playit-settings-title", "Playit.gg", "Public Minecraft access without router port forwarding."));
+
+    const card = el("div", { class: "card playit-settings-card" });
+    if (config.notice) {
+      card.append(el("div", { class: "notice playit-notice" }, config.notice));
+    }
+    card.append(el("div", { class: "settings-row" },
+      el("div", {}, el("h3", {}, "Connection"),
+        el("p", { class: "muted" }, state)),
+      el("div", { class: "playit-status-line" }, power,
+        config.public_address
+          ? el("div", { class: "playit-address" },
+            el("span", { class: "mono" }, config.public_address))
+          : null)));
+
+    if (config.enabled) {
+      const managedChoice = config.management_mode !== "external";
+      const methodButtons = el("div", { class: "playit-choice" },
+        el("button", { class: "btn" + (managedChoice ? " active" : ""), type: "button", onclick: async () => {
+          config.management_mode = "bonghos";
+          render();
+        } }, "Set up with Bonghos"),
+        el("button", { class: "btn" + (!managedChoice ? " active" : ""), type: "button", onclick: async () => {
+          config.management_mode = "external";
+          render();
+        } }, "Use existing agent"));
+      card.append(el("div", { class: "settings-row" },
+        el("div", {}, el("h3", {}, "Agent"),
+          el("p", { class: "muted" }, "Use a Bonghos-linked agent or keep an existing Playit deployment externally managed.")),
+        el("div", { class: "playit-form" }, methodButtons)));
+
+      if (managedChoice) {
+        const accountButtons = el("div", { class: "playit-choice" },
+          el("button", { class: "btn" + (config.account_mode === "account" ? " active" : ""), type: "button",
+            onclick: () => { config.account_mode = "account"; render(); } }, "Playit account"),
+          el("button", { class: "btn" + (config.account_mode === "guest" ? " active" : ""), type: "button",
+            onclick: () => { config.account_mode = "guest"; render(); } }, "Guest"));
+        const controls = el("div", { class: "playit-form" }, accountButtons);
+        if (!config.daemon_available) {
+          controls.append(el("div", { class: "notice playit-inline-notice" },
+            el("span", {}, "The official Playit agent is not installed on this host. "),
+            el("a", { href: "https://packages.playit.gg/", target: "_blank", rel: "noopener noreferrer" }, "Installation guide")));
+        }
+        if (config.claim_pending) {
+          controls.append(el("p", { class: "muted" }, "Approve the agent on Playit.gg, then return here."),
+            el("div", { class: "playit-actions" },
+              el("a", { class: "btn primary", href: config.claim_url, target: "_blank", rel: "noopener noreferrer" }, "Open Playit.gg"),
+              el("button", { class: "btn", type: "button", onclick: () => pollClaim(false) }, "Check status")));
+          queueMicrotask(() => pollClaim(true));
+        } else if (!config.secret_configured) {
+          controls.append(el("p", { class: "muted" }, config.account_mode === "guest"
+            ? "Quick setup without a permanent Playit account."
+            : "Sign in on Playit.gg. Your Playit password never passes through Bonghos."),
+            el("button", { class: "btn primary", type: "button", onclick: (event) => beginClaim(event.currentTarget) }, "Connect Playit.gg"));
+        } else {
+          const details = el("dl", { class: "kv compact" },
+            el("dt", {}, "Account"), el("dd", {}, config.account_status || config.account_mode),
+            el("dt", {}, "Agent"), el("dd", { class: "mono" }, config.agent_id || "Linked"),
+            el("dt", {}, "Local port"), el("dd", { class: "mono" }, String(config.local_port || 25565)));
+          if (config.guest_login_url) {
+            controls.append(el("a", { class: "btn", href: config.guest_login_url, target: "_blank", rel: "noopener noreferrer" }, "Manage guest account"));
+          }
+          controls.append(details, el("div", { class: "playit-actions" },
+            el("button", { class: "btn primary", type: "button", onclick: async (event) => {
+              event.currentTarget.disabled = true;
+              try {
+                const hadTunnel = !!config.tunnel_id;
+                Object.assign(config, await api("/playit/tunnel", { method: "POST", json: {} }));
+                toast(hadTunnel ? "Playit tunnel updated" : "Playit tunnel created", "ok");
+                render();
+              } catch (error) {
+                toast(error.message, "err");
+                event.currentTarget.disabled = false;
+              }
+            } }, config.tunnel_id ? "Update tunnel" : "Create tunnel"),
+            el("button", { class: "btn", type: "button", onclick: async (event) => {
+              event.currentTarget.disabled = true;
+              try { Object.assign(config, await api("/playit/refresh", { method: "POST", json: {} })); render(); }
+              catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+            } }, "Refresh"),
+            el("button", { class: "btn", type: "button", onclick: (event) => beginClaim(event.currentTarget) }, "Relink agent")));
+        }
+        card.append(el("div", { class: "settings-row" },
+          el("div", {}, el("h3", {}, "Account"), el("p", { class: "muted" }, "Choose an account login or quick guest setup.")), controls));
+      } else {
+        const address = el("input", { value: config.public_address || "", placeholder: "example.gl.joinmc.link", spellcheck: "false" });
+        const port = el("input", { type: "number", min: "1", max: "65535", value: String(config.local_port || 25565) });
+        card.append(el("div", { class: "settings-row" },
+          el("div", {}, el("h3", {}, "Existing agent"),
+            el("p", { class: "muted" }, "Bonghos will display the address but will not start, stop, or read secrets from this agent.")),
+          el("div", { class: "playit-form" },
+            el("label", {}, "Public address", address), el("label", {}, "Port", port),
+            el("div", { class: "playit-actions" }, el("button", { class: "btn primary", type: "button", onclick: async (event) => {
+              event.currentTarget.disabled = true;
+              try {
+                await savePreference({ enabled: true, management_mode: "external", public_address: address.value.trim(), local_port: Number(port.value) });
+                toast("External Playit agent saved", "ok");
+              } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+            } }, "Save")))));
+      }
+
+      if (Array.isArray(config.detections) && config.detections.length) {
+        card.append(el("div", { class: "settings-row" },
+          el("div", {}, el("h3", {}, "Detected agents"),
+            el("p", { class: "muted" }, "Detection is read-only and never accesses agent secrets.")),
+          el("div", { class: "settings-services" }, ...config.detections.map((item) =>
+            settingsServiceCard(item.name, item.kind,
+              item.externally_managed ? "Managed outside Bonghos." : "Managed by Bonghos.", item.state, true)))));
+      }
+    }
+    section.append(card);
+  };
+
+  render();
+  return section;
+}
+
 function botsSettingsSection(bots) {
   const providerCounts = bots.reduce((counts, bot) => {
     counts[bot.provider] = (counts[bot.provider] || 0) + 1;
@@ -7789,8 +8048,9 @@ function turnstileSettingsSection(config) {
 }
 
 async function pageSettings(main) {
-  const [version, rawBots, host] = await Promise.all([
+  const [version, rawPlayit, rawBots, host] = await Promise.all([
     api("/version").catch(() => ({ version: "unknown" })),
+    can("playit.manage") ? api("/playit").catch(() => null) : Promise.resolve(null),
     can("bots.manage") ? api("/bots") : Promise.resolve([]),
     can("host.view") ? api("/host").catch(() => null) : Promise.resolve(null),
   ]);
@@ -7802,7 +8062,7 @@ async function pageSettings(main) {
   }, label);
   main.innerHTML = "";
   main.append(
-    pageHeader("Settings", "Appearance, notification bots, and installation details."),
+    pageHeader("Settings", "Appearance, connectivity, integrations, and installation details."),
     el("section", { class: "settings-page-section", "aria-labelledby": "general-settings-title" },
       settingsSectionHeading("general-settings-title", "General", "Appearance and local preferences."),
       el("div", { class: "card" },
@@ -7812,6 +8072,7 @@ async function pageSettings(main) {
           makeThemeButton("system", "System"),
           makeThemeButton("dark", "Dark"),
           makeThemeButton("light", "Light"))))),
+    ...(can("playit.manage") && rawPlayit ? [playitSettingsSection(rawPlayit)] : []),
     ...(can("bots.manage") ? [botsSettingsSection(bots)] : []),
     el("section", { class: "settings-page-section", "aria-labelledby": "about-settings-title" },
       settingsSectionHeading("about-settings-title", "About", "Installation details and service status."),

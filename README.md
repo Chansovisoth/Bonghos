@@ -6,7 +6,7 @@
 
 Bonghos lets you import, configure, run, monitor, schedule, back up, restore, and manage Minecraft Java Edition servers from a browser. It runs directly on your Linux machine with no Docker, cloud account, subscription, or required telemetry.
 
-> **Status: v0.2.0** — current stable release. Keep independent backups and test restores before using it with an important world.
+> **Status: v0.3.0-rc.1** — current prerelease. Keep independent backups and test restores before using it with an important world.
 
 For implementation details, security design, data layout, development instructions, and current limitations, see [TECHNICAL.md](TECHNICAL.md).
 
@@ -23,6 +23,7 @@ For implementation details, security design, data layout, development instructio
 - Create scheduled actions, announcements, saves, and backups
 - Make full, world-only, or configuration-only backups; verify and restore them
 - Browse and edit server files, properties, icons, and startup settings; copy or move selections safely between managed projects
+- Optionally publish the active Minecraft server through a Playit.gg tunnel without router port forwarding
 - Connect up to two Telegram and two Discord bots for selected server and player notifications; Owners and Admins choose up to three destinations per bot with `/bonghos here`
 - Reconcile player sessions, Java PID, uptime, and Overview counts immediately when Minecraft stops, crashes, or restarts
 - Invite users with Owner, Admin, Member, or Viewer access and configure Admin, Member, and Viewer permissions
@@ -51,7 +52,7 @@ cd ~/bonghos-source
 ### From an extracted release archive
 
 ```bash
-cd ~/Downloads/Bonghos-0.2.0
+cd ~/Downloads/Bonghos-0.3.0-rc.1
 chmod +x setup.sh
 ./setup.sh
 ```
@@ -85,7 +86,8 @@ During guided setup, you will:
 2. Create the first Owner username and password.
 3. Scan a TOTP QR code and enter the six-digit code from your authenticator app.
 4. Save the one-time recovery codes somewhere safe.
-5. Decide whether to install the recommended systemd user services.
+5. Choose Playit.gg (recommended) or direct/manual player networking; Playit can use an account or guest setup.
+6. Decide whether to install the recommended systemd user services.
 
 Start the Web UI service:
 
@@ -122,13 +124,22 @@ Open <http://127.0.0.1:8080>, sign in, then:
 3. Set its memory limits and accept the Minecraft EULA.
 4. Start the server.
 
+If Playit was selected during setup, open **Settings > Playit.gg**. Install the
+official Linux agent from <https://packages.playit.gg/>, link it using the
+browser approval flow, then create the tunnel. Bonghos encrypts the agent
+credential and uses a separate on-demand user service. Existing installations
+upgraded from a version without Playit remain on direct/manual networking until
+an Owner enables the integration.
+
 Bonghos listens on `127.0.0.1` by default. To reach it securely from another computer, create an SSH tunnel from that computer:
 
 ```bash
 ssh -L 8080:127.0.0.1:8080 user@your-server
 ```
 
-Then open <http://127.0.0.1:8080> locally. Bonghos does not configure routers, firewalls, reverse proxies, or tunnels for you.
+Then open <http://127.0.0.1:8080> locally. Bonghos does not configure routers,
+firewalls, or reverse proxies for panel access; optional Playit support is only
+for the Minecraft player connection.
 
 For a panel intentionally published through Cloudflare Tunnel, an Owner can
 enable Cloudflare Turnstile under **Security > Login protection**. Create a
@@ -292,7 +303,7 @@ bonghos backup restore <backup-id> --scope configuration_only
 | `bonghos database checkpoint` | Check SQLite integrity and checkpoint its WAL |
 | `bonghos fix-permissions` | Restore expected file permissions |
 | `bonghos service install` | Install the advanced user-service definitions |
-| `bonghos service status` | Show control-panel and Minecraft service status |
+| `bonghos service status` | Show control-panel, Minecraft, and managed Playit service status |
 | `bonghos service repair` | Regenerate service files for the current runtime path |
 | `bonghos service uninstall` | Remove the user services without deleting data |
 
@@ -303,6 +314,7 @@ systemctl --user status bonghos.service
 systemctl --user restart bonghos.service
 journalctl --user -u bonghos.service -f
 journalctl --user -u bonghos-minecraft.service -f
+journalctl --user -u bonghos-playit.service -f
 ```
 
 Every CLI command supports a custom runtime directory through either form:

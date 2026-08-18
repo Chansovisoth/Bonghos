@@ -29,6 +29,7 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/database"
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/operations"
+	"github.com/Chansovisoth/Bonghos/internal/playit"
 	"github.com/Chansovisoth/Bonghos/internal/portability"
 	"github.com/Chansovisoth/Bonghos/internal/qrcode"
 	"github.com/Chansovisoth/Bonghos/internal/runtime/console"
@@ -42,7 +43,7 @@ import (
 //go:embed all:webdist
 var webEmbed embed.FS
 
-var version = "0.2.0"
+var version = "0.3.0-rc.1"
 
 func main() {
 	app.Version = version
@@ -61,6 +62,8 @@ func main() {
 		err = cmdWeb(*home, args)
 	case "supervisor":
 		err = cmdSupervisor(*home)
+	case "playit-agent":
+		err = cmdPlayitAgent(*home)
 	case "setup":
 		err = cmdSetup(*home)
 	case "console":
@@ -419,6 +422,37 @@ func cmdSupervisor(home string) error {
 	return sup.Run(ctx)
 }
 
+// cmdPlayitAgent is an internal service entry point. The command intentionally
+// stays out of help output because users manage it through Settings.
+func cmdPlayitAgent(home string) error {
+	if err := config.InitHome(home); err != nil {
+		return err
+	}
+	key, err := security.LoadSecretKey(filepath.Join(home, config.FileSecretKey))
+	if err != nil {
+		return err
+	}
+	db, err := database.Open(filepath.Join(home, config.FileDatabase))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := database.Migrate(db); err != nil {
+		return err
+	}
+	store := &playit.Store{DB: db, SecretKey: key}
+	settings, err := store.Config()
+	if err != nil {
+		return err
+	}
+	if !settings.Enabled || settings.ManagementMode != playit.ManagementBonghos || !settings.SecretConfigured {
+		return errors.New("Bonghos-managed Playit is not enabled and linked")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return playit.RunManagedAgent(ctx, home, store)
+}
+
 // ---------------------------------------------------------------------------
 // setup
 // ---------------------------------------------------------------------------
@@ -434,11 +468,29 @@ func cmdSetup(home string) error {
 
 	var owners int
 	_ = a.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE role=? AND disabled=0`, authorization.RoleOwner).Scan(&owners)
-	if owners > 0 {
+	freshInstall := owners == 0
+	if !freshInstall {
 		fmt.Println("An Owner account already exists; setup will not create another.")
 	} else {
 		if err := setupOwner(a); err != nil {
 			return err
+		}
+		fmt.Print("Use Playit.gg for player connections (recommended)? [Y/n]: ")
+		if readLine() != "n" {
+			fmt.Print("Playit identity: account [1] or guest [2]? [1]: ")
+			mode := playit.AccountModeAccount
+			if readLine() == "2" {
+				mode = playit.AccountModeGuest
+			}
+			if _, err := a.Playit.SetPreference(true, mode, playit.ManagementBonghos, 0); err != nil {
+				return err
+			}
+			fmt.Println("Playit selected. Finish linking the agent in Settings after the panel starts.")
+			if !playit.DaemonAvailable(home) {
+				fmt.Println("Install the official Linux agent first: https://packages.playit.gg/")
+			}
+		} else {
+			fmt.Println("Direct connection / manual port forwarding selected.")
 		}
 	}
 
@@ -1041,7 +1093,7 @@ func cmdService(home string, args []string) error {
 		if err := systemd.Install(home, cfg.GracefulStopSeconds); err != nil {
 			return err
 		}
-		fmt.Println("Installed", systemd.ServiceControlPlane, "and", systemd.ServiceMinecraft)
+		fmt.Println("Installed", systemd.ServiceControlPlane+",", systemd.ServiceMinecraft, "and", systemd.ServicePlayit)
 		if hint, err := systemd.LingerHint(); err == nil && hint != "" {
 			fmt.Println(hint)
 		}
@@ -1058,6 +1110,7 @@ func cmdService(home string, args []string) error {
 	case "status":
 		fmt.Println(systemd.ServiceControlPlane+":", systemd.Status(systemd.ServiceControlPlane))
 		fmt.Println(systemd.ServiceMinecraft+":", systemd.Status(systemd.ServiceMinecraft))
+		fmt.Println(systemd.ServicePlayit+":", systemd.Status(systemd.ServicePlayit))
 	default:
 		return fmt.Errorf("unknown service verb %q", args[0])
 	}

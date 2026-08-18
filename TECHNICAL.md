@@ -16,10 +16,14 @@ systemd user manager
 |       |-- Authentication and authorization
 |       `-- Scheduler, imports, backups, bots, and monitoring
 |
-`-- bonghos-minecraft.service
-    `-- Bonghos supervisor
-        `-- Selected server startup script
-            `-- Java / Minecraft
+|-- bonghos-minecraft.service
+|   `-- Bonghos supervisor
+|       `-- Selected server startup script
+|           `-- Java / Minecraft
+|
+`-- bonghos-playit.service (optional, started on demand)
+    `-- Bonghos credential bridge
+        `-- official playitd
 ```
 
 The control panel and Minecraft run as a normal Linux user. Bonghos does not require root.
@@ -135,7 +139,7 @@ ssh user@new-host
 ~/bonghos/system/bin/bonghos service repair
 ```
 
-Because the account database and `system/config/secret.key` travel with the runtime, accounts, authenticator secrets, passkey records, and notification bot credentials remain usable after migration when the WebAuthn origin is unchanged. Losing `secret.key` makes encrypted TOTP secrets and notification bot tokens unrecoverable.
+Because the account database and `system/config/secret.key` travel with the runtime, accounts, authenticator secrets, passkey records, notification bot credentials, and a managed Playit credential remain usable after migration when the WebAuthn origin is unchanged. Losing `secret.key` makes those encrypted credentials unrecoverable.
 
 Portable exports provide an alternative:
 
@@ -211,7 +215,28 @@ Every account enrolls in TOTP. Recovery codes are one-use fallback credentials, 
 
 ## Networking model
 
-Bonghos binds to `127.0.0.1` by default. It does not modify firewall rules, router settings, port forwarding, reverse proxies, Cloudflare Tunnel, playit.gg, Tailscale, or VPN configuration.
+Bonghos binds to `127.0.0.1` by default. It does not modify firewall rules,
+router settings, reverse proxies, Cloudflare Tunnel, Tailscale, or VPN
+configuration. Player networking may remain direct/manual or use the optional
+Playit.gg integration. Existing databases default to direct/manual; new guided
+setups offer Playit first but require explicit browser approval.
+
+The Playit integration stores one global configuration because Bonghos runs one
+active project at a time. The agent credential is AES-256-GCM encrypted with
+`secret.key` and is never returned to the Web UI. When the managed agent runs,
+the credential is materialized only in a mode-0600 runtime file and removed
+when the daemon exits. Bonghos uses the official `playitd` executable and a
+separate `bonghos-playit.service`; it does not download or replace agent
+software. The Web UI also performs read-only detection of the official system
+service, user service, Docker/Podman images, and Playit processes without
+reading container environments or process secrets. An externally managed
+agent remains outside Bonghos lifecycle control.
+
+Playit claim and tunnel requests use fixed HTTPS API origins, bounded response
+sizes and timeouts, and `Agent-Key` authentication only after a credential has
+been encrypted. The `playit.manage` permission is Owner-only by default and
+can be delegated to Admin by an Owner. Tunnel configuration always targets
+`127.0.0.1` and the active project's Minecraft port.
 
 For remote administration, an operator can use an SSH tunnel:
 
@@ -238,7 +263,7 @@ When Bonghos is placed behind a reverse proxy or tunnel, the operator is respons
 ## Security design
 
 - Passwords are hashed with Argon2id.
-- TOTP secrets and notification bot tokens are encrypted with authenticated encryption.
+- TOTP secrets, notification bot tokens, and the managed Playit agent credential are encrypted with authenticated encryption.
 - Recovery codes are stored as one-way hashes and can be used once.
 - Passkeys use WebAuthn challenge-response verification.
 - Login performs dummy verification work and returns non-enumerating errors.
@@ -378,7 +403,7 @@ See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) before contributing.
 
 ## Validation status and limitations
 
-This section describes the v0.2.0 release.
+This section describes the v0.3.0-rc.1 prerelease.
 
 ### Automated coverage
 

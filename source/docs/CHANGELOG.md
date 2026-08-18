@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.1] - 2026-08-19
+
 ### Added
 
+- Optional Playit.gg player networking can be selected during new setup and
+  configured above Bots in Settings. Owners may link an account or guest agent,
+  provision one Minecraft Java tunnel for the active project, show its public
+  address, or record an existing externally managed agent. Agent credentials
+  are encrypted, existing systemd/Docker/Podman/process deployments are
+  detected read-only, and a separate on-demand user service runs the official
+  `playitd` executable. Upgraded installations remain on direct/manual
+  networking until explicitly enabled, and Owners can delegate the new
+  `playit.manage` permission to Admin.
 - Owners can optionally protect every password and passkey sign-in with a
   Cloudflare Turnstile Managed challenge without requiring member email
   addresses. Widget secrets are encrypted at rest, tokens are validated
@@ -582,7 +593,8 @@ Docker or any container runtime; billing or subscriptions; public registration;
 browser shell access; automatic router, firewall, port-forwarding or tunnel
 configuration; required telemetry.
 
-[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Chansovisoth/Bonghos/compare/v0.3.0-rc.1...HEAD
+[0.3.0-rc.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.2.0...v0.3.0-rc.1
 [0.2.0]: https://github.com/Chansovisoth/Bonghos/compare/v0.2.0-rc.1...v0.2.0
 [0.2.0-rc.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.1...v0.2.0-rc.1
 [0.1.1]: https://github.com/Chansovisoth/Bonghos/compare/v0.1.0...v0.1.1

@@ -27,6 +27,8 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/monitoring"
 	"github.com/Chansovisoth/Bonghos/internal/operations"
+	"github.com/Chansovisoth/Bonghos/internal/playit"
+	"github.com/Chansovisoth/Bonghos/internal/runtime/systemd"
 	"github.com/Chansovisoth/Bonghos/internal/scheduler"
 	"github.com/Chansovisoth/Bonghos/internal/security"
 	"github.com/Chansovisoth/Bonghos/internal/supervisor"
@@ -35,7 +37,7 @@ import (
 )
 
 // Version is stamped at build time via -ldflags.
-var Version = "0.2.0-dev"
+var Version = "0.3.0-rc.1-dev"
 
 // App is the control plane.
 type App struct {
@@ -51,6 +53,8 @@ type App struct {
 	Backups    *backup.Manager
 	Bots       *bot.Store
 	Turnstile  *turnstile.Service
+	Playit     *playit.Store
+	PlayitAPI  *playit.Client
 	BotNotify  *bot.Dispatcher
 	Sched      *scheduler.Scheduler
 	Hub        *websocket.Hub
@@ -69,6 +73,12 @@ type App struct {
 	internetSpeedMu         sync.Mutex
 	uploadMu                sync.Mutex
 	botLifecycleMu          sync.Mutex
+	playitMu                sync.Mutex
+	playitRuntimeMu         sync.Mutex
+	playitParent            context.Context
+	playitCancel            context.CancelFunc
+	playitDone              chan struct{}
+	playitRunID             uint64
 	botSawOnline            bool
 	botReadySent            bool
 	botStoppedSent          bool
@@ -163,6 +173,8 @@ func New(home string, webFS fs.FS) (*App, error) {
 	}
 	a.Bots = &bot.Store{DB: db, SecretKey: key}
 	a.Turnstile = &turnstile.Service{Store: &turnstile.Store{DB: db, SecretKey: key}}
+	a.Playit = &playit.Store{DB: db, SecretKey: key}
+	a.PlayitAPI = &playit.Client{Version: Version}
 	a.BotNotify = &bot.Dispatcher{Store: a.Bots, Sender: bot.NewSender(), Logf: a.Logf}
 	a.Hub = websocket.NewHub()
 	a.Runner = newRunner(a)
@@ -193,6 +205,9 @@ func (a *App) activeInstance() (*instance.Instance, error) {
 
 // Serve runs the HTTP server and background loops until ctx is cancelled.
 func (a *App) Serve(ctx context.Context) error {
+	a.playitRuntimeMu.Lock()
+	a.playitParent = ctx
+	a.playitRuntimeMu.Unlock()
 	a.Operations.CleanStale()
 	state, processState := a.Runner.State()
 	a.observeServerState(state, processState)
@@ -202,6 +217,7 @@ func (a *App) Serve(ctx context.Context) error {
 	go a.playerPollLoop(ctx)
 	go a.BotNotify.RunTelegramCommands(ctx)
 	go a.BotNotify.RunDiscordCommands(ctx)
+	go a.bootPlayit(ctx)
 	go a.bootAutostart(ctx)
 	go a.Runner.attachConsole()
 
@@ -224,6 +240,83 @@ func (a *App) Serve(ctx context.Context) error {
 		return nil
 	case err := <-errCh:
 		return err
+	}
+}
+
+func (a *App) bootPlayit(ctx context.Context) {
+	settings, err := a.Playit.Config()
+	if err != nil || !settings.Enabled || settings.ManagementMode != playit.ManagementBonghos || !settings.SecretConfigured {
+		playit.CleanupRuntime(a.Home)
+		return
+	}
+	if !playit.DaemonAvailable(a.Home) {
+		a.Logf("Playit agent not started: official playitd executable not found")
+		return
+	}
+	if systemd.Available() {
+		if err := systemd.Start(systemd.ServicePlayit); err != nil {
+			a.Logf("Playit agent service unavailable; using the foreground fallback: %v", err)
+			a.startForegroundPlayit(ctx)
+		}
+		return
+	}
+	a.startForegroundPlayit(ctx)
+}
+
+func (a *App) startForegroundPlayit(parent context.Context) {
+	a.playitRuntimeMu.Lock()
+	if a.playitCancel != nil {
+		a.playitRuntimeMu.Unlock()
+		return
+	}
+	if parent == nil {
+		parent = a.playitParent
+	}
+	if parent == nil {
+		a.playitRuntimeMu.Unlock()
+		return
+	}
+	runCtx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	a.playitRunID++
+	runID := a.playitRunID
+	a.playitCancel = cancel
+	a.playitDone = done
+	a.playitRuntimeMu.Unlock()
+
+	go func() {
+		defer close(done)
+		err := playit.RunManagedAgent(runCtx, a.Home, a.Playit)
+		a.playitRuntimeMu.Lock()
+		if a.playitRunID == runID {
+			a.playitCancel = nil
+			a.playitDone = nil
+		}
+		a.playitRuntimeMu.Unlock()
+		if err != nil && runCtx.Err() == nil {
+			a.Logf("Playit agent stopped: %v", err)
+		}
+	}()
+}
+
+func (a *App) stopForegroundPlayit() {
+	a.playitRuntimeMu.Lock()
+	cancel := a.playitCancel
+	done := a.playitDone
+	a.playitRuntimeMu.Unlock()
+	stopped := cancel == nil
+	if cancel != nil {
+		cancel()
+		if done != nil {
+			select {
+			case <-done:
+				stopped = true
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
+	if stopped {
+		playit.CleanupRuntime(a.Home)
 	}
 }
 

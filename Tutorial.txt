@@ -3,9 +3,9 @@
 ===============================================================================
 
  Official repository: https://github.com/Chansovisoth/Bonghos
- Bonghos version:     0.2.0
+ Bonghos version:     0.3.0-rc.1
  Tutorial format:     1
- Last updated:        2026-08-16
+ Last updated:        2026-08-19
  License:             AGPL-3.0-only
 
 -------------------------------------------------------------------------------
@@ -17,13 +17,14 @@
 
  * NEVER delete or lose this file:
        <BONGHOS_HOME>/system/config/secret.key
-   It encrypts your two-factor (TOTP) secrets and notification bot tokens.
+   It encrypts your two-factor (TOTP) secrets, notification bot tokens, and
+   managed Playit agent credential.
    Without it, that encrypted data is permanently unreadable. It is included when
    you copy the whole Bonghos directory to another machine.
 
- * Bonghos does NOT configure public networking. It never touches your router,
-   firewall, port forwarding or tunnels. Making a server reachable from the
-   internet is entirely your responsibility. See section 13.
+ * Bonghos never changes your router, firewall, or manual port forwarding. The
+   optional Playit integration can create a Minecraft tunnel only after an
+   Owner enables and approves it. See section 50A.
 
  * The Web UI listens on 127.0.0.1 (this machine only) by default.
 
@@ -82,6 +83,7 @@
  48. Uninstalling Bonghos
  49. Troubleshooting
  50. Managing files safely
+ 50A. Configuring Playit.gg player access
  51. Configuring Telegram and Discord notification bots
  52. Command quick reference
 
@@ -111,6 +113,7 @@
    * Persistent schedules that run without a browser open
    * Manual and scheduled backups, verification, retention and restore
    * Telegram and Discord notifications for server and player events
+   * Optional Playit.gg tunneling for the active Minecraft server
    * Multiple user accounts with mandatory two-factor authentication
    * Owner / Admin / Member / Viewer roles
    * Portable installation you can move between directories and computers
@@ -125,7 +128,7 @@
    * Multiple servers running simultaneously
    * Billing, subscriptions or public account registration
    * Shell access in the browser
-   * Automatic port forwarding, firewall or tunnel configuration
+   * Router port forwarding or automatic firewall configuration
    * Docker or any container runtime
 
 
@@ -212,9 +215,9 @@
  If you downloaded a source ZIP or tar archive instead of using Git:
 
      cd ~/Downloads
-     unzip Bonghos-0.2.0.zip          # GitHub source ZIP
-     # or: tar -xzf Bonghos-0.2.0-source.tar.gz
-     cd Bonghos-0.2.0
+     unzip Bonghos-0.3.0-rc.1.zip          # GitHub source ZIP
+     # or: tar -xzf Bonghos-0.3.0-rc.1-source.tar.gz
+     cd Bonghos-0.3.0-rc.1
      chmod +x setup.sh
      ./setup.sh
 
@@ -245,8 +248,9 @@
    10. Ask where to install the runtime
    11. Create the runtime directory, configuration, encryption key and database
    12. Walk you through creating the first Owner account and two-factor setup
-   13. Offer to install the two systemd user services
-   14. Print the Web UI address and next steps
+   13. Ask whether to use Playit.gg (recommended) or direct/manual networking
+   14. Offer to install the systemd user services
+   15. Print the Web UI address and next steps
 
  It never starts Minecraft during installation.
 
@@ -884,7 +888,7 @@
  31. STARTING BONGHOS AUTOMATICALLY AT BOOT
 ===============================================================================
 
- Install the two systemd user services (the installer offers this):
+ Install the Bonghos systemd user services (the installer offers this):
 
      ~/bonghos/system/bin/bonghos web enable
 
@@ -1318,7 +1322,7 @@
    11. Confirms secret.key exists and preserves it (never logged or copied out)
    12. Installs the new executable atomically (temp file + rename)
    13. Applies configuration and database migrations
-   14. Repairs both systemd services
+   14. Repairs the Bonghos systemd services
    15. Runs `bonghos doctor` against the updated installation
    16. Restores whatever was running before
    17. Restores the executable, database and configuration if verification fails
@@ -1496,7 +1500,7 @@
      cd ~/bonghos-source
      ./setup.sh --uninstall
 
- This stops and removes the two systemd user services and deletes the
+ This stops and removes the Bonghos systemd user services and deletes the
  executable. It PRESERVES your servers, backups, database, configuration and
  secret.key.
 
@@ -1505,7 +1509,8 @@
      rm -rf ~/bonghos
 
  WARNING: that deletes secret.key too. Every encrypted value, including all
- two-factor secrets and notification bot tokens, becomes permanently
+ two-factor secrets, notification bot tokens, and the managed Playit agent
+ credential, becomes permanently
  unrecoverable. Take a backup or an
  export first if there is any chance you want the data later.
 
@@ -1650,6 +1655,39 @@
  selecting so a selection cannot silently change directories.
 
  Clicking the Files navigation tab again returns to the active project.
+
+
+===============================================================================
+ 50A. CONFIGURING PLAYIT.GG PLAYER ACCESS
+===============================================================================
+
+ New guided installations offer Playit.gg as the default player-networking
+ option. Choosing Direct/manual leaves router and firewall configuration to
+ you. Existing Bonghos installations upgraded from an older release also stay
+ Direct/manual until an Owner enables Playit in Settings.
+
+ To use Bonghos-managed Playit:
+
+   1. Install the official Linux agent from https://packages.playit.gg/.
+   2. Open Settings > Playit.gg and turn it on.
+   3. Choose Playit account or Guest, then select Connect Playit.gg.
+   4. Approve the agent in the Playit browser page.
+   5. Create the tunnel. Bonghos uses the active project's Minecraft port.
+   6. Give players the public address shown in Settings.
+
+ Bonghos encrypts the agent credential with secret.key and runs the official
+ playitd executable through bonghos-playit.service. It does not ask for your
+ Playit password. Guest setup returns a temporary management link after the
+ claim completes; save or convert the guest account according to Playit's
+ instructions if you need durable account access.
+
+ If Playit is already running as a system service, user service, Docker or
+ Podman container, Settings displays the read-only detection. Choose Use
+ existing agent and enter its public address and local Minecraft port. Bonghos
+ will display it but will not inspect its secret or control that deployment.
+
+ Only the Owner can manage Playit by default. The Owner may delegate Manage
+ Playit.gg to the Admin role from Users > Role permissions.
 
 
 ===============================================================================

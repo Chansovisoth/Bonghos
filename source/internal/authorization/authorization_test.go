@@ -71,6 +71,12 @@ func TestPermissionCatalogDependenciesAndTargets(t *testing.T) {
 	if !PermissionAssignableTo(PermRolesManage, RoleAdmin) || PermissionAssignableTo(PermRolesManage, RoleMember) {
 		t.Error("roles.manage must be Admin-only")
 	}
+	if !PermissionAssignableTo(PermPlayitManage, RoleAdmin) || PermissionAssignableTo(PermPlayitManage, RoleMember) {
+		t.Error("playit.manage must be delegable only to Admin")
+	}
+	if Has(RoleAdmin, PermPlayitManage) {
+		t.Error("Admin must receive playit.manage explicitly from an Owner")
+	}
 	if !PermissionAssignableTo(PermPerformanceTest, RoleMember) || PermissionAssignableTo(PermPerformanceTest, RoleViewer) {
 		t.Error("performance.test must be an action permission assignable to Admin and Member only")
 	}

@@ -62,6 +62,14 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("GET /api/roles/permissions", a.requirePerm(authorization.PermRolesManage, a.handleRolePermissions))
 	mux.HandleFunc("PUT /api/roles/{role}/permissions", a.requirePerm(authorization.PermRolesManage, a.handleRolePermissionsUpdate))
 
+	// --- Playit.gg ----------------------------------------------------------
+	mux.HandleFunc("GET /api/playit", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitGet))
+	mux.HandleFunc("PUT /api/playit", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitUpdate))
+	mux.HandleFunc("POST /api/playit/claim", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitClaimStart))
+	mux.HandleFunc("POST /api/playit/claim/poll", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitClaimPoll))
+	mux.HandleFunc("POST /api/playit/tunnel", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitTunnel))
+	mux.HandleFunc("POST /api/playit/refresh", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitRefresh))
+
 	// --- notification bots -------------------------------------------------
 	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermBotsManage, a.handleBotList))
 	mux.HandleFunc("POST /api/bots", a.requirePerm(authorization.PermBotsManage, a.handleBotCreate))
@@ -830,6 +838,9 @@ func (a *App) handleOverview(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	st, ps := a.Runner.State()
 	out := map[string]any{"state": st, "version": Version}
+	if config, err := a.Playit.Config(); err == nil && config.Enabled && strings.TrimSpace(config.PublicAddress) != "" {
+		out["playit_address"] = strings.TrimSpace(config.PublicAddress)
+	}
 	if ip := localLANIPv4(a.Cfg.BindAddress); ip != "" {
 		out["lan_ip"] = ip
 	}

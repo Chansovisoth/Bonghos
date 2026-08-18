@@ -49,6 +49,9 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	if _, err := db.Exec(`DROP TABLE turnstile_settings`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`DROP TABLE playit_settings`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`ALTER TABLE notification_bots DROP COLUMN dns_server`); err != nil {
 		t.Fatal(err)
 	}
@@ -103,8 +106,8 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if version, err := Version(upgraded); err != nil || version != 18 {
-		t.Fatalf("upgraded schema version = %d, %v; want 18", version, err)
+	if version, err := Version(upgraded); err != nil || version != 19 {
+		t.Fatalf("upgraded schema version = %d, %v; want 19", version, err)
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='passkeys'`).Scan(&table); err != nil {
 		t.Fatalf("passkeys migration was not applied: %v", err)
@@ -120,6 +123,15 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='turnstile_settings'`).Scan(&table); err != nil {
 		t.Fatalf("Turnstile settings migration was not applied: %v", err)
+	}
+	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='playit_settings'`).Scan(&table); err != nil {
+		t.Fatalf("Playit settings migration was not applied: %v", err)
+	}
+	var playitEnabled int
+	var playitManagement string
+	if err := upgraded.QueryRow(`SELECT enabled, management_mode FROM playit_settings WHERE id=1`).
+		Scan(&playitEnabled, &playitManagement); err != nil || playitEnabled != 0 || playitManagement != "none" {
+		t.Fatalf("upgraded Playit default = enabled %d management %q, %v; want disabled manual networking", playitEnabled, playitManagement, err)
 	}
 	var recoveryCreatedAt string
 	if err := upgraded.QueryRow(`SELECT created_at FROM recovery_codes LIMIT 1`).Scan(&recoveryCreatedAt); err != sql.ErrNoRows {

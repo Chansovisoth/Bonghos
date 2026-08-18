@@ -46,6 +46,7 @@ const (
 	PermActivityView    Permission = "activity.view"
 	PermUsersManage     Permission = "users.manage"
 	PermRolesManage     Permission = "roles.manage"
+	PermPlayitManage    Permission = "playit.manage"
 	PermBotsManage      Permission = "bots.manage"
 	PermHostView        Permission = "host.view"
 )
@@ -87,6 +88,7 @@ var permissionCatalog = []PermissionDefinition{
 	{PermActivityView, "People and integrations", "View activity", "Review account and server administration history.", nil, viewAssignableRoles},
 	{PermUsersManage, "People and integrations", "Manage users", "Invite users and manage lower-role accounts and sessions.", nil, []Role{RoleAdmin, RoleMember}},
 	{PermRolesManage, "People and integrations", "Manage role permissions", "Configure permissions for lower roles.", nil, []Role{RoleAdmin}},
+	{PermPlayitManage, "People and integrations", "Manage Playit.gg", "Configure the public Minecraft tunnel and Playit agent.", []Permission{PermServerView}, []Role{RoleAdmin}},
 	{PermBotsManage, "People and integrations", "Manage notification bots", "Configure Discord and Telegram bots.", []Permission{PermServerView}, actionAssignableRoles},
 	{PermHostView, "System", "View host", "See Bonghos installation, listener, and service details.", nil, viewAssignableRoles},
 }

@@ -20,7 +20,7 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="$PROJECT_ROOT/source"
 OFFICIAL_REPO="https://github.com/Chansovisoth/Bonghos"
 
-BONGHOS_VERSION="0.2.0"
+BONGHOS_VERSION="0.3.0-rc.1"
 
 # Some minimal environments (containers, cron) do not export USER.
 USER="${USER:-$(id -un)}"
@@ -613,13 +613,16 @@ mode_build() {
 }
 
 restore_update_services() { # restore_update_services <control-was-active> <minecraft-was-active>
-  local cp_was_active="$1" mc_was_active="$2"
+  local cp_was_active="$1" mc_was_active="$2" playit_was_active="${PLAYIT_UPDATE_WAS_ACTIVE:-0}"
   [ "${SYSTEMD_OK:-0}" = "1" ] || return 0
   if [ "$cp_was_active" = "1" ]; then
     systemctl --user start bonghos.service || warn "could not restore bonghos.service"
   fi
   if [ "$mc_was_active" = "1" ]; then
     systemctl --user start bonghos-minecraft.service || warn "could not restore bonghos-minecraft.service"
+  fi
+  if [ "$playit_was_active" = "1" ]; then
+    systemctl --user start bonghos-playit.service || warn "could not restore bonghos-playit.service"
   fi
 }
 
@@ -687,9 +690,11 @@ mode_update() {
 
   # Record running state so it can be restored.
   local cp_was_active=0 mc_was_active=0
+  PLAYIT_UPDATE_WAS_ACTIVE=0
   if [ "${SYSTEMD_OK:-0}" = "1" ]; then
     systemctl --user is-active --quiet bonghos.service           && cp_was_active=1
     systemctl --user is-active --quiet bonghos-minecraft.service && mc_was_active=1
+    systemctl --user is-active --quiet bonghos-playit.service    && PLAYIT_UPDATE_WAS_ACTIVE=1
   fi
   if [ "$mc_was_active" = "1" ]; then
     warn "A Minecraft server is currently running."
@@ -714,6 +719,14 @@ mode_update() {
     if systemctl --user is-active --quiet bonghos.service; then
       restore_update_services "$cp_was_active" "$mc_was_active"
       die "the control plane is still running; refusing to update"
+    fi
+  fi
+  if [ "$PLAYIT_UPDATE_WAS_ACTIVE" = "1" ]; then
+    info "Stopping the Bonghos-managed Playit agent ..."
+    systemctl --user stop bonghos-playit.service || warn "Playit stop returned an error"
+    if systemctl --user is-active --quiet bonghos-playit.service; then
+      restore_update_services "$cp_was_active" "$mc_was_active"
+      die "the Bonghos-managed Playit agent is still running; refusing to update"
     fi
   fi
   if installed_bonghos_running; then
@@ -791,7 +804,7 @@ mode_update() {
     ok "secret.key present and preserved"
   else
     restore_update_services "$cp_was_active" "$mc_was_active"
-    die "secret.key is missing; encrypted TOTP secrets and notification bot tokens cannot be recovered"
+    die "secret.key is missing; encrypted account, bot and Playit credentials cannot be recovered"
   fi
 
   head1 "Installing the new version"
@@ -878,13 +891,15 @@ mode_uninstall() {
 
   if have systemctl && systemctl --user show-environment >/dev/null 2>&1; then
     systemctl --user stop bonghos-minecraft.service 2>/dev/null || true
+    systemctl --user stop bonghos-playit.service 2>/dev/null || true
     systemctl --user stop bonghos.service 2>/dev/null || true
     systemctl --user disable bonghos.service 2>/dev/null || true
     if [ -x "$BIN_PATH" ]; then
       "$BIN_PATH" --home "$BONGHOS_HOME" service uninstall 2>/dev/null || true
     fi
     rm -f "$HOME/.config/systemd/user/bonghos.service" \
-          "$HOME/.config/systemd/user/bonghos-minecraft.service"
+          "$HOME/.config/systemd/user/bonghos-minecraft.service" \
+          "$HOME/.config/systemd/user/bonghos-playit.service"
     systemctl --user daemon-reload 2>/dev/null || true
     ok "systemd user services removed"
   fi
@@ -901,7 +916,7 @@ mode_uninstall() {
   say "To remove the Bonghos directory permanently, delete it yourself:"
   say "  ${C_DIM}rm -rf \"$BONGHOS_HOME\"${C_RESET}"
   warn "That also deletes system/config/secret.key. Encrypted data (including"
-  warn "TOTP secrets and notification bot tokens) becomes permanently unrecoverable without it."
+  warn "TOTP, bot and Playit credentials) becomes permanently unrecoverable without it."
 }
 
 print_next_steps() {
@@ -944,8 +959,8 @@ EOF
   fi
   cat <<EOF
 
-${C_BOLD}Remote access${C_RESET}
-  Bonghos listens on 127.0.0.1 only. It does not configure port forwarding,
+${C_BOLD}Remote panel access${C_RESET}
+  Bonghos listens on 127.0.0.1 only. It does not configure panel port forwarding,
   firewalls or tunnels — that stays your responsibility. For remote access,
   tunnel over SSH from your own computer:
 

@@ -1,4 +1,4 @@
-// Package systemd generates and manages the two Bonghos systemd user
+// Package systemd generates and manages the Bonghos systemd user
 // services. Normal operation never requires root; lingering is only ever
 // explained, never enabled silently.
 package systemd
@@ -15,6 +15,7 @@ import (
 const (
 	ServiceControlPlane = "bonghos.service"
 	ServiceMinecraft    = "bonghos-minecraft.service"
+	ServicePlayit       = "bonghos-playit.service"
 )
 
 // unitDir returns ~/.config/systemd/user.
@@ -108,6 +109,29 @@ RestrictSUIDSGID=yes
 `, unitQuote("BONGHOS_HOME="+bonghosHome), unitPath(bonghosHome), unitQuote(binPath), unitQuote(bonghosHome), gracefulStopSeconds+30)
 }
 
+// PlayitUnit renders the optional Playit daemon service. It is installed but
+// not enabled; linking an agent starts it on demand, and the control panel can
+// start it again after reboot when Playit remains enabled.
+func PlayitUnit(bonghosHome, binPath string) string {
+	return fmt.Sprintf(`[Unit]
+Description=Bonghos Managed Playit.gg Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+Environment=%s
+WorkingDirectory=%s
+ExecStart=%s --home %s playit-agent
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+
+`, unitQuote("BONGHOS_HOME="+bonghosHome), unitPath(bonghosHome), unitQuote(binPath), unitQuote(bonghosHome))
+}
+
 // Available reports whether a systemd user manager is reachable.
 func Available() bool {
 	if _, err := exec.LookPath("systemctl"); err != nil {
@@ -119,7 +143,7 @@ func Available() bool {
 	return s != "" && s != "offline" && !strings.Contains(s, "Failed to connect")
 }
 
-// Install writes both unit files and reloads the user daemon.
+// Install writes all unit files and reloads the user daemon.
 func Install(bonghosHome string, gracefulStopSeconds int) error {
 	dir, err := unitDir()
 	if err != nil {
@@ -140,6 +164,10 @@ func Install(bonghosHome string, gracefulStopSeconds int) error {
 		[]byte(MinecraftUnit(bonghosHome, binPath, gracefulStopSeconds)), 0o644); err != nil {
 		return err
 	}
+	if err := os.WriteFile(filepath.Join(dir, ServicePlayit),
+		[]byte(PlayitUnit(bonghosHome, binPath)), 0o644); err != nil {
+		return err
+	}
 	return DaemonReload()
 }
 
@@ -147,14 +175,15 @@ func DaemonReload() error {
 	return run("systemctl", "--user", "daemon-reload")
 }
 
-// Repair regenerates both units (after BONGHOS_HOME moves) then reloads.
+// Repair regenerates all units (after BONGHOS_HOME moves) then reloads.
 func Repair(bonghosHome string, gracefulStopSeconds int) error {
 	return Install(bonghosHome, gracefulStopSeconds)
 }
 
-// Uninstall stops and removes both unit files (data is untouched).
+// Uninstall stops and removes all unit files (data is untouched).
 func Uninstall() error {
 	run("systemctl", "--user", "stop", ServiceMinecraft)
+	run("systemctl", "--user", "stop", ServicePlayit)
 	run("systemctl", "--user", "stop", ServiceControlPlane)
 	run("systemctl", "--user", "disable", ServiceControlPlane)
 	dir, err := unitDir()
@@ -163,6 +192,7 @@ func Uninstall() error {
 	}
 	os.Remove(filepath.Join(dir, ServiceControlPlane))
 	os.Remove(filepath.Join(dir, ServiceMinecraft))
+	os.Remove(filepath.Join(dir, ServicePlayit))
 	return DaemonReload()
 }
 
