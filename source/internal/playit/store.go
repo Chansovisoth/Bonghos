@@ -54,7 +54,7 @@ func validAccountMode(mode string) bool {
 	return mode == AccountModeAccount || mode == AccountModeGuest
 }
 
-func (s *Store) load() (storedConfig, error) {
+func (s *Store) load(decryptSecret bool) (storedConfig, error) {
 	var out storedConfig
 	var enabled int
 	var encrypted []byte
@@ -68,7 +68,7 @@ func (s *Store) load() (storedConfig, error) {
 	}
 	out.Enabled = enabled != 0
 	out.SecretConfigured = len(encrypted) > 0
-	if len(encrypted) > 0 {
+	if decryptSecret && len(encrypted) > 0 {
 		plain, err := security.Decrypt(s.SecretKey, encrypted)
 		if err != nil {
 			return storedConfig{}, fmt.Errorf("decrypting Playit agent secret: %w", err)
@@ -86,7 +86,7 @@ func (s *Store) load() (storedConfig, error) {
 }
 
 func (s *Store) Config() (Config, error) {
-	stored, err := s.load()
+	stored, err := s.load(false)
 	return stored.Config, err
 }
 
@@ -104,9 +104,6 @@ func (s *Store) SetPreference(enabled bool, accountMode, managementMode string, 
 	}
 	if enabled && managementMode == ManagementNone {
 		return Config{}, errors.New("choose Bonghos-managed or external Playit")
-	}
-	if !enabled {
-		managementMode = ManagementNone
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.Exec(`UPDATE playit_settings SET enabled=?, account_mode=?, management_mode=?,
@@ -140,7 +137,7 @@ func (s *Store) BeginClaim(accountMode, code string, updatedBy int64) (Config, e
 }
 
 func (s *Store) Claim() (code, accountMode string, err error) {
-	stored, err := s.load()
+	stored, err := s.load(false)
 	if err != nil {
 		return "", "", err
 	}
@@ -177,7 +174,7 @@ func (s *Store) CompleteClaim(secret string, updatedBy int64) (Config, error) {
 }
 
 func (s *Store) Secret() (string, error) {
-	stored, err := s.load()
+	stored, err := s.load(true)
 	if err != nil {
 		return "", err
 	}
@@ -200,6 +197,14 @@ func (s *Store) SaveTunnel(tunnelID, publicAddress string, localPort int) error 
 	}
 	_, err := s.DB.Exec(`UPDATE playit_settings SET tunnel_id=?, public_address=?, local_port=?, updated_at=? WHERE id=1`,
 		strings.TrimSpace(tunnelID), strings.TrimSpace(publicAddress), localPort,
+		time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
+// ClearTunnel forgets only Bonghos's association with a Playit tunnel. Callers
+// must first delete the remote tunnel, or establish that it no longer exists.
+func (s *Store) ClearTunnel() error {
+	_, err := s.DB.Exec(`UPDATE playit_settings SET tunnel_id='', public_address='', updated_at=? WHERE id=1`,
 		time.Now().UTC().Format(time.RFC3339))
 	return err
 }

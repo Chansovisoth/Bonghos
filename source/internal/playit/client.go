@@ -29,6 +29,47 @@ type apiEnvelope struct {
 	Data   json.RawMessage `json:"data"`
 }
 
+// ProviderError retains a machine-readable Playit error without exposing raw
+// provider responses or credentials to the Web UI.
+type ProviderError struct {
+	Code string
+}
+
+func (e *ProviderError) Error() string {
+	switch e.Code {
+	case "AgentVersionUnknown", "AgentVersionTooOld", "TunnelTypeNotSupported", "ConfigNotCompatibleWithAgent":
+		return "Playit has not registered a compatible agent yet; wait for the agent to become ready, then try again"
+	case "TunnelNotFound":
+		return "The Playit tunnel no longer exists"
+	default:
+		return "Playit rejected the request"
+	}
+}
+
+func IsProviderError(err error, code string) bool {
+	var providerErr *ProviderError
+	return errors.As(err, &providerErr) && providerErr.Code == code
+}
+
+func providerError(raw json.RawMessage) error {
+	var code string
+	if err := json.Unmarshal(raw, &code); err != nil {
+		var tagged struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &tagged)
+		code = tagged.Error
+	}
+	code = strings.TrimSpace(code)
+	for _, r := range code {
+		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '_' && r != '-' {
+			code = ""
+			break
+		}
+	}
+	return &ProviderError{Code: code}
+}
+
 func (c *Client) post(ctx context.Context, path, secret string, request, response any) error {
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -73,17 +114,7 @@ func (c *Client) post(ctx context.Context, path, secret string, request, respons
 		return errors.New("Playit returned an unreadable response")
 	}
 	if envelope.Status != "success" {
-		var detail string
-		if err := json.Unmarshal(envelope.Data, &detail); err != nil || detail == "" {
-			detail = strings.TrimSpace(string(envelope.Data))
-		}
-		if len(detail) > 180 {
-			detail = detail[:180]
-		}
-		if detail == "" || detail == "null" || detail == "{}" {
-			detail = envelope.Status
-		}
-		return fmt.Errorf("Playit rejected the request: %s", detail)
+		return providerError(envelope.Data)
 	}
 	if response == nil || len(envelope.Data) == 0 || string(envelope.Data) == "null" {
 		return nil
@@ -199,4 +230,12 @@ func (c *Client) UpdateTunnelPort(ctx context.Context, secret, tunnelID string, 
 			{"name": "local_port", "value": fmt.Sprint(localPort)},
 		}},
 	}, nil)
+}
+
+func (c *Client) DeleteTunnel(ctx context.Context, secret, tunnelID string) error {
+	tunnelID = strings.TrimSpace(tunnelID)
+	if tunnelID == "" {
+		return errors.New("Playit tunnel is not configured")
+	}
+	return c.post(ctx, "/tunnels/delete", secret, map[string]string{"tunnel_id": tunnelID}, nil)
 }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Chansovisoth/Bonghos/internal/minecraft"
 	"github.com/Chansovisoth/Bonghos/internal/playit"
@@ -18,6 +19,9 @@ type playitPayload struct {
 	playit.Config
 	Detections      []playit.Detection `json:"detections"`
 	AgentOnline     bool               `json:"agent_online"`
+	AgentPhase      string             `json:"agent_phase,omitempty"`
+	AgentVersion    string             `json:"agent_version,omitempty"`
+	AgentError      string             `json:"agent_error,omitempty"`
 	AccountStatus   string             `json:"account_status,omitempty"`
 	TunnelStatus    string             `json:"tunnel_status,omitempty"`
 	Notice          string             `json:"notice,omitempty"`
@@ -35,13 +39,37 @@ func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, e
 	if systemd.Available() {
 		payload.ManagedState = systemd.State(systemd.ServicePlayit)
 	}
-	for _, detection := range payload.Detections {
-		if detection.State == "active" || detection.State == "running" {
-			payload.AgentOnline = true
-			break
+	if config.ManagementMode == playit.ManagementBonghos && config.SecretConfigured {
+		status := a.PlayitStatus(ctx)
+		payload.AgentOnline = status.Running
+		payload.AgentPhase = status.Phase
+		payload.AgentVersion = status.Version
+		payload.AgentError = status.Error
+		if !payload.DaemonAvailable {
+			payload.AgentPhase = "unavailable"
+			payload.AgentError = "The official Playit agent is not installed or executable"
+		} else if status.Phase == "stopped" && payload.ManagedState == "failed" {
+			payload.AgentPhase = "error"
+			payload.AgentError = "The managed Playit service failed; check bonghos-playit.service logs"
+		}
+		if status.AgentID != "" && status.AgentID != config.AgentID {
+			_ = a.Playit.SaveAgent(status.AgentID)
+			payload.AgentID = status.AgentID
+		}
+		if a.foregroundPlayitRunning() {
+			filtered := payload.Detections[:0]
+			for _, detection := range payload.Detections {
+				if detection.Kind == "process" && strings.EqualFold(detection.Name, "playitd") {
+					continue
+				}
+				filtered = append(filtered, detection)
+			}
+			payload.Detections = append(filtered, playit.Detection{
+				Kind: "bonghos", Name: "Bonghos foreground agent", State: status.Phase, ExternallyManaged: false,
+			})
 		}
 	}
-	if !refresh || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || !config.SecretConfigured {
+	if !refresh || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || !config.SecretConfigured || !payload.AgentOnline {
 		return payload, nil
 	}
 	secret, err := a.Playit.Secret()
@@ -59,19 +87,27 @@ func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, e
 		payload.AgentID = data.AgentID
 	}
 	if config.TunnelID != "" {
-		payload.TunnelStatus = "pending"
+		payload.TunnelStatus = "missing"
 		for _, tunnel := range data.Tunnels {
 			if tunnel.ID != config.TunnelID {
 				continue
 			}
 			payload.TunnelStatus = "configured"
+			if tunnel.DisabledReason != "" {
+				payload.TunnelStatus = tunnel.DisabledReason
+			} else if tunnel.StatusMessage != "" {
+				payload.TunnelStatus = tunnel.StatusMessage
+			}
 			payload.PublicAddress = tunnel.DisplayAddress
 			_ = a.Playit.SaveTunnel(tunnel.ID, tunnel.DisplayAddress, config.LocalPort)
 			break
 		}
 		for _, tunnel := range data.Pending {
-			if tunnel.ID == config.TunnelID && tunnel.StatusMessage != "" {
-				payload.TunnelStatus = tunnel.StatusMessage
+			if tunnel.ID == config.TunnelID {
+				payload.TunnelStatus = "pending"
+				if tunnel.StatusMessage != "" {
+					payload.TunnelStatus = tunnel.StatusMessage
+				}
 			}
 		}
 	}
@@ -105,7 +141,9 @@ func (a *App) reconcilePlayitService(config playit.Config) string {
 	if !playit.DaemonAvailable(a.Home) {
 		return "Install the official Playit agent, then repair Bonghos services"
 	}
+	a.stopForegroundPlayit()
 	if err := systemd.Start(systemd.ServicePlayit); err != nil {
+		_ = systemd.Stop(systemd.ServicePlayit)
 		a.startForegroundPlayit(nil)
 		return "The Playit service is unavailable, so the agent is running inside Bonghos; run bonghos service repair to restore the separate service"
 	}
@@ -123,6 +161,8 @@ func (a *App) handlePlayitGet(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handlePlayitUpdate(w http.ResponseWriter, r *http.Request) {
 	actor := currentUser(r)
+	a.playitMu.Lock()
+	defer a.playitMu.Unlock()
 	var req struct {
 		Enabled        bool   `json:"enabled"`
 		AccountMode    string `json:"account_mode"`
@@ -168,6 +208,8 @@ func (a *App) handlePlayitUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handlePlayitClaimStart(w http.ResponseWriter, r *http.Request) {
 	actor := currentUser(r)
+	a.playitMu.Lock()
+	defer a.playitMu.Unlock()
 	var req struct {
 		AccountMode string `json:"account_mode"`
 	}
@@ -177,6 +219,10 @@ func (a *App) handlePlayitClaimStart(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AccountMode != playit.AccountModeAccount && req.AccountMode != playit.AccountModeGuest {
 		writeErr(w, http.StatusBadRequest, errors.New("Playit account mode must be account or guest"))
+		return
+	}
+	if !playit.DaemonAvailable(a.Home) {
+		writeErr(w, http.StatusConflict, errors.New("install the official Playit agent before linking it to Bonghos"))
 		return
 	}
 	codeBytes := make([]byte, 5)
@@ -226,6 +272,24 @@ func (a *App) handlePlayitClaimPoll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, errors.New("Playit returned an unknown claim state"))
 		return
 	}
+	oldConfig, configErr := a.Playit.Config()
+	if configErr == nil && oldConfig.TunnelID != "" && oldConfig.SecretConfigured {
+		oldSecret, secretErr := a.Playit.Secret()
+		if secretErr != nil {
+			writeErr(w, http.StatusConflict, errors.New("could not access the existing Playit tunnel"))
+			return
+		}
+		deleteErr := a.PlayitAPI.DeleteTunnel(r.Context(), oldSecret, oldConfig.TunnelID)
+		if deleteErr != nil && !playit.IsProviderError(deleteErr, "TunnelNotFound") {
+			writeErr(w, http.StatusBadGateway, errors.New("could not remove the existing Playit tunnel before relinking"))
+			return
+		}
+		if err := a.Playit.ClearTunnel(); err != nil {
+			writeErr(w, http.StatusInternalServerError, errors.New("could not clear the existing Playit tunnel"))
+			return
+		}
+		a.audit(actor.ID, actor.Username, "playit_tunnel_deleted", oldConfig.TunnelID, "during agent relink", remoteIP(r))
+	}
 	secret, err := a.PlayitAPI.ClaimExchange(r.Context(), code)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
@@ -235,11 +299,6 @@ func (a *App) handlePlayitClaimPoll(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, errors.New("could not save the Playit agent"))
 		return
-	}
-	data, statusErr := a.PlayitAPI.RunData(r.Context(), secret)
-	if statusErr == nil && data.AgentID != "" {
-		_ = a.Playit.SaveAgent(data.AgentID)
-		config.AgentID = data.AgentID
 	}
 	notice := a.reconcilePlayitService(config)
 	guestLoginURL := ""
@@ -285,6 +344,15 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
+	status := a.waitForPlayitReady(r.Context(), 15*time.Second)
+	if !status.Running {
+		message := status.Error
+		if message == "" {
+			message = "The Playit agent is still starting; wait a moment and try again"
+		}
+		writeErr(w, http.StatusConflict, errors.New(message))
+		return
+	}
 	port, err := a.activeMinecraftPort()
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
@@ -319,6 +387,133 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 	a.audit(actor.ID, actor.Username, action, tunnelID, "local port "+strconv.Itoa(port), remoteIP(r))
 	payload, _ := a.playitPayload(r.Context(), true)
 	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *App) waitForPlayitReady(ctx context.Context, timeout time.Duration) playit.AgentStatus {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(400 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		status := a.PlayitStatus(ctx)
+		if status.Running || status.Error != "" || status.Phase == "has_invalid_secret" || status.Phase == "disabled_over_limit" {
+			return status
+		}
+		select {
+		case <-ctx.Done():
+			return status
+		case <-deadline.C:
+			return status
+		case <-ticker.C:
+		}
+	}
+}
+
+// schedulePlayitTunnelSync keeps a configured managed tunnel pointed at the
+// active project's current server-port. It is deliberately best-effort: a
+// Playit outage must never prevent project selection or Minecraft startup.
+func (a *App) schedulePlayitTunnelSync() {
+	config, err := a.Playit.Config()
+	if err != nil || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || config.TunnelID == "" {
+		return
+	}
+	a.playitRuntimeMu.Lock()
+	parent := a.playitParent
+	a.playitRuntimeMu.Unlock()
+	if parent == nil {
+		parent = context.Background()
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(parent, 35*time.Second)
+		defer cancel()
+		updated, err := a.syncPlayitTunnelPort(ctx)
+		if err != nil {
+			a.Logf("Playit tunnel port sync failed: %v", err)
+			return
+		}
+		if updated {
+			config, _ := a.Playit.Config()
+			a.Logf("Playit tunnel updated for active Minecraft port %d", config.LocalPort)
+		}
+	}()
+}
+
+func (a *App) syncPlayitTunnelPort(ctx context.Context) (bool, error) {
+	if status := a.waitForPlayitReady(ctx, 30*time.Second); !status.Running {
+		return false, nil
+	}
+	a.playitMu.Lock()
+	defer a.playitMu.Unlock()
+	config, err := a.Playit.Config()
+	if err != nil || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || config.TunnelID == "" {
+		return false, err
+	}
+	port, err := a.activeMinecraftPort()
+	if err != nil {
+		return false, err
+	}
+	secret, err := a.Playit.Secret()
+	if err != nil {
+		return false, err
+	}
+	if err := a.PlayitAPI.UpdateTunnelPort(ctx, secret, config.TunnelID, port); err != nil {
+		return false, err
+	}
+	if err := a.Playit.SaveTunnel(config.TunnelID, config.PublicAddress, port); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *App) handlePlayitTunnelDelete(w http.ResponseWriter, r *http.Request) {
+	actor := currentUser(r)
+	a.playitMu.Lock()
+	defer a.playitMu.Unlock()
+	config, err := a.Playit.Config()
+	if err != nil || config.TunnelID == "" || !config.SecretConfigured || config.ManagementMode != playit.ManagementBonghos {
+		writeErr(w, http.StatusConflict, errors.New("Playit tunnel is not configured"))
+		return
+	}
+	secret, err := a.Playit.Secret()
+	if err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	err = a.PlayitAPI.DeleteTunnel(r.Context(), secret, config.TunnelID)
+	if err != nil && !playit.IsProviderError(err, "TunnelNotFound") {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	if err := a.Playit.ClearTunnel(); err != nil {
+		writeErr(w, http.StatusInternalServerError, errors.New("could not clear the Playit tunnel"))
+		return
+	}
+	a.audit(actor.ID, actor.Username, "playit_tunnel_deleted", config.TunnelID, "", remoteIP(r))
+	payload, _ := a.playitPayload(r.Context(), true)
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *App) handlePlayitGuestLogin(w http.ResponseWriter, r *http.Request) {
+	actor := currentUser(r)
+	a.playitMu.Lock()
+	defer a.playitMu.Unlock()
+	config, err := a.Playit.Config()
+	if err != nil || !config.SecretConfigured || config.ManagementMode != playit.ManagementBonghos || config.AccountMode != playit.AccountModeGuest {
+		writeErr(w, http.StatusConflict, errors.New("a linked Playit guest account is required"))
+		return
+	}
+	secret, err := a.Playit.Secret()
+	if err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	url, err := a.PlayitAPI.GuestLogin(r.Context(), secret)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	a.audit(actor.ID, actor.Username, "playit_guest_login_created", "networking", "", remoteIP(r))
+	writeJSON(w, http.StatusOK, map[string]string{"url": url})
 }
 
 func (a *App) handlePlayitRefresh(w http.ResponseWriter, r *http.Request) {

@@ -77,3 +77,51 @@ func TestExternalAddressMustBeExplicitAndSafe(t *testing.T) {
 		t.Fatalf("unexpected external config: %+v", config)
 	}
 }
+
+func TestDisablingPreservesSelectedManagementMode(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.SetPreference(false, AccountModeAccount, ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Enabled || config.ManagementMode != ManagementBonghos {
+		t.Fatalf("disabled config forgot mode: %+v", config)
+	}
+}
+
+func TestConfigDoesNotDecryptCredential(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.DB.Exec(`UPDATE playit_settings SET agent_secret_enc=? WHERE id=1`, []byte("not encrypted")); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.Config()
+	if err != nil || !config.SecretConfigured {
+		t.Fatalf("safe config = %+v, %v", config, err)
+	}
+	if _, err := store.Secret(); err == nil {
+		t.Fatal("expected corrupt credential decryption to fail")
+	}
+}
+
+func TestClearTunnelPreservesAgentAndPort(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveTunnel("tunnel-id", "example.gl.joinmc.link", 25566); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ClearTunnel(); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.Config()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.TunnelID != "" || config.PublicAddress != "" || config.LocalPort != 25566 || !config.SecretConfigured {
+		t.Fatalf("clear tunnel changed unrelated state: %+v", config)
+	}
+}

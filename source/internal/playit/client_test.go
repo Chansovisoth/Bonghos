@@ -47,6 +47,13 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 				t.Errorf("update tunnel id = %+v", request["tunnel_id"])
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": nil})
+		case "/tunnels/delete":
+			var request map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&request)
+			if request["tunnel_id"] != "tunnel-id" {
+				t.Errorf("delete tunnel id = %+v", request["tunnel_id"])
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": nil})
 		default:
 			http.NotFound(w, r)
 		}
@@ -77,8 +84,29 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 	if err := client.UpdateTunnelPort(context.Background(), secret, tunnelID, 25567); err != nil {
 		t.Fatalf("UpdateTunnelPort: %v", err)
 	}
-	if strings.Join(paths, ",") != "/claim/setup,/claim/exchange,/v1/agents/rundata,/login/guest,/v1/tunnels/create,/v1/tunnels/config" {
+	if err := client.DeleteTunnel(context.Background(), secret, tunnelID); err != nil {
+		t.Fatalf("DeleteTunnel: %v", err)
+	}
+	if strings.Join(paths, ",") != "/claim/setup,/claim/exchange,/v1/agents/rundata,/login/guest,/v1/tunnels/create,/v1/tunnels/config,/tunnels/delete" {
 		t.Fatalf("paths = %v", paths)
+	}
+}
+
+func TestClientMapsProviderErrorsWithoutRawResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "fail", "data": map[string]any{"error": "TunnelTypeNotSupported", "details": "private upstream detail"},
+		})
+	}))
+	defer server.Close()
+	client := &Client{BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.CreateMinecraftTunnel(context.Background(), "secret", "agent", 25565)
+	if !IsProviderError(err, "TunnelTypeNotSupported") {
+		t.Fatalf("provider error = %T %v", err, err)
+	}
+	if strings.Contains(err.Error(), "private upstream detail") {
+		t.Fatalf("raw provider detail escaped: %v", err)
 	}
 }
 

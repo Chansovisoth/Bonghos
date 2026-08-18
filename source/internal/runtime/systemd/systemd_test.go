@@ -38,8 +38,8 @@ func TestGeneratedUnitsQuotePathsAndApplyPortableHardening(t *testing.T) {
 	if !strings.Contains(minecraft, "Restart=on-failure\nRestartSec=5s") {
 		t.Error("Minecraft unit must not restart after an intentional clean stop")
 	}
-	if !strings.Contains(playit, "playit-agent\nRestart=on-failure") {
-		t.Error("Playit unit must run the managed-agent command and restart after failures")
+	if !strings.Contains(playit, "playit-agent\nRestart=always") {
+		t.Error("Playit unit must run the managed-agent command and restart after clean or failed exits")
 	}
 	if strings.Contains(playit, "\n[Install]\n") {
 		t.Error("Playit service must only be started on demand")

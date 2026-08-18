@@ -575,6 +575,11 @@ func (a *App) handleConfigProperty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.audit(u.ID, u.Username, "property_updated", inst.Slug, req.Key, remoteIP(r))
+	if req.Key == "server-port" {
+		if activeID, activeErr := a.Instances.ActiveID(); activeErr == nil && activeID == inst.ID {
+			a.schedulePlayitTunnelSync()
+		}
+	}
 	writeJSON(w, 200, map[string]bool{"ok": true, "restart_required": true})
 }
 

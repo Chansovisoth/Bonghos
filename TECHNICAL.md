@@ -227,7 +227,9 @@ active project at a time. The agent credential is AES-256-GCM encrypted with
 the credential is materialized only in a mode-0600 runtime file and removed
 when the daemon exits. Bonghos uses the official `playitd` executable and a
 separate `bonghos-playit.service`; it does not download or replace agent
-software. The Web UI also performs read-only detection of the official system
+software. Readiness comes from playitd's private versioned IPC socket, not from
+process detection, so a process that has not registered a compatible agent
+cannot create a tunnel. The Web UI also performs read-only detection of the official system
 service, user service, Docker/Podman images, and Playit processes without
 reading container environments or process secrets. An externally managed
 agent remains outside Bonghos lifecycle control.
@@ -236,7 +238,11 @@ Playit claim and tunnel requests use fixed HTTPS API origins, bounded response
 sizes and timeouts, and `Agent-Key` authentication only after a credential has
 been encrypted. The `playit.manage` permission is Owner-only by default and
 can be delegated to Admin by an Owner. Tunnel configuration always targets
-`127.0.0.1` and the active project's Minecraft port.
+`127.0.0.1` and the active project's Minecraft port. Deleting or relinking a
+tunnel removes it from Playit before Bonghos clears its local record; an
+already-missing remote tunnel is treated as successful cleanup. Bonghos also
+reapplies the active port after agent startup, project selection, server start,
+or a `server-port` edit so a pending or previously configured tunnel recovers.
 
 For remote administration, an operator can use an SSH tunnel:
 

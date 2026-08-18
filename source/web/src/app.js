@@ -7747,12 +7747,15 @@ function settingsServiceCard(title, unit, description, rawState, systemdAvailabl
 
 function playitState(config) {
   if (!config.enabled) return "Off";
-  if (config.agent_online && config.public_address) return "Online";
-  if (config.claim_pending) return "Waiting for approval";
   if (config.management_mode === "external") return "External agent";
-  if (config.secret_configured && config.managed_state === "failed") return "Agent failed";
-  if (config.secret_configured && config.managed_state === "inactive") return "Agent stopped";
-  if (config.secret_configured) return "Agent linked";
+  if (config.claim_pending) return "Waiting for approval";
+  if (config.agent_online && config.public_address) return "Online";
+  if (config.agent_error) return "Agent error";
+  if (config.secret_configured && ["starting", "stopping", "stopped"].includes(config.agent_phase)) {
+    return config.agent_phase === "starting" ? "Starting agent" : "Agent stopped";
+  }
+  if (config.secret_configured && config.agent_online) return "Agent ready";
+  if (config.secret_configured) return "Starting agent";
   return "Setup required";
 }
 
@@ -7760,6 +7763,8 @@ function playitSettingsSection(initialConfig) {
   const config = { account_mode: "account", management_mode: "none", local_port: 25565, detections: [], ...initialConfig };
   const section = el("section", { class: "settings-page-section", "aria-labelledby": "playit-settings-title" });
   let polling = false;
+  let statusPolling = false;
+  let claimAccountMode = config.account_mode;
 
   const savePreference = async (updates) => {
     const payload = {
@@ -7807,14 +7812,32 @@ function playitSettingsSection(initialConfig) {
   };
 
   const beginClaim = async (button) => {
-    button.disabled = true;
+    if (button) button.disabled = true;
     try {
-      const started = await api("/playit/claim", { method: "POST", json: { account_mode: config.account_mode } });
+      const started = await api("/playit/claim", { method: "POST", json: { account_mode: claimAccountMode } });
       Object.assign(config, started);
       render();
     } catch (error) {
       toast(error.message, "err");
-      button.disabled = false;
+      if (button) button.disabled = false;
+    }
+  };
+
+  const pollAgent = async () => {
+    if (statusPolling || !config.enabled || config.management_mode !== "bonghos" || !config.secret_configured) return;
+    statusPolling = true;
+    try {
+      for (let attempt = 0; attempt < 60 && document.body.contains(section); attempt++) {
+        const refreshed = await api("/playit/refresh", { method: "POST", json: {} });
+        Object.assign(config, refreshed);
+        render();
+        if (config.agent_online || config.agent_error || !config.enabled || config.management_mode !== "bonghos") return;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    } catch (_) {
+      // Manual Refresh remains available if a transient status request fails.
+    } finally {
+      statusPolling = false;
     }
   };
 
@@ -7830,7 +7853,7 @@ function playitSettingsSection(initialConfig) {
         try {
           await savePreference({
             enabled: !config.enabled,
-            management_mode: config.enabled ? "none" : (config.management_mode === "external" ? "external" : "bonghos"),
+            management_mode: config.management_mode === "none" ? "bonghos" : config.management_mode,
           });
           toast(config.enabled ? "Playit.gg enabled" : "Playit.gg disabled", "ok");
         } catch (error) {
@@ -7861,8 +7884,11 @@ function playitSettingsSection(initialConfig) {
       const managedChoice = config.management_mode !== "external";
       const methodButtons = el("div", { class: "playit-choice" },
         el("button", { class: "btn" + (managedChoice ? " active" : ""), type: "button", onclick: async () => {
-          config.management_mode = "bonghos";
-          render();
+          if (config.management_mode === "bonghos") return;
+          try {
+            await savePreference({ enabled: true, management_mode: "bonghos" });
+            toast("Bonghos-managed Playit agent selected", "ok");
+          } catch (error) { toast(error.message, "err"); }
         } }, "Set up with Bonghos"),
         el("button", { class: "btn" + (!managedChoice ? " active" : ""), type: "button", onclick: async () => {
           config.management_mode = "external";
@@ -7875,10 +7901,10 @@ function playitSettingsSection(initialConfig) {
 
       if (managedChoice) {
         const accountButtons = el("div", { class: "playit-choice" },
-          el("button", { class: "btn" + (config.account_mode === "account" ? " active" : ""), type: "button",
-            onclick: () => { config.account_mode = "account"; render(); } }, "Playit account"),
-          el("button", { class: "btn" + (config.account_mode === "guest" ? " active" : ""), type: "button",
-            onclick: () => { config.account_mode = "guest"; render(); } }, "Guest"));
+          el("button", { class: "btn" + (claimAccountMode === "account" ? " active" : ""), type: "button",
+            onclick: () => { claimAccountMode = "account"; render(); } }, "Playit account"),
+          el("button", { class: "btn" + (claimAccountMode === "guest" ? " active" : ""), type: "button",
+            onclick: () => { claimAccountMode = "guest"; render(); } }, "Guest"));
         const controls = el("div", { class: "playit-form" }, accountButtons);
         if (!config.daemon_available) {
           controls.append(el("div", { class: "notice playit-inline-notice" },
@@ -7892,20 +7918,37 @@ function playitSettingsSection(initialConfig) {
               el("button", { class: "btn", type: "button", onclick: () => pollClaim(false) }, "Check status")));
           queueMicrotask(() => pollClaim(true));
         } else if (!config.secret_configured) {
-          controls.append(el("p", { class: "muted" }, config.account_mode === "guest"
+          controls.append(el("p", { class: "muted" }, claimAccountMode === "guest"
             ? "Quick setup without a permanent Playit account."
             : "Sign in on Playit.gg. Your Playit password never passes through Bonghos."),
-            el("button", { class: "btn primary", type: "button", onclick: (event) => beginClaim(event.currentTarget) }, "Connect Playit.gg"));
+            el("button", {
+              class: "btn primary", type: "button", onclick: (event) => beginClaim(event.currentTarget),
+              ...(config.daemon_available ? {} : { disabled: "disabled", title: "Install the official Playit agent first" }),
+            }, "Connect Playit.gg"));
         } else {
           const details = el("dl", { class: "kv compact" },
             el("dt", {}, "Account"), el("dd", {}, config.account_status || config.account_mode),
             el("dt", {}, "Agent"), el("dd", { class: "mono" }, config.agent_id || "Linked"),
+            el("dt", {}, "Agent status"), el("dd", {}, String(config.agent_phase || "starting").replaceAll("_", " ")),
+            config.agent_version ? [el("dt", {}, "Version"), el("dd", { class: "mono" }, config.agent_version)] : null,
+            config.tunnel_id ? [el("dt", {}, "Tunnel status"), el("dd", {}, config.tunnel_status || "pending")] : null,
             el("dt", {}, "Local port"), el("dd", { class: "mono" }, String(config.local_port || 25565)));
+          if (config.agent_error) controls.append(el("div", { class: "notice playit-inline-notice" }, config.agent_error));
           if (config.guest_login_url) {
             controls.append(el("a", { class: "btn", href: config.guest_login_url, target: "_blank", rel: "noopener noreferrer" }, "Manage guest account"));
+          } else if (config.account_mode === "guest") {
+            controls.append(el("button", { class: "btn", type: "button", onclick: async (event) => {
+              event.currentTarget.disabled = true;
+              try {
+                const result = await api("/playit/guest-login", { method: "POST", json: {} });
+                config.guest_login_url = result.url;
+                render();
+              } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+            } }, "Manage guest account"));
           }
           controls.append(details, el("div", { class: "playit-actions" },
-            el("button", { class: "btn primary", type: "button", onclick: async (event) => {
+            el("button", { class: "btn primary", type: "button",
+              ...(!config.agent_online ? { disabled: "disabled", title: "Wait for the Playit agent to become ready" } : {}), onclick: async (event) => {
               event.currentTarget.disabled = true;
               try {
                 const hadTunnel = !!config.tunnel_id;
@@ -7917,12 +7960,38 @@ function playitSettingsSection(initialConfig) {
                 event.currentTarget.disabled = false;
               }
             } }, config.tunnel_id ? "Update tunnel" : "Create tunnel"),
+            !config.agent_online && config.daemon_available && ["stopped", "error"].includes(config.agent_phase)
+              ? el("button", { class: "btn", type: "button", onclick: async (event) => {
+                event.currentTarget.disabled = true;
+                try {
+                  await savePreference({ enabled: true, management_mode: "bonghos" });
+                  toast("Playit agent restart requested", "ok");
+                } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+              } }, "Restart agent") : null,
             el("button", { class: "btn", type: "button", onclick: async (event) => {
               event.currentTarget.disabled = true;
               try { Object.assign(config, await api("/playit/refresh", { method: "POST", json: {} })); render(); }
               catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
             } }, "Refresh"),
-            el("button", { class: "btn", type: "button", onclick: (event) => beginClaim(event.currentTarget) }, "Relink agent")));
+            config.tunnel_id ? el("button", { class: "btn danger", type: "button", onclick: () => confirmModal(
+              "Delete Playit tunnel",
+              "This removes the public Playit address. It does not delete or stop the Minecraft server.",
+              "Delete tunnel",
+              async () => {
+                try {
+                  Object.assign(config, await api("/playit/tunnel", { method: "DELETE" }));
+                  toast("Playit tunnel deleted", "ok");
+                  render();
+                } catch (error) { toast(error.message, "err"); }
+              }) }, "Delete tunnel") : null,
+            el("button", { class: "btn", type: "button", onclick: () => confirmModal(
+              "Relink Playit agent",
+              config.tunnel_id
+                ? "Relinking replaces the current agent and deletes its existing Playit tunnel. You can create a new tunnel after the new agent is ready."
+                : "Relinking replaces the current Bonghos-managed Playit agent.",
+              "Relink agent",
+              async () => beginClaim(null),
+              false) }, "Relink agent")));
         }
         card.append(el("div", { class: "settings-row" },
           el("div", {}, el("h3", {}, "Account"), el("p", { class: "muted" }, "Choose an account login or quick guest setup.")), controls));
@@ -7953,6 +8022,9 @@ function playitSettingsSection(initialConfig) {
       }
     }
     section.append(card);
+    if (config.enabled && config.management_mode === "bonghos" && config.secret_configured && !config.agent_online && !config.agent_error) {
+      queueMicrotask(pollAgent);
+    }
   };
 
   render();

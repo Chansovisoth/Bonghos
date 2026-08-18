@@ -127,7 +127,9 @@ Open <http://127.0.0.1:8080>, sign in, then:
 If Playit was selected during setup, open **Settings > Playit.gg**. Install the
 official Linux agent from <https://packages.playit.gg/>, link it using the
 browser approval flow, then create the tunnel. Bonghos encrypts the agent
-credential and uses a separate on-demand user service. Existing installations
+credential, waits for the official agent to report that it is ready, and uses
+a separate on-demand user service. Tunnel status and the agent version are
+shown in Settings; tunnels can be updated or deleted there. Existing installations
 upgraded from a version without Playit remain on direct/manual networking until
 an Owner enables the integration.
 

@@ -45,20 +45,21 @@ type App struct {
 	Cfg  *config.Config
 	DB   *sql.DB
 
-	SecretKey  []byte
-	Auth       *auth.Store
-	Instances  *instance.Store
-	Operations *operations.Store
-	OpLock     *operations.Lock
-	Backups    *backup.Manager
-	Bots       *bot.Store
-	Turnstile  *turnstile.Service
-	Playit     *playit.Store
-	PlayitAPI  *playit.Client
-	BotNotify  *bot.Dispatcher
-	Sched      *scheduler.Scheduler
-	Hub        *websocket.Hub
-	Runner     *Runner
+	SecretKey    []byte
+	Auth         *auth.Store
+	Instances    *instance.Store
+	Operations   *operations.Store
+	OpLock       *operations.Lock
+	Backups      *backup.Manager
+	Bots         *bot.Store
+	Turnstile    *turnstile.Service
+	Playit       *playit.Store
+	PlayitAPI    *playit.Client
+	PlayitStatus func(context.Context) playit.AgentStatus
+	BotNotify    *bot.Dispatcher
+	Sched        *scheduler.Scheduler
+	Hub          *websocket.Hub
+	Runner       *Runner
 
 	// Startup phases already reported for the current server run.
 	phaseMu                 sync.Mutex
@@ -175,6 +176,7 @@ func New(home string, webFS fs.FS) (*App, error) {
 	a.Turnstile = &turnstile.Service{Store: &turnstile.Store{DB: db, SecretKey: key}}
 	a.Playit = &playit.Store{DB: db, SecretKey: key}
 	a.PlayitAPI = &playit.Client{Version: Version}
+	a.PlayitStatus = func(ctx context.Context) playit.AgentStatus { return playit.ManagedAgentStatus(ctx, home) }
 	a.BotNotify = &bot.Dispatcher{Store: a.Bots, Sender: bot.NewSender(), Logf: a.Logf}
 	a.Hub = websocket.NewHub()
 	a.Runner = newRunner(a)
@@ -256,11 +258,14 @@ func (a *App) bootPlayit(ctx context.Context) {
 	if systemd.Available() {
 		if err := systemd.Start(systemd.ServicePlayit); err != nil {
 			a.Logf("Playit agent service unavailable; using the foreground fallback: %v", err)
+			_ = systemd.Stop(systemd.ServicePlayit)
 			a.startForegroundPlayit(ctx)
 		}
+		a.schedulePlayitTunnelSync()
 		return
 	}
 	a.startForegroundPlayit(ctx)
+	a.schedulePlayitTunnelSync()
 }
 
 func (a *App) startForegroundPlayit(parent context.Context) {
@@ -318,6 +323,12 @@ func (a *App) stopForegroundPlayit() {
 	if stopped {
 		playit.CleanupRuntime(a.Home)
 	}
+}
+
+func (a *App) foregroundPlayitRunning() bool {
+	a.playitRuntimeMu.Lock()
+	defer a.playitRuntimeMu.Unlock()
+	return a.playitCancel != nil
 }
 
 // bootAutostart starts the active project once after control-plane startup

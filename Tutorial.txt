@@ -1672,14 +1672,22 @@
    2. Open Settings > Playit.gg and turn it on.
    3. Choose Playit account or Guest, then select Connect Playit.gg.
    4. Approve the agent in the Playit browser page.
-   5. Create the tunnel. Bonghos uses the active project's Minecraft port.
+   5. Wait for Agent status to become running, then create the tunnel. Bonghos
+      uses the active project's Minecraft port.
    6. Give players the public address shown in Settings.
+
+ Bonghos keeps a managed tunnel pointed at the active project's server-port
+ after project changes, server starts, and port edits. A Playit outage does not
+ block Minecraft from starting; use Refresh or Restart agent in Settings to
+ inspect and retry the connection.
 
  Bonghos encrypts the agent credential with secret.key and runs the official
  playitd executable through bonghos-playit.service. It does not ask for your
  Playit password. Guest setup returns a temporary management link after the
- claim completes; save or convert the guest account according to Playit's
- instructions if you need durable account access.
+ claim completes. Settings can request a fresh temporary guest management link;
+ convert the guest account according to Playit's instructions if you need
+ durable account access. Delete tunnel removes the remote Playit tunnel without
+ deleting or stopping the Minecraft server.
 
  If Playit is already running as a system service, user service, Docker or
  Podman container, Settings displays the read-only detection. Choose Use

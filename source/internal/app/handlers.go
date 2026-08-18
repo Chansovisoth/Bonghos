@@ -68,6 +68,8 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("POST /api/playit/claim", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitClaimStart))
 	mux.HandleFunc("POST /api/playit/claim/poll", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitClaimPoll))
 	mux.HandleFunc("POST /api/playit/tunnel", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitTunnel))
+	mux.HandleFunc("DELETE /api/playit/tunnel", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitTunnelDelete))
+	mux.HandleFunc("POST /api/playit/guest-login", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitGuestLogin))
 	mux.HandleFunc("POST /api/playit/refresh", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitRefresh))
 
 	// --- notification bots -------------------------------------------------
@@ -711,6 +713,7 @@ func (a *App) handleServerSelect(w http.ResponseWriter, r *http.Request) {
 	}
 	a.audit(u.ID, u.Username, "project_selected", inst.Slug, "", remoteIP(r))
 	a.broadcastStatus()
+	a.schedulePlayitTunnelSync()
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -755,6 +758,7 @@ func (a *App) handleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.audit(u.ID, u.Username, "server_start", "", "", remoteIP(r))
+	a.schedulePlayitTunnelSync()
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 

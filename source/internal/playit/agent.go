@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 )
 
@@ -21,7 +22,7 @@ func FindDaemon(home string) (string, error) {
 		"/usr/bin/playitd",
 	}
 	if path, err := exec.LookPath("playitd"); err == nil {
-		candidates = append([]string{path}, candidates...)
+		candidates = append(candidates, path)
 	}
 	seen := map[string]bool{}
 	for _, candidate := range candidates {
@@ -30,7 +31,7 @@ func FindDaemon(home string) (string, error) {
 		}
 		seen[candidate] = true
 		info, err := os.Stat(candidate)
-		if err == nil && !info.IsDir() {
+		if err == nil && !info.IsDir() && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0) {
 			return candidate, nil
 		}
 	}
