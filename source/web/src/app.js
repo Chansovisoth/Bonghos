@@ -2939,7 +2939,19 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
     if (!row || !fileList?.contains(row)) return;
     const nextIndex = Number(row.dataset.fileIndex);
     if (!Number.isInteger(nextIndex) || nextIndex === selectionDrag.lastIndex) return;
-    selectVisibleRange(selectionDrag.lastIndex, nextIndex, selectionDrag.selected);
+    const previousFirst = Math.min(selectionDrag.originIndex, selectionDrag.lastIndex);
+    const previousLast = Math.max(selectionDrag.originIndex, selectionDrag.lastIndex);
+    const nextFirst = Math.min(selectionDrag.originIndex, nextIndex);
+    const nextLast = Math.max(selectionDrag.originIndex, nextIndex);
+    const affectedFirst = Math.min(previousFirst, nextFirst);
+    const affectedLast = Math.max(previousLast, nextLast);
+    for (let index = affectedFirst; index <= affectedLast; index += 1) {
+      const selected = index >= nextFirst && index <= nextLast
+        ? selectionDrag.selected
+        : selectionDrag.baseline[index];
+      setEntrySelected(lastVisibleEntries[index], selected);
+    }
+    updateSelectionUI();
     selectionDrag.lastIndex = nextIndex;
   };
   const runSelectionAutoScroll = () => {
@@ -2985,7 +2997,7 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
   };
   const beginSelectionDrag = (event, entry, index) => {
     if (!selectionMode || event.pointerType !== "mouse" || event.button !== 0
-      || event.target.closest?.("a, button, input")) return;
+      || event.target.closest?.("a, button")) return;
     event.preventDefault();
     suppressSelectionClick = true;
     if (event.shiftKey) {
@@ -2997,10 +3009,14 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
     }
     const rel = entryPath(entry);
     const selected = !selectedPaths.has(rel);
+    const baseline = lastVisibleEntries.map((visibleEntry) => selectedPaths.has(entryPath(visibleEntry)));
     selectionAnchorPath = rel;
     setEntrySelected(entry, selected);
     updateSelectionUI();
-    selectionDrag = { selected, lastIndex: index, clientX: event.clientX, clientY: event.clientY };
+    selectionDrag = {
+      selected, baseline, originIndex: index, lastIndex: index,
+      clientX: event.clientX, clientY: event.clientY,
+    };
     document.body.classList.add("file-selection-dragging");
     document.addEventListener("pointermove", handleSelectionPointerMove);
     document.addEventListener("pointerup", stopSelectionDrag);
@@ -3016,6 +3032,11 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
       checked: selectedPaths.has(rel) ? "checked" : null,
       onclick: (event) => {
         event.stopPropagation();
+        if (suppressSelectionClick) {
+          event.preventDefault();
+          setTimeout(() => syncRenderedSelection(rel), 0);
+          return;
+        }
         if (event.shiftKey && selectionAnchorPath) {
           event.preventDefault();
           selectFromAnchor(entry);
@@ -3024,6 +3045,7 @@ async function pageFiles(main, path = filePath, root = fileBrowseRoot) {
         }
       },
       onchange: (event) => {
+        if (suppressSelectionClick) return;
         setEntrySelected(entry, event.currentTarget.checked);
         updateSelectionUI();
       },
