@@ -196,8 +196,10 @@ func TestPlayitTunnelCreateAndMissingRemoteDelete(t *testing.T) {
 	if err != nil || !updated || updateCalls.Load() != 1 {
 		t.Fatalf("automatic tunnel repair = %v, calls=%d, err=%v", updated, updateCalls.Load(), err)
 	}
+	payload = nil
 	status, body = owner.do(http.MethodDelete, "/api/playit/tunnel", nil, &payload)
-	if status != http.StatusOK || payload["tunnel_id"] != nil && payload["tunnel_id"] != "" {
+	_, hasTunnelID := payload["tunnel_id"]
+	if status != http.StatusOK || hasTunnelID {
 		t.Fatalf("delete missing remote tunnel: %d %s", status, body)
 	}
 	config, err := env.app.Playit.Config()
