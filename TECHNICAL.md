@@ -233,16 +233,22 @@ cannot create a tunnel. The Web UI also performs read-only detection of the offi
 service, user service, Docker/Podman images, and Playit processes without
 reading container environments or process secrets. An externally managed
 agent remains outside Bonghos lifecycle control.
+If the dedicated user service cannot be started, Bonghos runs the managed agent
+in-process and retries it after five seconds when it exits unexpectedly.
 
 Playit claim and tunnel requests use fixed HTTPS API origins, bounded response
 sizes and timeouts, and `Agent-Key` authentication only after a credential has
 been encrypted. The `playit.manage` permission is Owner-only by default and
 can be delegated to Admin by an Owner. Tunnel configuration always targets
-`127.0.0.1` and the active project's Minecraft port. Deleting or relinking a
+`127.0.0.1` and the active project's Minecraft port. Agent renames are sent to
+Playit first and persisted locally only after Playit accepts them. Deleting or relinking a
 tunnel removes it from Playit before Bonghos clears its local record; an
-already-missing remote tunnel is treated as successful cleanup. Bonghos also
+already-missing remote tunnel is treated as successful cleanup, while a missing,
+pending, disabled, or otherwise errored tunnel is no longer advertised on
+Overview. Bonghos also
 reapplies the active port after agent startup, project selection, server start,
-or a `server-port` edit so a pending or previously configured tunnel recovers.
+or a `server-port` edit. A missing tunnel association is cleared so an Owner can
+create a replacement rather than retaining a dead public address.
 
 For remote administration, an operator can use an SSH tunnel:
 

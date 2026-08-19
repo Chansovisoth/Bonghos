@@ -3,6 +3,7 @@ package playit
 import (
 	"bytes"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Chansovisoth/Bonghos/internal/database"
@@ -38,6 +39,9 @@ func TestStoreEncryptsSecretAndClearsOldTunnelOnRelink(t *testing.T) {
 	if err := store.SaveAgent("old-agent"); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.SaveAgentName("Old agent name"); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SaveTunnel("old-tunnel", "old.example:25565", 25565); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +50,7 @@ func TestStoreEncryptsSecretAndClearsOldTunnelOnRelink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.AgentID != "" || config.TunnelID != "" || config.PublicAddress != "" {
+	if config.AgentID != "" || config.AgentName != "" || config.TunnelID != "" || config.PublicAddress != "" {
 		t.Fatalf("relink retained old agent state: %+v", config)
 	}
 	var encrypted []byte
@@ -59,6 +63,22 @@ func TestStoreEncryptsSecretAndClearsOldTunnelOnRelink(t *testing.T) {
 	secret, err := store.Secret()
 	if err != nil || secret != secondSecret {
 		t.Fatalf("secret round trip = %q, %v", secret, err)
+	}
+}
+
+func TestStoreSavesAcceptedAgentName(t *testing.T) {
+	store := testStore(t)
+	if err := store.SaveAgentName(" Home server "); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.Config()
+	if err != nil || config.AgentName != "Home server" {
+		t.Fatalf("agent name = %q, %v", config.AgentName, err)
+	}
+	for _, name := range []string{"", "bad\nname", strings.Repeat("x", 101)} {
+		if err := store.SaveAgentName(name); err == nil {
+			t.Fatalf("accepted invalid agent name %q", name)
+		}
 	}
 }
 
@@ -75,6 +95,62 @@ func TestExternalAddressMustBeExplicitAndSafe(t *testing.T) {
 	}
 	if !config.Enabled || config.ManagementMode != ManagementExternal {
 		t.Fatalf("unexpected external config: %+v", config)
+	}
+}
+
+func TestPlayitConfigurationCanChangeWhileDisabled(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.SetPreference(false, AccountModeAccount, ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.BeginClaim(AccountModeGuest, "0123456789", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Enabled || !config.ClaimPending || config.ManagementMode != ManagementBonghos {
+		t.Fatalf("disabled claim changed activation state: %+v", config)
+	}
+	config, err = store.CompleteClaim("agent-secret", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Enabled || !config.SecretConfigured || config.ManagementMode != ManagementBonghos {
+		t.Fatalf("disabled link changed activation state: %+v", config)
+	}
+	config, err = store.SaveExternalConfig(false, "example.gl.joinmc.link:25565", 25565, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Enabled || config.ManagementMode != ManagementExternal || config.PublicAddress == "" {
+		t.Fatalf("disabled external config changed activation state: %+v", config)
+	}
+}
+
+func TestExternalConfigCancelsManagedClaim(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.BeginClaim(AccountModeAccount, "0123456789", 0); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.SaveExternalConfig(false, "example.gl.joinmc.link:25565", 25565, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.ClaimPending || config.ClaimURL != "" || config.ManagementMode != ManagementExternal {
+		t.Fatalf("external config retained managed claim: %+v", config)
+	}
+}
+
+func TestSwitchingBackToManagedClearsExternalAddress(t *testing.T) {
+	store := testStore(t)
+	if _, err := store.SaveExternalConfig(true, "external.example:25565", 25565, 0); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.SetPreference(true, AccountModeAccount, ManagementBonghos, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.PublicAddress != "" || config.ManagementMode != ManagementBonghos {
+		t.Fatalf("managed mode retained external address: %+v", config)
 	}
 }
 

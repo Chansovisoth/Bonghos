@@ -88,27 +88,42 @@ func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, e
 	}
 	if config.TunnelID != "" {
 		payload.TunnelStatus = "missing"
+		found := false
 		for _, tunnel := range data.Tunnels {
 			if tunnel.ID != config.TunnelID {
 				continue
 			}
+			found = true
 			payload.TunnelStatus = "configured"
 			if tunnel.DisabledReason != "" {
 				payload.TunnelStatus = tunnel.DisabledReason
+				payload.PublicAddress = ""
 			} else if tunnel.StatusMessage != "" {
 				payload.TunnelStatus = tunnel.StatusMessage
+				payload.PublicAddress = ""
+			} else {
+				payload.PublicAddress = tunnel.DisplayAddress
 			}
-			payload.PublicAddress = tunnel.DisplayAddress
-			_ = a.Playit.SaveTunnel(tunnel.ID, tunnel.DisplayAddress, config.LocalPort)
+			_ = a.Playit.SaveTunnel(tunnel.ID, payload.PublicAddress, config.LocalPort)
 			break
 		}
-		for _, tunnel := range data.Pending {
-			if tunnel.ID == config.TunnelID {
-				payload.TunnelStatus = "pending"
-				if tunnel.StatusMessage != "" {
-					payload.TunnelStatus = tunnel.StatusMessage
+		if !found {
+			for _, tunnel := range data.Pending {
+				if tunnel.ID == config.TunnelID {
+					found = true
+					payload.TunnelStatus = "pending"
+					payload.PublicAddress = ""
+					if tunnel.StatusMessage != "" {
+						payload.TunnelStatus = tunnel.StatusMessage
+					}
+					_ = a.Playit.SaveTunnel(tunnel.ID, "", config.LocalPort)
+					break
 				}
 			}
+		}
+		if !found {
+			payload.PublicAddress = ""
+			_ = a.Playit.SaveTunnel(config.TunnelID, "", config.LocalPort)
 		}
 	}
 	return payload, nil
@@ -182,11 +197,11 @@ func (a *App) handlePlayitUpdate(w http.ResponseWriter, r *http.Request) {
 		config playit.Config
 		err    error
 	)
-	if req.Enabled && req.ManagementMode == playit.ManagementExternal {
+	if req.ManagementMode == playit.ManagementExternal {
 		if req.LocalPort == 0 {
 			req.LocalPort = 25565
 		}
-		config, err = a.Playit.SaveExternalAddress(req.PublicAddress, req.LocalPort, actor.ID)
+		config, err = a.Playit.SaveExternalConfig(req.Enabled, req.PublicAddress, req.LocalPort, actor.ID)
 	} else {
 		config, err = a.Playit.SetPreference(req.Enabled, req.AccountMode, req.ManagementMode, actor.ID)
 	}
@@ -375,12 +390,24 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 		action = "playit_tunnel_created"
 	} else {
 		err = a.PlayitAPI.UpdateTunnelPort(r.Context(), secret, tunnelID, port)
+		if playit.IsProviderError(err, "TunnelNotFound") {
+			if clearErr := a.Playit.ClearTunnel(); clearErr != nil {
+				writeErr(w, http.StatusInternalServerError, errors.New("could not clear the missing Playit tunnel"))
+				return
+			}
+			tunnelID, err = a.PlayitAPI.CreateMinecraftTunnel(r.Context(), secret, data.AgentID, port)
+			action = "playit_tunnel_recreated"
+		}
 	}
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
-	if err := a.Playit.SaveTunnel(tunnelID, config.PublicAddress, port); err != nil {
+	publicAddress := config.PublicAddress
+	if action == "playit_tunnel_created" || action == "playit_tunnel_recreated" {
+		publicAddress = ""
+	}
+	if err := a.Playit.SaveTunnel(tunnelID, publicAddress, port); err != nil {
 		writeErr(w, http.StatusInternalServerError, errors.New("could not save the Playit tunnel"))
 		return
 	}
@@ -457,6 +484,12 @@ func (a *App) syncPlayitTunnelPort(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if err := a.PlayitAPI.UpdateTunnelPort(ctx, secret, config.TunnelID, port); err != nil {
+		if playit.IsProviderError(err, "TunnelNotFound") {
+			if clearErr := a.Playit.ClearTunnel(); clearErr != nil {
+				return false, clearErr
+			}
+			return false, errors.New("the configured Playit tunnel no longer exists; create a new tunnel in Settings")
+		}
 		return false, err
 	}
 	if err := a.Playit.SaveTunnel(config.TunnelID, config.PublicAddress, port); err != nil {
@@ -520,6 +553,67 @@ func (a *App) handlePlayitRefresh(w http.ResponseWriter, r *http.Request) {
 	payload, err := a.playitPayload(r.Context(), true)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, errors.New("could not refresh Playit status"))
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func (a *App) handlePlayitAgentRename(w http.ResponseWriter, r *http.Request) {
+	actor := currentUser(r)
+	a.playitMu.Lock()
+	defer a.playitMu.Unlock()
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := readJSON(r, &req, 1<<16); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("invalid request"))
+		return
+	}
+	name, err := playit.NormalizeAgentName(req.Name)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	config, err := a.Playit.Config()
+	if err != nil || config.ManagementMode != playit.ManagementBonghos || !config.SecretConfigured {
+		writeErr(w, http.StatusConflict, errors.New("link a Bonghos-managed Playit agent first"))
+		return
+	}
+	secret, err := a.Playit.Secret()
+	if err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	agentID := config.AgentID
+	if agentID == "" {
+		data, runErr := a.PlayitAPI.RunData(r.Context(), secret)
+		if runErr != nil {
+			writeErr(w, http.StatusBadGateway, runErr)
+			return
+		}
+		agentID = data.AgentID
+		if agentID == "" {
+			writeErr(w, http.StatusBadGateway, errors.New("Playit did not return an agent identifier"))
+			return
+		}
+		_ = a.Playit.SaveAgent(agentID)
+	}
+	if err := a.PlayitAPI.RenameAgent(r.Context(), secret, agentID, name); err != nil {
+		status := http.StatusBadGateway
+		if playit.IsProviderError(err, "InvalidName") {
+			status = http.StatusBadRequest
+		}
+		writeErr(w, status, err)
+		return
+	}
+	if err := a.Playit.SaveAgentName(name); err != nil {
+		writeErr(w, http.StatusInternalServerError, errors.New("Playit renamed the agent, but Bonghos could not save the name"))
+		return
+	}
+	a.audit(actor.ID, actor.Username, "playit_agent_renamed", agentID, name, remoteIP(r))
+	payload, payloadErr := a.playitPayload(r.Context(), false)
+	if payloadErr != nil {
+		writeErr(w, http.StatusInternalServerError, errors.New("could not reload Playit settings"))
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)

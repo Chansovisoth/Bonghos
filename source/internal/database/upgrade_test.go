@@ -106,8 +106,8 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if version, err := Version(upgraded); err != nil || version != 19 {
-		t.Fatalf("upgraded schema version = %d, %v; want 19", version, err)
+	if version, err := Version(upgraded); err != nil || version != 20 {
+		t.Fatalf("upgraded schema version = %d, %v; want 20", version, err)
 	}
 	if err := upgraded.QueryRow(`SELECT name FROM sqlite_master WHERE type='table' AND name='passkeys'`).Scan(&table); err != nil {
 		t.Fatalf("passkeys migration was not applied: %v", err)
@@ -132,6 +132,10 @@ func TestPreUpdateCheckpointDoesNotMigrateAndUpgradePreservesData(t *testing.T) 
 	if err := upgraded.QueryRow(`SELECT enabled, management_mode FROM playit_settings WHERE id=1`).
 		Scan(&playitEnabled, &playitManagement); err != nil || playitEnabled != 0 || playitManagement != "none" {
 		t.Fatalf("upgraded Playit default = enabled %d management %q, %v; want disabled manual networking", playitEnabled, playitManagement, err)
+	}
+	var playitAgentName string
+	if err := upgraded.QueryRow(`SELECT agent_name FROM playit_settings WHERE id=1`).Scan(&playitAgentName); err != nil || playitAgentName != "" {
+		t.Fatalf("upgraded Playit agent name = %q, %v; want empty", playitAgentName, err)
 	}
 	var recoveryCreatedAt string
 	if err := upgraded.QueryRow(`SELECT created_at FROM recovery_codes LIMIT 1`).Scan(&recoveryCreatedAt); err != sql.ErrNoRows {

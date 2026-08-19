@@ -1674,7 +1674,7 @@
    4. Approve the agent in the Playit browser page.
    5. Wait for Agent status to become running, then create the tunnel. Bonghos
       uses the active project's Minecraft port.
-   6. Give players the public address shown in Settings.
+   6. Give players the Playit IP shown on Overview.
 
  Bonghos keeps a managed tunnel pointed at the active project's server-port
  after project changes, server starts, and port edits. A Playit outage does not
@@ -1686,8 +1686,9 @@
  Playit password. Guest setup returns a temporary management link after the
  claim completes. Settings can request a fresh temporary guest management link;
  convert the guest account according to Playit's instructions if you need
- durable account access. Delete tunnel removes the remote Playit tunnel without
- deleting or stopping the Minecraft server.
+ durable account access. The linked agent can also be renamed from the same
+ editor. Delete tunnel removes the remote Playit tunnel without deleting or
+ stopping the Minecraft server.
 
  If Playit is already running as a system service, user service, Docker or
  Podman container, Settings displays the read-only detection. Choose Use

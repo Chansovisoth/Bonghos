@@ -41,6 +41,10 @@ func (e *ProviderError) Error() string {
 		return "Playit has not registered a compatible agent yet; wait for the agent to become ready, then try again"
 	case "TunnelNotFound":
 		return "The Playit tunnel no longer exists"
+	case "InvalidName":
+		return "Playit rejected that agent name"
+	case "AgentNotFound", "InvalidAgentId":
+		return "The linked Playit agent could not be found"
 	default:
 		return "Playit rejected the request"
 	}
@@ -189,6 +193,21 @@ func (c *Client) RunData(ctx context.Context, secret string) (RunData, error) {
 	var result RunData
 	err := c.post(ctx, "/v1/agents/rundata", secret, struct{}{}, &result)
 	return result, err
+}
+
+func (c *Client) RenameAgent(ctx context.Context, secret, agentID, name string) error {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return errors.New("Playit agent is not linked")
+	}
+	name, err := NormalizeAgentName(name)
+	if err != nil {
+		return err
+	}
+	return c.post(ctx, "/agents/rename", secret, map[string]string{
+		"agent_id": agentID,
+		"name":     name,
+	}, nil)
 }
 
 func (c *Client) CreateMinecraftTunnel(ctx context.Context, secret, agentID string, localPort int) (string, error) {

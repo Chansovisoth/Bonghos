@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Owners and delegated Admins can rename a Bonghos-linked Playit agent from
+  the Settings editor, including while the integration is switched off.
+
+### Fixed
+
+- Playit now cancels abandoned managed claims when switching to an external
+  deployment, preserves disabled configuration consistently in demo mode,
+  keeps relink approval visible, stops stale managed services on disabled
+  startup, and no longer advertises missing, pending, or disabled tunnels.
+- Updating a tunnel that was deleted remotely now creates a replacement instead
+  of leaving Bonghos permanently attached to the missing tunnel identifier.
+- The in-process Playit fallback now restarts an unexpectedly exited agent after
+  five seconds when a managed systemd user service is unavailable.
+
 ## [0.3.0-rc.1] - 2026-08-19
 
 ### Added

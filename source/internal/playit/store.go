@@ -30,6 +30,7 @@ type Config struct {
 	ManagementMode   string `json:"management_mode"`
 	SecretConfigured bool   `json:"secret_configured"`
 	AgentID          string `json:"agent_id,omitempty"`
+	AgentName        string `json:"agent_name,omitempty"`
 	TunnelID         string `json:"tunnel_id,omitempty"`
 	PublicAddress    string `json:"public_address,omitempty"`
 	LocalPort        int    `json:"local_port"`
@@ -54,14 +55,22 @@ func validAccountMode(mode string) bool {
 	return mode == AccountModeAccount || mode == AccountModeGuest
 }
 
+func NormalizeAgentName(agentName string) (string, error) {
+	agentName = strings.TrimSpace(agentName)
+	if agentName == "" || len(agentName) > 100 || strings.ContainsAny(agentName, "\r\n\t") {
+		return "", errors.New("enter a valid Playit agent name")
+	}
+	return agentName, nil
+}
+
 func (s *Store) load(decryptSecret bool) (storedConfig, error) {
 	var out storedConfig
 	var enabled int
 	var encrypted []byte
 	err := s.DB.QueryRow(`SELECT enabled, account_mode, management_mode, agent_secret_enc,
-		agent_id, tunnel_id, public_address, local_port, claim_code, claim_started_at, updated_at
+		agent_id, agent_name, tunnel_id, public_address, local_port, claim_code, claim_started_at, updated_at
 		FROM playit_settings WHERE id=1`).Scan(&enabled, &out.AccountMode, &out.ManagementMode,
-		&encrypted, &out.AgentID, &out.TunnelID, &out.PublicAddress, &out.LocalPort,
+		&encrypted, &out.AgentID, &out.AgentName, &out.TunnelID, &out.PublicAddress, &out.LocalPort,
 		&out.claimCode, &out.claimStartedAt, &out.UpdatedAt)
 	if err != nil {
 		return storedConfig{}, err
@@ -107,10 +116,11 @@ func (s *Store) SetPreference(enabled bool, accountMode, managementMode string, 
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err := s.DB.Exec(`UPDATE playit_settings SET enabled=?, account_mode=?, management_mode=?,
+		public_address=CASE WHEN management_mode<>? AND ?='bonghos' THEN '' ELSE public_address END,
 		claim_code=CASE WHEN ?=0 THEN '' ELSE claim_code END,
 		claim_started_at=CASE WHEN ?=0 THEN '' ELSE claim_started_at END,
 		updated_at=?, updated_by=? WHERE id=1`, boolInt(enabled), accountMode, managementMode,
-		boolInt(enabled), boolInt(enabled), now, nullableID(updatedBy))
+		managementMode, managementMode, boolInt(enabled), boolInt(enabled), now, nullableID(updatedBy))
 	if err != nil {
 		return Config{}, err
 	}
@@ -127,7 +137,7 @@ func (s *Store) BeginClaim(accountMode, code string, updatedBy int64) (Config, e
 		return Config{}, errors.New("invalid Playit claim code")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(`UPDATE playit_settings SET enabled=1, account_mode=?, management_mode='bonghos',
+	_, err := s.DB.Exec(`UPDATE playit_settings SET account_mode=?, management_mode='bonghos',
 		claim_code=?, claim_started_at=?, updated_at=?, updated_by=? WHERE id=1`, accountMode,
 		code, now, now, nullableID(updatedBy))
 	if err != nil {
@@ -163,8 +173,8 @@ func (s *Store) CompleteClaim(secret string, updatedBy int64) (Config, error) {
 		return Config{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.DB.Exec(`UPDATE playit_settings SET enabled=1, management_mode='bonghos',
-		agent_secret_enc=?, agent_id='', tunnel_id='', public_address='',
+	_, err = s.DB.Exec(`UPDATE playit_settings SET management_mode='bonghos',
+		agent_secret_enc=?, agent_id='', agent_name='', tunnel_id='', public_address='',
 		claim_code='', claim_started_at='', updated_at=?, updated_by=? WHERE id=1`,
 		encrypted, now, nullableID(updatedBy))
 	if err != nil {
@@ -191,6 +201,19 @@ func (s *Store) SaveAgent(agentID string) error {
 	return err
 }
 
+// SaveAgentName records a name only after Playit has accepted the remote
+// rename. The agent run-data API does not return the current agent name, so
+// Bonghos cannot discover names that were assigned outside Bonghos.
+func (s *Store) SaveAgentName(agentName string) error {
+	agentName, err := NormalizeAgentName(agentName)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(`UPDATE playit_settings SET agent_name=?, updated_at=? WHERE id=1`,
+		agentName, time.Now().UTC().Format(time.RFC3339))
+	return err
+}
+
 func (s *Store) SaveTunnel(tunnelID, publicAddress string, localPort int) error {
 	if localPort < 1 || localPort > 65535 {
 		return errors.New("Minecraft port must be between 1 and 65535")
@@ -210,6 +233,12 @@ func (s *Store) ClearTunnel() error {
 }
 
 func (s *Store) SaveExternalAddress(publicAddress string, localPort int, updatedBy int64) (Config, error) {
+	return s.SaveExternalConfig(true, publicAddress, localPort, updatedBy)
+}
+
+// SaveExternalConfig updates an externally managed connection without
+// conflating configuration with whether Bonghos should advertise it as active.
+func (s *Store) SaveExternalConfig(enabled bool, publicAddress string, localPort int, updatedBy int64) (Config, error) {
 	publicAddress = strings.TrimSpace(publicAddress)
 	if publicAddress == "" || len(publicAddress) > 255 || strings.ContainsAny(publicAddress, "\r\n\t /\\") {
 		return Config{}, errors.New("enter a valid Playit public host and optional port")
@@ -218,9 +247,9 @@ func (s *Store) SaveExternalAddress(publicAddress string, localPort int, updated
 		return Config{}, errors.New("Minecraft port must be between 1 and 65535")
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.DB.Exec(`UPDATE playit_settings SET enabled=1, management_mode='external',
-		public_address=?, local_port=?, updated_at=?, updated_by=? WHERE id=1`,
-		publicAddress, localPort, now, nullableID(updatedBy))
+	_, err := s.DB.Exec(`UPDATE playit_settings SET enabled=?, management_mode='external',
+		public_address=?, local_port=?, claim_code='', claim_started_at='', updated_at=?, updated_by=? WHERE id=1`,
+		boolInt(enabled), publicAddress, localPort, now, nullableID(updatedBy))
 	if err != nil {
 		return Config{}, err
 	}

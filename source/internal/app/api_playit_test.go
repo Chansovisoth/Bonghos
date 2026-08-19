@@ -56,6 +56,14 @@ func TestPlayitSettingsAreOwnerOnlyAndExistingInstallsDefaultToManual(t *testing
 	if status != http.StatusOK || overview["playit_address"] != "example.gl.joinmc.link:25565" {
 		t.Fatalf("overview Playit address: %d %s", status, body)
 	}
+
+	status, body = owner.do(http.MethodPut, "/api/playit", map[string]any{
+		"enabled": false, "account_mode": "account", "management_mode": "external",
+		"public_address": "disabled.gl.joinmc.link:25565", "local_port": 25566,
+	}, &settings)
+	if status != http.StatusOK || settings["enabled"] != false || settings["public_address"] != "disabled.gl.joinmc.link:25565" {
+		t.Fatalf("save disabled external Playit settings: %d %s", status, body)
+	}
 }
 
 func TestPlayitClaimStoresSecretEncryptedAndNeverReturnsIt(t *testing.T) {
@@ -123,6 +131,10 @@ func TestPlayitClaimStoresSecretEncryptedAndNeverReturnsIt(t *testing.T) {
 	if strings.Contains(string(encrypted), agentSecret) {
 		t.Fatal("Playit credential was stored as plaintext")
 	}
+	config, err := env.app.Playit.Config()
+	if err != nil || config.Enabled || !config.SecretConfigured {
+		t.Fatalf("linking while disabled changed activation state: %+v, %v", config, err)
+	}
 }
 
 func TestPlayitClaimRequiresInstalledDaemon(t *testing.T) {
@@ -144,12 +156,167 @@ func TestPlayitTunnelRequiresDaemonReportedReady(t *testing.T) {
 	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
 	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
 		return playit.AgentStatus{Phase: "has_invalid_secret", Error: "The Playit agent rejected its credential"}
 	}
 	status, body := owner.do(http.MethodPost, "/api/playit/tunnel", map[string]any{}, nil)
 	if status != http.StatusConflict || !strings.Contains(body, "rejected its credential") {
 		t.Fatalf("tunnel with unready agent: %d %s", status, body)
+	}
+}
+
+func TestPlayitAgentCanBeRenamedWhileDisabled(t *testing.T) {
+	env := newTestEnv(t)
+	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner := env.newClient()
+	owner.mustLogin("owner", "correct horse battery", ownerSecret)
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.app.Playit.SaveAgent("agent-id"); err != nil {
+		t.Fatal(err)
+	}
+	var renameCalls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/agents/rename" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Agent-Key agent-secret" {
+			t.Error("rename did not use the linked agent credential")
+		}
+		renameCalls.Add(1)
+		var request map[string]string
+		_ = json.NewDecoder(r.Body).Decode(&request)
+		if request["agent_id"] != "agent-id" || request["name"] != "Bonghos home" {
+			t.Errorf("rename request = %+v", request)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": nil})
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	var payload map[string]any
+	status, body := owner.do(http.MethodPut, "/api/playit/agent", map[string]string{"name": " Bonghos home "}, &payload)
+	if status != http.StatusOK || payload["agent_name"] != "Bonghos home" || payload["enabled"] != false {
+		t.Fatalf("rename disabled agent: %d %s", status, body)
+	}
+	status, body = owner.do(http.MethodPut, "/api/playit/agent", map[string]string{"name": "  "}, nil)
+	if status != http.StatusBadRequest || renameCalls.Load() != 1 {
+		t.Fatalf("invalid rename reached Playit: %d calls=%d %s", status, renameCalls.Load(), body)
+	}
+}
+
+func TestPlayitRefreshHidesInactiveRemoteTunnelAddresses(t *testing.T) {
+	tests := []struct {
+		name       string
+		tunnels    []any
+		pending    []any
+		wantStatus string
+	}{
+		{name: "missing", wantStatus: "missing"},
+		{name: "disabled", tunnels: []any{map[string]any{
+			"id": "managed-tunnel", "display_address": "disabled.example:25565", "disabled_reason": "account disabled",
+		}}, wantStatus: "account disabled"},
+		{name: "pending", pending: []any{map[string]any{
+			"id": "managed-tunnel", "display_address": "pending.example:25565", "status_msg": "tunnel type not supported",
+		}}, wantStatus: "tunnel type not supported"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+			owner := env.newClient()
+			owner.mustLogin("owner", "correct horse battery", ownerSecret)
+			if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+				t.Fatal(err)
+			}
+			if err := env.app.Playit.SaveTunnel("managed-tunnel", "stale.example:25565", 25565); err != nil {
+				t.Fatal(err)
+			}
+			env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+				return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id"}
+			}
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
+					"agent_id": "agent-id", "tunnels": test.tunnels, "pending": test.pending,
+					"permissions": map[string]string{"account_status": "verified"},
+				}})
+			}))
+			defer provider.Close()
+			env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+			var payload map[string]any
+			status, body := owner.do(http.MethodGet, "/api/playit", nil, &payload)
+			if _, hasAddress := payload["public_address"]; status != http.StatusOK || hasAddress || payload["tunnel_status"] != test.wantStatus {
+				t.Fatalf("refresh inactive tunnel: %d %s", status, body)
+			}
+			config, err := env.app.Playit.Config()
+			if err != nil || config.TunnelID != "managed-tunnel" || config.PublicAddress != "" {
+				t.Fatalf("inactive tunnel cache = %+v, %v", config, err)
+			}
+			var overview map[string]any
+			status, body = owner.do(http.MethodGet, "/api/overview", nil, &overview)
+			if _, hasAddress := overview["playit_address"]; status != http.StatusOK || hasAddress {
+				t.Fatalf("overview advertised inactive tunnel: %d %s", status, body)
+			}
+		})
+	}
+}
+
+func TestPlayitUpdateRecreatesMissingRemoteTunnel(t *testing.T) {
+	env := newTestEnv(t)
+	env.newServerProject(t, "playit-recreate")
+	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner := env.newClient()
+	owner.mustLogin("owner", "correct horse battery", ownerSecret)
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.app.Playit.SaveTunnel("missing-tunnel", "stale.example:25565", 25565); err != nil {
+		t.Fatal(err)
+	}
+	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+		return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id"}
+	}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/agents/rundata":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
+				"agent_id": "agent-id", "tunnels": []any{}, "pending": []any{},
+				"permissions": map[string]string{"account_status": "verified"},
+			}})
+		case "/v1/tunnels/config":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "fail", "data": "TunnelNotFound"})
+		case "/v1/tunnels/create":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"id": "replacement-tunnel"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	var payload map[string]any
+	status, body := owner.do(http.MethodPost, "/api/playit/tunnel", map[string]any{}, &payload)
+	if status != http.StatusOK || payload["tunnel_id"] != "replacement-tunnel" {
+		t.Fatalf("recreate missing tunnel: %d %s", status, body)
+	}
+	config, err := env.app.Playit.Config()
+	if err != nil || config.TunnelID != "replacement-tunnel" {
+		t.Fatalf("replacement tunnel cache = %+v, %v", config, err)
 	}
 }
 
@@ -160,6 +327,9 @@ func TestPlayitTunnelCreateAndMissingRemoteDelete(t *testing.T) {
 	owner := env.newClient()
 	owner.mustLogin("owner", "correct horse battery", ownerSecret)
 	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
 		t.Fatal(err)
 	}
 	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {

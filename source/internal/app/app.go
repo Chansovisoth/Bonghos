@@ -247,7 +247,17 @@ func (a *App) Serve(ctx context.Context) error {
 
 func (a *App) bootPlayit(ctx context.Context) {
 	settings, err := a.Playit.Config()
-	if err != nil || !settings.Enabled || settings.ManagementMode != playit.ManagementBonghos || !settings.SecretConfigured {
+	if err != nil {
+		a.Logf("Playit settings could not be loaded: %v", err)
+		return
+	}
+	if !settings.Enabled || settings.ManagementMode != playit.ManagementBonghos || !settings.SecretConfigured {
+		a.stopForegroundPlayit()
+		if systemd.Available() && systemd.IsActive(systemd.ServicePlayit) {
+			if stopErr := systemd.Stop(systemd.ServicePlayit); stopErr != nil {
+				a.Logf("Playit agent could not be stopped while disabled: %v", stopErr)
+			}
+		}
 		playit.CleanupRuntime(a.Home)
 		return
 	}
@@ -291,16 +301,32 @@ func (a *App) startForegroundPlayit(parent context.Context) {
 
 	go func() {
 		defer close(done)
-		err := playit.RunManagedAgent(runCtx, a.Home, a.Playit)
+		for {
+			err := playit.RunManagedAgent(runCtx, a.Home, a.Playit)
+			if runCtx.Err() != nil {
+				break
+			}
+			if err != nil {
+				a.Logf("Playit agent stopped: %v; restarting in 5 seconds", err)
+			} else {
+				a.Logf("Playit agent exited; restarting in 5 seconds")
+			}
+			timer := time.NewTimer(5 * time.Second)
+			select {
+			case <-runCtx.Done():
+				timer.Stop()
+			case <-timer.C:
+			}
+			if runCtx.Err() != nil {
+				break
+			}
+		}
 		a.playitRuntimeMu.Lock()
 		if a.playitRunID == runID {
 			a.playitCancel = nil
 			a.playitDone = nil
 		}
 		a.playitRuntimeMu.Unlock()
-		if err != nil && runCtx.Err() == nil {
-			a.Logf("Playit agent stopped: %v", err)
-		}
 	}()
 }
 

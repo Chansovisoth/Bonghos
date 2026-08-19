@@ -129,7 +129,8 @@ official Linux agent from <https://packages.playit.gg/>, link it using the
 browser approval flow, then create the tunnel. Bonghos encrypts the agent
 credential, waits for the official agent to report that it is ready, and uses
 a separate on-demand user service. Tunnel status and the agent version are
-shown in Settings; tunnels can be updated or deleted there. Existing installations
+shown in Settings; the linked agent can be renamed and tunnels can be updated
+or deleted there. The public player address is shown on Overview. Existing installations
 upgraded from a version without Playit remain on direct/manual networking until
 an Owner enables the integration.
 

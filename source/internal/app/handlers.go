@@ -71,6 +71,7 @@ func (a *App) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/playit/tunnel", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitTunnelDelete))
 	mux.HandleFunc("POST /api/playit/guest-login", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitGuestLogin))
 	mux.HandleFunc("POST /api/playit/refresh", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitRefresh))
+	mux.HandleFunc("PUT /api/playit/agent", a.requirePerm(authorization.PermPlayitManage, a.handlePlayitAgentRename))
 
 	// --- notification bots -------------------------------------------------
 	mux.HandleFunc("GET /api/bots", a.requirePerm(authorization.PermBotsManage, a.handleBotList))

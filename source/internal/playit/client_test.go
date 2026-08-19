@@ -32,6 +32,16 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 			}})
 		case "/login/guest":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"session_key": "guest-session"}})
+		case "/agents/rename":
+			if got := r.Header.Get("Authorization"); got != "Agent-Key agent-secret" {
+				t.Errorf("rename Authorization = %q", got)
+			}
+			var request map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&request)
+			if request["agent_id"] != "agent-id" || request["name"] != "Home server" {
+				t.Errorf("rename request = %+v", request)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": nil})
 		case "/v1/tunnels/create":
 			var request map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&request)
@@ -77,6 +87,9 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 	if err != nil || guestURL != "https://playit.gg/login/guest-account/guest-session" {
 		t.Fatalf("GuestLogin = %q, %v", guestURL, err)
 	}
+	if err := client.RenameAgent(context.Background(), secret, "agent-id", " Home server "); err != nil {
+		t.Fatalf("RenameAgent: %v", err)
+	}
 	tunnelID, err := client.CreateMinecraftTunnel(context.Background(), secret, "agent-id", 25566)
 	if err != nil || tunnelID != "tunnel-id" {
 		t.Fatalf("CreateMinecraftTunnel = %q, %v", tunnelID, err)
@@ -87,7 +100,7 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 	if err := client.DeleteTunnel(context.Background(), secret, tunnelID); err != nil {
 		t.Fatalf("DeleteTunnel: %v", err)
 	}
-	if strings.Join(paths, ",") != "/claim/setup,/claim/exchange,/v1/agents/rundata,/login/guest,/v1/tunnels/create,/v1/tunnels/config,/tunnels/delete" {
+	if strings.Join(paths, ",") != "/claim/setup,/claim/exchange,/v1/agents/rundata,/login/guest,/agents/rename,/v1/tunnels/create,/v1/tunnels/config,/tunnels/delete" {
 		t.Fatalf("paths = %v", paths)
 	}
 }
