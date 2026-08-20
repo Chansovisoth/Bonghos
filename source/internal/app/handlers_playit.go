@@ -240,6 +240,10 @@ func (a *App) handlePlayitClaimStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, errors.New("install the official Playit agent before linking it to Bonghos"))
 		return
 	}
+	if err := a.preparePlayitClaim(); err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
 	codeBytes := make([]byte, 5)
 	if _, err := rand.Read(codeBytes); err != nil {
 		writeErr(w, http.StatusInternalServerError, errors.New("could not create a Playit claim"))
@@ -265,6 +269,10 @@ func (a *App) handlePlayitClaimPoll(w http.ResponseWriter, r *http.Request) {
 	defer a.playitMu.Unlock()
 	code, accountMode, err := a.Playit.Claim()
 	if err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	if err := a.preparePlayitClaim(); err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
@@ -331,6 +339,19 @@ func (a *App) handlePlayitClaimPoll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"state": "complete", "config": config})
 }
 
+func (a *App) preparePlayitClaim() error {
+	version, err := playit.DaemonVersion(a.Home)
+	if err != nil {
+		// Tests and specialized clients may supply a trusted version override.
+		if strings.TrimSpace(a.PlayitAPI.AgentVersion) != "" {
+			return nil
+		}
+		return errors.New("could not read the installed playitd version; update or reinstall the official Playit agent")
+	}
+	a.PlayitAPI.AgentVersion = version
+	return nil
+}
+
 func (a *App) activeMinecraftPort() (int, error) {
 	inst, err := a.activeInstance()
 	if err != nil {
@@ -375,7 +396,12 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := a.PlayitAPI.RunData(r.Context(), secret)
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
+		status := http.StatusBadGateway
+		var providerErr *playit.ProviderError
+		if errors.As(err, &providerErr) {
+			status = http.StatusConflict
+		}
+		writeErr(w, status, err)
 		return
 	}
 	if data.AgentID == "" {
@@ -400,7 +426,12 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, err)
+		status := http.StatusBadGateway
+		var providerErr *playit.ProviderError
+		if errors.As(err, &providerErr) {
+			status = http.StatusConflict
+		}
+		writeErr(w, status, err)
 		return
 	}
 	publicAddress := config.PublicAddress

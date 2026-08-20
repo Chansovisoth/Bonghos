@@ -8086,24 +8086,26 @@ function playitSettingsSection(initialConfig) {
             controls.append(el("a", { class: "btn", href: config.guest_login_url, target: "_blank", rel: "noopener noreferrer" }, "Manage guest account"));
           } else if (config.account_mode === "guest") {
             controls.append(el("button", { class: "btn", type: "button", onclick: async (event) => {
-              event.currentTarget.disabled = true;
+              const button = event.currentTarget;
+              button.disabled = true;
               try {
                 const result = await api("/playit/guest-login", { method: "POST", json: {} });
                 config.guest_login_url = result.url;
                 render();
-              } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+              } catch (error) { toast(error.message, "err"); button.disabled = false; }
             } }, "Manage guest account"));
           }
           controls.append(details,
             el("div", { class: "playit-agent-name" },
               el("label", {}, "Agent name", agentName),
               el("button", { class: "btn playit-agent-name-save", type: "button", title: "Save agent name", "aria-label": "Save agent name", onclick: async (event) => {
-                event.currentTarget.disabled = true;
+                const button = event.currentTarget;
+                button.disabled = true;
                 try {
                   replaceConfig(await api("/playit/agent", { method: "PUT", json: { name: agentName.value.trim() } }));
                   toast("Playit agent renamed", "ok");
                   render();
-                } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+                } catch (error) { toast(error.message, "err"); button.disabled = false; }
               } }, solarIcon("diskette-linear"))),
             el("div", { class: "playit-actions playit-tunnel-actions" },
             el("button", { class: "btn primary", type: "button",
@@ -8111,27 +8113,30 @@ function playitSettingsSection(initialConfig) {
                 disabled: "disabled",
                 title: config.enabled ? "The managed agent must be ready first" : "Turn on Playit.gg to manage the tunnel",
             } : {}), onclick: async (event) => {
-              event.currentTarget.disabled = true;
+              const button = event.currentTarget;
+              button.disabled = true;
               try {
                 const hadTunnel = !!config.tunnel_id;
                 const missingTunnel = hadTunnel && config.tunnel_status === "missing";
                 replaceConfig(await api("/playit/tunnel", { method: "POST", json: {} }));
                 toast(missingTunnel ? "Playit tunnel recreated" : hadTunnel ? "Playit tunnel updated" : "Playit tunnel created", "ok");
                 render();
-              } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+              } catch (error) { toast(error.message, "err"); button.disabled = false; }
             } }, config.tunnel_status === "missing" ? "Recreate tunnel" : config.tunnel_id ? "Update tunnel" : "Create tunnel"),
             config.enabled && !config.agent_online && config.daemon_available && ["stopped", "error"].includes(config.agent_phase)
               ? el("button", { class: "btn", type: "button", onclick: async (event) => {
-                event.currentTarget.disabled = true;
+                const button = event.currentTarget;
+                button.disabled = true;
                 try {
                   await savePreference({ enabled: true, management_mode: "bonghos" });
                   toast("Playit agent restart requested", "ok");
-                } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+                } catch (error) { toast(error.message, "err"); button.disabled = false; }
               } }, "Restart agent") : null,
             el("button", { class: "btn", type: "button", onclick: async (event) => {
-              event.currentTarget.disabled = true;
+              const button = event.currentTarget;
+              button.disabled = true;
               try { replaceConfig(await api("/playit/refresh", { method: "POST", json: {} })); render(); }
-              catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
+              catch (error) { toast(error.message, "err"); button.disabled = false; }
             } }, "Refresh"),
             config.tunnel_id ? el("button", { class: "btn danger", type: "button", onclick: () => {
               editorRoot = null;

@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Playit claims now register the installed official agent version instead of
+  the Bonghos version, allowing Playit to recognize supported tunnel types.
+  Existing incompatible links receive a relink instruction, and failed
+  Playit actions no longer trigger a secondary browser error.
 - Backup integrity is shown beside the backup ID instead of consuming a
   separate table column.
 - Playit now cancels abandoned managed claims when switching to an external

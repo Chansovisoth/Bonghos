@@ -19,9 +19,10 @@ type HTTPDoer interface {
 }
 
 type Client struct {
-	BaseURL string
-	HTTP    HTTPDoer
-	Version string
+	BaseURL      string
+	HTTP         HTTPDoer
+	Version      string
+	AgentVersion string
 }
 
 type apiEnvelope struct {
@@ -37,14 +38,26 @@ type ProviderError struct {
 
 func (e *ProviderError) Error() string {
 	switch e.Code {
-	case "AgentVersionUnknown", "AgentVersionTooOld", "TunnelTypeNotSupported", "ConfigNotCompatibleWithAgent":
-		return "Playit has not registered a compatible agent yet; wait for the agent to become ready, then try again"
+	case "AgentVersionUnknown", "TunnelTypeNotSupported", "ConfigNotCompatibleWithAgent":
+		return "Playit does not recognize this agent's tunnel support; relink the agent once in Bonghos, then try again"
+	case "AgentVersionTooOld":
+		return "The installed Playit agent is too old; update playitd, then relink the agent"
 	case "TunnelNotFound":
 		return "The Playit tunnel no longer exists"
 	case "InvalidName":
 		return "Playit rejected that agent name"
 	case "AgentNotFound", "InvalidAgentId":
 		return "The linked Playit agent could not be found"
+	case "RequiresVerifiedAccount", "EmailMustBeVerified":
+		return "Verify the email address on the Playit account before creating a tunnel"
+	case "AgentOverLimit":
+		return "The Playit account has reached its agent limit"
+	case "AccountBanned":
+		return "The Playit account cannot create tunnels"
+	case "InvalidTunnelConfig":
+		return "Playit rejected the tunnel configuration for this agent; update playitd, then relink the agent"
+	case "PublicPortRequiresPlayitPremium", "RegionRequiresPlayitPremium":
+		return "This Playit tunnel allocation requires Playit Premium"
 	default:
 		return "Playit rejected the request"
 	}
@@ -59,10 +72,14 @@ func providerError(raw json.RawMessage) error {
 	var code string
 	if err := json.Unmarshal(raw, &code); err != nil {
 		var tagged struct {
-			Error string `json:"error"`
+			Error   string `json:"error"`
+			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(raw, &tagged)
 		code = tagged.Error
+		if strings.TrimSpace(code) == "" {
+			code = tagged.Message
+		}
 	}
 	code = strings.TrimSpace(code)
 	for _, r := range code {
@@ -138,8 +155,12 @@ func (c *Client) clientVersion() string {
 
 func (c *Client) ClaimSetup(ctx context.Context, code string) (string, error) {
 	var state string
+	agentVersion := strings.TrimSpace(c.AgentVersion)
+	if agentVersion == "" {
+		return "", errors.New("the official Playit agent version is unavailable")
+	}
 	err := c.post(ctx, "/claim/setup", "", map[string]any{
-		"code": code, "agent_type": "assignable", "version": "Bonghos " + c.clientVersion(),
+		"code": code, "agent_type": "assignable", "version": "playit " + agentVersion,
 	}, &state)
 	return state, err
 }

@@ -7,9 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
+	"time"
 )
+
+var daemonVersionPattern = regexp.MustCompile(`(?i)\bv?(\d+\.\d+\.\d+(?:[-+][0-9a-z.-]+)?)\b`)
 
 // FindDaemon locates the official Playit daemon without downloading or
 // replacing software on the host. The Bonghos-local location allows a future
@@ -41,6 +46,34 @@ func FindDaemon(home string) (string, error) {
 func DaemonAvailable(home string) bool {
 	_, err := FindDaemon(home)
 	return err == nil
+}
+
+// DaemonVersion returns the official agent version used when registering a
+// claim with Playit. Playit uses this metadata to determine which tunnel types
+// the linked agent supports, so the Bonghos application version must not be
+// substituted here.
+func DaemonVersion(home string) (string, error) {
+	daemon, err := FindDaemon(home)
+	if err != nil {
+		return "", err
+	}
+	for _, flag := range []string{"--version", "-V"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		output, _ := exec.CommandContext(ctx, daemon, flag).CombinedOutput()
+		cancel()
+		if version := parseDaemonVersion(string(output)); version != "" {
+			return version, nil
+		}
+	}
+	return "", errors.New("could not determine the official playitd version")
+}
+
+func parseDaemonVersion(output string) string {
+	match := daemonVersionPattern.FindStringSubmatch(strings.TrimSpace(output))
+	if len(match) < 2 {
+		return ""
+	}
+	return match[1]
 }
 
 // CleanupRuntime removes only the credential and socket files created by the

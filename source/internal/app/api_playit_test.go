@@ -104,7 +104,7 @@ func TestPlayitClaimStoresSecretEncryptedAndNeverReturnsIt(t *testing.T) {
 		}
 	}))
 	defer provider.Close()
-	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client(), AgentVersion: "1.0.10"}
 
 	var started map[string]any
 	status, body := owner.do(http.MethodPost, "/api/playit/claim", map[string]string{"account_mode": "account"}, &started)
@@ -168,6 +168,43 @@ func TestPlayitTunnelRequiresDaemonReportedReady(t *testing.T) {
 	}
 }
 
+func TestPlayitTunnelExplainsIncompatibleAgentRegistration(t *testing.T) {
+	env := newTestEnv(t)
+	env.newServerProject(t, "playit-incompatible")
+	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner := env.newClient()
+	owner.mustLogin("owner", "correct horse battery", ownerSecret)
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+		return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id", Version: "1.0.10"}
+	}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/agents/rundata":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
+				"agent_id": "agent-id", "tunnels": []any{}, "pending": []any{}, "permissions": map[string]string{"account_status": "verified"},
+			}})
+		case "/v1/tunnels/create":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "fail", "data": "TunnelTypeNotSupported"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	status, body := owner.do(http.MethodPost, "/api/playit/tunnel", map[string]any{}, nil)
+	if status != http.StatusConflict || !strings.Contains(body, "relink the agent") {
+		t.Fatalf("incompatible tunnel registration: %d %s", status, body)
+	}
+}
+
 func TestPlayitAgentCanBeRenamedWhileDisabled(t *testing.T) {
 	env := newTestEnv(t)
 	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
@@ -198,7 +235,7 @@ func TestPlayitAgentCanBeRenamedWhileDisabled(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": nil})
 	}))
 	defer provider.Close()
-	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client(), AgentVersion: "1.0.10"}
 
 	var payload map[string]any
 	status, body := owner.do(http.MethodPut, "/api/playit/agent", map[string]string{"name": " Bonghos home "}, &payload)
@@ -420,7 +457,7 @@ func TestPlayitRelinkDeletesExistingRemoteTunnel(t *testing.T) {
 		}
 	}))
 	defer provider.Close()
-	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client(), AgentVersion: "1.0.10"}
 	if status, body := owner.do(http.MethodPost, "/api/playit/claim", map[string]string{"account_mode": "account"}, nil); status != http.StatusOK {
 		t.Fatalf("start relink: %d %s", status, body)
 	}

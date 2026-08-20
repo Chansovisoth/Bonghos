@@ -19,6 +19,11 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 			if r.Header.Get("Authorization") != "" {
 				t.Error("claim setup unexpectedly sent authorization")
 			}
+			var request map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&request)
+			if request["version"] != "playit 1.0.10" {
+				t.Errorf("claim version = %q", request["version"])
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": "UserAccepted"})
 		case "/claim/exchange":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"secret_key": "agent-secret"}})
@@ -70,7 +75,7 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &Client{BaseURL: server.URL, HTTP: server.Client()}
+	client := &Client{BaseURL: server.URL, HTTP: server.Client(), AgentVersion: "1.0.10"}
 	state, err := client.ClaimSetup(context.Background(), "0123456789")
 	if err != nil || state != "UserAccepted" {
 		t.Fatalf("ClaimSetup = %q, %v", state, err)
@@ -120,6 +125,21 @@ func TestClientMapsProviderErrorsWithoutRawResponse(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "private upstream detail") {
 		t.Fatalf("raw provider detail escaped: %v", err)
+	}
+}
+
+func TestClientMapsStructuredProviderMessage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "error", "data": map[string]any{"type": "auth", "message": "EmailMustBeVerified"},
+		})
+	}))
+	defer server.Close()
+	client := &Client{BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.CreateMinecraftTunnel(context.Background(), "secret", "agent", 25565)
+	if !IsProviderError(err, "EmailMustBeVerified") || !strings.Contains(err.Error(), "Verify the email address") {
+		t.Fatalf("structured provider error = %T %v", err, err)
 	}
 }
 
