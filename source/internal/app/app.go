@@ -56,10 +56,13 @@ type App struct {
 	Playit       *playit.Store
 	PlayitAPI    *playit.Client
 	PlayitStatus func(context.Context) playit.AgentStatus
-	BotNotify    *bot.Dispatcher
-	Sched        *scheduler.Scheduler
-	Hub          *websocket.Hub
-	Runner       *Runner
+	// PlayitDaemonAvailable is injectable so tests never depend on or control
+	// Playit software installed on the host running the suite.
+	PlayitDaemonAvailable func() bool
+	BotNotify             *bot.Dispatcher
+	Sched                 *scheduler.Scheduler
+	Hub                   *websocket.Hub
+	Runner                *Runner
 
 	// Startup phases already reported for the current server run.
 	phaseMu                 sync.Mutex
@@ -177,6 +180,7 @@ func New(home string, webFS fs.FS) (*App, error) {
 	a.Playit = &playit.Store{DB: db, SecretKey: key}
 	a.PlayitAPI = &playit.Client{Version: Version}
 	a.PlayitStatus = func(ctx context.Context) playit.AgentStatus { return playit.ManagedAgentStatus(ctx, home) }
+	a.PlayitDaemonAvailable = func() bool { return playit.DaemonAvailable(home) }
 	a.BotNotify = &bot.Dispatcher{Store: a.Bots, Sender: bot.NewSender(), Logf: a.Logf}
 	a.Hub = websocket.NewHub()
 	a.Runner = newRunner(a)
@@ -203,6 +207,13 @@ func (a *App) activeInstance() (*instance.Instance, error) {
 		return nil, fmt.Errorf("no active server project selected")
 	}
 	return a.Instances.ByID(id)
+}
+
+func (a *App) hasPlayitDaemon() bool {
+	if a.PlayitDaemonAvailable != nil {
+		return a.PlayitDaemonAvailable()
+	}
+	return playit.DaemonAvailable(a.Home)
 }
 
 // Serve runs the HTTP server and background loops until ctx is cancelled.
@@ -261,7 +272,7 @@ func (a *App) bootPlayit(ctx context.Context) {
 		playit.CleanupRuntime(a.Home)
 		return
 	}
-	if !playit.DaemonAvailable(a.Home) {
+	if !a.hasPlayitDaemon() {
 		a.Logf("Playit agent not started: official playitd executable not found")
 		return
 	}

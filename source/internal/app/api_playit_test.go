@@ -68,6 +68,7 @@ func TestPlayitSettingsAreOwnerOnlyAndExistingInstallsDefaultToManual(t *testing
 
 func TestPlayitClaimStoresSecretEncryptedAndNeverReturnsIt(t *testing.T) {
 	env := newTestEnv(t)
+	env.app.PlayitDaemonAvailable = func() bool { return true }
 	daemon := filepath.Join(env.home, "system", "bin", "playitd")
 	if err := os.WriteFile(daemon, []byte("test daemon"), 0o755); err != nil {
 		t.Fatal(err)
@@ -417,6 +418,7 @@ func TestPlayitTunnelCreateAndMissingRemoteDelete(t *testing.T) {
 
 func TestPlayitRelinkDeletesExistingRemoteTunnel(t *testing.T) {
 	env := newTestEnv(t)
+	env.app.PlayitDaemonAvailable = func() bool { return true }
 	daemon := filepath.Join(env.home, "system", "bin", "playitd")
 	if err := os.WriteFile(daemon, []byte("test daemon"), 0o755); err != nil {
 		t.Fatal(err)

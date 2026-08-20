@@ -32,6 +32,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatalf("app.New: %v", err)
 	}
+	// App tests must not discover or operate Playit software installed on the
+	// developer or CI host. Tests that exercise a managed agent opt in.
+	a.PlayitDaemonAvailable = func() bool { return false }
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(func() {
 		srv.Close()

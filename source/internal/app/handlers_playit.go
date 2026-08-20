@@ -35,7 +35,7 @@ func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, e
 	if err != nil {
 		return playitPayload{}, err
 	}
-	payload := playitPayload{Config: config, Detections: playit.DetectExisting(ctx), DaemonAvailable: playit.DaemonAvailable(a.Home)}
+	payload := playitPayload{Config: config, Detections: playit.DetectExisting(ctx), DaemonAvailable: a.hasPlayitDaemon()}
 	if systemd.Available() {
 		payload.ManagedState = systemd.State(systemd.ServicePlayit)
 	}
@@ -138,7 +138,7 @@ func (a *App) reconcilePlayitService(config playit.Config) string {
 		if !shouldRun {
 			return ""
 		}
-		if !playit.DaemonAvailable(a.Home) {
+		if !a.hasPlayitDaemon() {
 			return "Install the official Playit agent before starting the managed tunnel"
 		}
 		a.startForegroundPlayit(nil)
@@ -153,7 +153,7 @@ func (a *App) reconcilePlayitService(config playit.Config) string {
 		playit.CleanupRuntime(a.Home)
 		return ""
 	}
-	if !playit.DaemonAvailable(a.Home) {
+	if !a.hasPlayitDaemon() {
 		return "Install the official Playit agent, then repair Bonghos services"
 	}
 	a.stopForegroundPlayit()
@@ -236,7 +236,7 @@ func (a *App) handlePlayitClaimStart(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("Playit account mode must be account or guest"))
 		return
 	}
-	if !playit.DaemonAvailable(a.Home) {
+	if !a.hasPlayitDaemon() {
 		writeErr(w, http.StatusConflict, errors.New("install the official Playit agent before linking it to Bonghos"))
 		return
 	}
