@@ -1,6 +1,11 @@
 package playit
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+)
 
 func TestParseDaemonVersion(t *testing.T) {
 	for input, want := range map[string]string{
@@ -14,5 +19,23 @@ func TestParseDaemonVersion(t *testing.T) {
 	}
 	if got := parseDaemonVersion("playitd development build"); got != "" {
 		t.Fatalf("unexpected development version %q", got)
+	}
+}
+
+func TestVersionProbesPreferPackagedCLISubcommand(t *testing.T) {
+	home := t.TempDir()
+	cli := filepath.Join(home, "system", "bin", "playit-cli")
+	if err := os.MkdirAll(filepath.Dir(cli), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cli, []byte("test"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	probes := versionProbes(home)
+	if len(probes) == 0 {
+		t.Fatal("expected a version probe")
+	}
+	if probes[0].executable != cli || !reflect.DeepEqual(probes[0].args, []string{"version"}) {
+		t.Fatalf("first probe = %#v, want %q version", probes[0], cli)
 	}
 }

@@ -346,7 +346,7 @@ func (a *App) preparePlayitClaim() error {
 		if strings.TrimSpace(a.PlayitAPI.AgentVersion) != "" {
 			return nil
 		}
-		return errors.New("could not read the installed playitd version; update or reinstall the official Playit agent")
+		return errors.New("could not read the installed Playit agent version; ensure playit-cli and playitd come from the official Playit package")
 	}
 	a.PlayitAPI.AgentVersion = version
 	return nil

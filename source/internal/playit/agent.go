@@ -49,23 +49,74 @@ func DaemonAvailable(home string) bool {
 }
 
 // DaemonVersion returns the official agent version used when registering a
-// claim with Playit. Playit uses this metadata to determine which tunnel types
-// the linked agent supports, so the Bonghos application version must not be
-// substituted here.
+// claim with Playit. The current official package exposes this through the
+// `playit-cli version` subcommand; playitd itself does not expose a version
+// flag. Legacy executable and flag forms remain as fallbacks for older
+// supported packages.
 func DaemonVersion(home string) (string, error) {
-	daemon, err := FindDaemon(home)
-	if err != nil {
-		return "", err
-	}
-	for _, flag := range []string{"--version", "-V"} {
+	probes := versionProbes(home)
+	for _, probe := range probes {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		output, _ := exec.CommandContext(ctx, daemon, flag).CombinedOutput()
+		output, _ := exec.CommandContext(ctx, probe.executable, probe.args...).CombinedOutput()
 		cancel()
 		if version := parseDaemonVersion(string(output)); version != "" {
 			return version, nil
 		}
 	}
-	return "", errors.New("could not determine the official playitd version")
+	return "", errors.New("could not determine the installed official Playit agent version")
+}
+
+type versionProbe struct {
+	executable string
+	args       []string
+}
+
+func versionProbes(home string) []versionProbe {
+	cliCandidates := []string{
+		filepath.Join(home, "system", "bin", "playit-cli"),
+		filepath.Join(home, "system", "bin", "playit"),
+		"/opt/playit/agent",
+		"/opt/playit/playit-cli",
+		"/opt/playit/playit",
+		"/usr/local/bin/playit-cli",
+		"/usr/local/bin/playit",
+		"/usr/bin/playit-cli",
+		"/usr/bin/playit",
+	}
+	for _, name := range []string{"playit-cli", "playit"} {
+		if path, err := exec.LookPath(name); err == nil {
+			cliCandidates = append(cliCandidates, path)
+		}
+	}
+
+	probes := make([]versionProbe, 0, len(cliCandidates)*3+2)
+	seen := map[string]bool{}
+	for _, candidate := range cliCandidates {
+		if !isExecutableFile(candidate) || seen[candidate] {
+			continue
+		}
+		seen[candidate] = true
+		probes = append(probes,
+			versionProbe{executable: candidate, args: []string{"version"}},
+			versionProbe{executable: candidate, args: []string{"--version"}},
+			versionProbe{executable: candidate, args: []string{"-V"}},
+		)
+	}
+	if daemon, err := FindDaemon(home); err == nil && !seen[daemon] {
+		probes = append(probes,
+			versionProbe{executable: daemon, args: []string{"--version"}},
+			versionProbe{executable: daemon, args: []string{"-V"}},
+		)
+	}
+	return probes
+}
+
+func isExecutableFile(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && (runtime.GOOS == "windows" || info.Mode().Perm()&0o111 != 0)
 }
 
 func parseDaemonVersion(output string) string {

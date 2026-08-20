@@ -5,6 +5,7 @@
 // tiny helpers
 // ---------------------------------------------------------------------------
 const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => root.querySelectorAll(sel);
 
 let solarIconData = {};
 const INLINE_SOLAR_ICONS = {
