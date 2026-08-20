@@ -143,6 +143,65 @@ func TestClientMapsStructuredProviderMessage(t *testing.T) {
 	}
 }
 
+func TestClientMapsStructuredProviderErrorOnHTTPFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "error", "data": map[string]any{"type": "auth", "message": "InvalidAgentKey"},
+		})
+	}))
+	defer server.Close()
+	client := &Client{BaseURL: server.URL, HTTP: server.Client()}
+	_, err := client.RunData(context.Background(), "expired-secret")
+	if !IsProviderError(err, "InvalidAgentKey") || !strings.Contains(err.Error(), "relink the agent") {
+		t.Fatalf("HTTP provider error = %T %v", err, err)
+	}
+}
+
+func TestClientMapsNestedProviderErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		data map[string]any
+		code string
+		want string
+	}{
+		{
+			name: "path not found",
+			data: map[string]any{"type": "path-not-found", "message": map[string]string{"path": "/missing"}},
+			code: "PathNotFound",
+			want: "update Bonghos",
+		},
+		{
+			name: "internal",
+			data: map[string]any{"type": "internal", "message": map[string]string{"trace_id": "private-trace"}},
+			code: "Internal",
+			want: "internal error",
+		},
+		{
+			name: "validation",
+			data: map[string]any{"type": "validation", "message": "a provider validation detail"},
+			code: "Validation",
+			want: "invalid",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(tt.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = providerError(raw)
+			if !IsProviderError(err, tt.code) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("nested provider error = %T %v", err, err)
+			}
+			if strings.Contains(err.Error(), "private-trace") || strings.Contains(err.Error(), "/missing") {
+				t.Fatalf("provider detail escaped: %v", err)
+			}
+		})
+	}
+}
+
 func TestClientDoesNotExposeSecretInHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "upstream detail", http.StatusUnauthorized)

@@ -277,9 +277,10 @@ function pageFilterMenu(label, modes, onChange, initialValue = modes[0]?.[0]) {
 }
 
 function toast(msg, kind = "", iconName = "") {
+  const message = typeof msg === "string" ? msg.trim() : "";
   const t = el("div", { class: `toast ${kind}${iconName ? " has-icon" : ""}`, role: "status" },
     iconName ? solarIcon(iconName, "toast-icon") : null,
-    el("span", {}, msg));
+    el("span", {}, message || (kind === "err" ? "Something went wrong" : "Notification")));
   $("#toast-host").append(t);
   setTimeout(() => t.remove(), 6000);
 }
@@ -952,7 +953,10 @@ async function api(path, opts = {}) {
   let data = null;
   try { data = await res.json(); } catch { /* empty */ }
   if (!res.ok) {
-    const error = new Error((data && data.error) || res.statusText);
+    const candidates = [data?.error, data?.message, data?.error?.message, res.statusText];
+    const message = candidates.find((value) => typeof value === "string" && value.trim())?.trim()
+      || `Request failed (${res.status})`;
+    const error = new Error(message);
     error.status = res.status;
     throw error;
   }

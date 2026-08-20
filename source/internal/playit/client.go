@@ -54,11 +54,26 @@ func (e *ProviderError) Error() string {
 		return "The Playit account has reached its agent limit"
 	case "AccountBanned":
 		return "The Playit account cannot create tunnels"
-	case "InvalidTunnelConfig":
+	case "InvalidTunnelConfig", "InvalidConfig":
 		return "Playit rejected the tunnel configuration for this agent; update playitd, then relink the agent"
-	case "PublicPortRequiresPlayitPremium", "RegionRequiresPlayitPremium":
+	case "RequiresPlayitPremium", "PublicPortRequiresPlayitPremium", "RegionRequiresPlayitPremium":
 		return "This Playit tunnel allocation requires Playit Premium"
+	case "AuthRequired", "InvalidHeader", "InvalidSignature", "InvalidTimestamp", "InvalidApiKey", "InvalidAgentKey", "SessionExpired", "InvalidAuthType", "NoLongerValid", "InvalidToken":
+		return "The linked Playit credential is no longer valid; relink the agent"
+	case "ScopeNotAllowed", "AgentNotSelfManaged", "SelfManagedAgentCanOnlyAffectSelf", "AccountNotAuthorized", "NotAllowedWithReadOnly":
+		return "This Playit agent does not allow Bonghos to manage that resource"
+	case "GuestAccountNotAllowed":
+		return "This Playit operation is not available for guest accounts"
+	case "PathNotFound":
+		return "This Playit API operation is unavailable; update Bonghos and try again"
+	case "Validation":
+		return "Playit rejected the request as invalid"
+	case "Internal":
+		return "Playit encountered an internal error; try again shortly"
 	default:
+		if e.Code != "" {
+			return "Playit rejected the request (" + e.Code + ")"
+		}
 		return "Playit rejected the request"
 	}
 }
@@ -70,25 +85,53 @@ func IsProviderError(err error, code string) bool {
 
 func providerError(raw json.RawMessage) error {
 	var code string
-	if err := json.Unmarshal(raw, &code); err != nil {
-		var tagged struct {
-			Error   string `json:"error"`
-			Message string `json:"message"`
-		}
-		_ = json.Unmarshal(raw, &tagged)
-		code = tagged.Error
-		if strings.TrimSpace(code) == "" {
-			code = tagged.Message
+	var kind string
+	if err := json.Unmarshal(raw, &code); err != nil || strings.TrimSpace(code) == "" {
+		var tagged map[string]json.RawMessage
+		if json.Unmarshal(raw, &tagged) == nil {
+			code = jsonString(tagged["error"])
+			kind = jsonString(tagged["type"])
+			if code == "" {
+				code = jsonString(tagged["message"])
+			}
+			if code == "" {
+				var nested map[string]json.RawMessage
+				if json.Unmarshal(tagged["message"], &nested) == nil {
+					code = jsonString(nested["error"])
+				}
+			}
 		}
 	}
-	code = strings.TrimSpace(code)
-	for _, r := range code {
-		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '_' && r != '-' {
-			code = ""
-			break
+	code = cleanProviderCode(code)
+	if code == "" {
+		switch kind {
+		case "path-not-found":
+			code = "PathNotFound"
+		case "validation":
+			code = "Validation"
+		case "internal":
+			code = "Internal"
 		}
 	}
 	return &ProviderError{Code: code}
+}
+
+func jsonString(raw json.RawMessage) string {
+	var value string
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func cleanProviderCode(code string) string {
+	code = strings.TrimSpace(code)
+	for _, r := range code {
+		if !(r >= 'a' && r <= 'z') && !(r >= 'A' && r <= 'Z') && !(r >= '0' && r <= '9') && r != '_' && r != '-' {
+			return ""
+		}
+	}
+	return code
 }
 
 func (c *Client) post(ctx context.Context, path, secret string, request, response any) error {
@@ -127,15 +170,21 @@ func (c *Client) post(ctx context.Context, path, secret string, request, respons
 	if res.StatusCode == http.StatusTooManyRequests {
 		return errors.New("Playit is rate limiting requests; try again shortly")
 	}
+	var envelope apiEnvelope
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			return fmt.Errorf("Playit returned HTTP %d", res.StatusCode)
+		}
+		return errors.New("Playit returned an unreadable response")
+	}
+	if envelope.Status == "fail" || envelope.Status == "error" {
+		return providerError(envelope.Data)
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("Playit returned HTTP %d", res.StatusCode)
 	}
-	var envelope apiEnvelope
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return errors.New("Playit returned an unreadable response")
-	}
 	if envelope.Status != "success" {
-		return providerError(envelope.Data)
+		return errors.New("Playit returned an unknown response")
 	}
 	if response == nil || len(envelope.Data) == 0 || string(envelope.Data) == "null" {
 		return nil
