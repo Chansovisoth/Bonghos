@@ -27,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Playit API failures now preserve the provider's structured error category
   even when Playit responds with a non-success HTTP status, so expired links,
   account restrictions, unsupported operations, and provider failures produce
-  actionable messages. Web UI error toasts also always show a fallback message
-  when an upstream or proxy response has no usable error text.
+  actionable messages. Sanitized validation details identify rejected fields
+  without exposing credentials. Web UI error toasts also always show a fallback
+  message when an upstream or proxy response has no usable error text.
 - Playit claims now register the installed official agent version instead of
   the Bonghos version, allowing Playit to recognize supported tunnel types.
   Existing incompatible links receive a relink instruction, and failed

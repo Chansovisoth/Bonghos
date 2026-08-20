@@ -182,7 +182,7 @@ func TestClientMapsNestedProviderErrors(t *testing.T) {
 			name: "validation",
 			data: map[string]any{"type": "validation", "message": "a provider validation detail"},
 			code: "Validation",
-			want: "invalid",
+			want: "provider validation detail",
 		},
 	}
 	for _, tt := range tests {
@@ -195,10 +195,29 @@ func TestClientMapsNestedProviderErrors(t *testing.T) {
 			if !IsProviderError(err, tt.code) || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("nested provider error = %T %v", err, err)
 			}
+			if tt.code == "Validation" && !strings.Contains(err.Error(), "provider validation detail") {
+				t.Fatalf("validation detail was not preserved: %v", err)
+			}
 			if strings.Contains(err.Error(), "private-trace") || strings.Contains(err.Error(), "/missing") {
 				t.Fatalf("provider detail escaped: %v", err)
 			}
 		})
+	}
+}
+
+func TestClientSanitizesProviderValidationDetail(t *testing.T) {
+	for _, message := range []string{
+		"Authorization header Agent-Key private-value is invalid",
+		"contains\na control character",
+	} {
+		raw, err := json.Marshal(map[string]any{"type": "validation", "message": message})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = providerError(raw)
+		if err.Error() != "Playit rejected the request as invalid" {
+			t.Fatalf("unsafe validation detail escaped: %v", err)
+		}
 	}
 }
 

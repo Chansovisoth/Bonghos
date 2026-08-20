@@ -33,7 +33,8 @@ type apiEnvelope struct {
 // ProviderError retains a machine-readable Playit error without exposing raw
 // provider responses or credentials to the Web UI.
 type ProviderError struct {
-	Code string
+	Code   string
+	Detail string
 }
 
 func (e *ProviderError) Error() string {
@@ -67,6 +68,9 @@ func (e *ProviderError) Error() string {
 	case "PathNotFound":
 		return "This Playit API operation is unavailable; update Bonghos and try again"
 	case "Validation":
+		if e.Detail != "" {
+			return "Playit rejected the request: " + e.Detail
+		}
 		return "Playit rejected the request as invalid"
 	case "Internal":
 		return "Playit encountered an internal error; try again shortly"
@@ -86,11 +90,15 @@ func IsProviderError(err error, code string) bool {
 func providerError(raw json.RawMessage) error {
 	var code string
 	var kind string
+	var detail string
 	if err := json.Unmarshal(raw, &code); err != nil || strings.TrimSpace(code) == "" {
 		var tagged map[string]json.RawMessage
 		if json.Unmarshal(raw, &tagged) == nil {
 			code = jsonString(tagged["error"])
 			kind = jsonString(tagged["type"])
+			if kind == "validation" {
+				detail = safeProviderDetail(jsonString(tagged["message"]))
+			}
 			if code == "" {
 				code = jsonString(tagged["message"])
 			}
@@ -113,7 +121,7 @@ func providerError(raw json.RawMessage) error {
 			code = "Internal"
 		}
 	}
-	return &ProviderError{Code: code}
+	return &ProviderError{Code: code, Detail: detail}
 }
 
 func jsonString(raw json.RawMessage) string {
@@ -132,6 +140,30 @@ func cleanProviderCode(code string) string {
 		}
 	}
 	return code
+}
+
+func safeProviderDetail(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	lower := strings.ToLower(detail)
+	for _, sensitive := range []string{"authorization", "credential", "secret_key", "agent-key"} {
+		if strings.Contains(lower, sensitive) {
+			return ""
+		}
+	}
+	runes := []rune(detail)
+	if len(runes) > 240 {
+		runes = runes[:240]
+		detail = strings.TrimSpace(string(runes)) + "…"
+	}
+	for _, r := range detail {
+		if r < 0x20 && r != '\t' {
+			return ""
+		}
+	}
+	return detail
 }
 
 func (c *Client) post(ctx context.Context, path, secret string, request, response any) error {
