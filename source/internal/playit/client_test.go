@@ -50,15 +50,22 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 				t.Errorf("rename request = %+v", request)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": nil})
-		case "/v1/tunnels/create":
+		case "/tunnels/create":
 			var request map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&request)
 			origin, _ := request["origin"].(map[string]any)
 			if origin["type"] != "agent" {
 				t.Errorf("create origin = %+v", origin)
 			}
+			originData, _ := origin["data"].(map[string]any)
+			if originData["agent_id"] != "agent-id" || originData["local_ip"] != "127.0.0.1" || originData["local_port"] != float64(25566) {
+				t.Errorf("create origin data = %+v", originData)
+			}
 			if request["name"] != ManagedTunnelName {
 				t.Errorf("create name = %+v", request["name"])
+			}
+			if request["tunnel_type"] != "minecraft-java" || request["port_type"] != "tcp" || request["port_count"] != float64(1) {
+				t.Errorf("create tunnel details = %+v", request)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"id": "tunnel-id"}})
 		case "/v1/tunnels/config":
@@ -113,7 +120,7 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 	if err := client.DeleteTunnel(context.Background(), secret, tunnelID); err != nil {
 		t.Fatalf("DeleteTunnel: %v", err)
 	}
-	if strings.Join(paths, ",") != "/claim/setup,/claim/exchange,/v1/agents/rundata,/login/guest,/agents/rename,/v1/tunnels/create,/v1/tunnels/config,/tunnels/delete" {
+	if strings.Join(paths, ",") != "/claim/setup,/claim/exchange,/v1/agents/rundata,/login/guest,/agents/rename,/tunnels/create,/v1/tunnels/config,/tunnels/delete" {
 		t.Fatalf("paths = %v", paths)
 	}
 }

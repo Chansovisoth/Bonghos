@@ -603,8 +603,12 @@ body.file-selection-dragging { cursor: default; user-select: none; }
 .playit-agent-name-save .icon { width: 18px; height: 18px; }
 .playit-form .kv.compact { margin: 0; }
 .playit-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
-.playit-tunnel-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.playit-tunnel-actions > .btn { width: 100%; min-width: 0; }
+.playit-setup-progress { margin: 0; }
+.playit-advanced { margin-top: var(--space-1); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.playit-advanced > summary { color: var(--muted); font-size: 0.78rem; font-weight: 800; cursor: pointer; }
+.playit-advanced-body { display: grid; gap: var(--space-3); padding-top: var(--space-3); }
+.playit-maintenance-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.playit-maintenance-actions > .btn { width: 100%; min-width: 0; }
 .playit-inline-notice { margin: 0; }
 .playit-inline-notice a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .playit-dismissible-notice { display: flex; align-items: flex-start; gap: var(--space-3); }

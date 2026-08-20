@@ -477,10 +477,10 @@ func cmdSetup(home string) error {
 		}
 		fmt.Print("Use Playit.gg for player connections (recommended)? [Y/n]: ")
 		if readLine() != "n" {
-			fmt.Print("Playit identity: account [1] or guest [2]? [1]: ")
-			mode := playit.AccountModeAccount
+			fmt.Print("Playit identity: guest [1] or account [2]? [1]: ")
+			mode := playit.AccountModeGuest
 			if readLine() == "2" {
-				mode = playit.AccountModeGuest
+				mode = playit.AccountModeAccount
 			}
 			if _, err := a.Playit.SetPreference(true, mode, playit.ManagementBonghos, 0); err != nil {
 				return err

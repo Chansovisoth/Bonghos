@@ -310,6 +310,9 @@ func (a *App) handlePlayitUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	payload.Notice = notice
 	writeJSON(w, http.StatusOK, payload)
+	if config.Enabled && config.ManagementMode == playit.ManagementBonghos && config.SecretConfigured {
+		a.schedulePlayitTunnelSync()
+	}
 }
 
 func (a *App) handlePlayitClaimStart(w http.ResponseWriter, r *http.Request) {
@@ -425,9 +428,11 @@ func (a *App) handlePlayitClaimPoll(w http.ResponseWriter, r *http.Request) {
 		payload.Notice = notice
 		payload.GuestLoginURL = guestLoginURL
 		writeJSON(w, http.StatusOK, map[string]any{"state": "complete", "config": payload})
+		a.schedulePlayitTunnelSync()
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"state": "complete", "config": config})
+	a.schedulePlayitTunnelSync()
 }
 
 func (a *App) preparePlayitClaim() error {
@@ -478,6 +483,25 @@ func (a *App) recoverCreatedPlayitTunnel(ctx context.Context, secret string, bef
 		data, err := a.PlayitAPI.RunData(ctx, secret)
 		if err == nil {
 			if remote, found, ambiguous := discoverManagedPlayitTunnel(data, localPort, excluded); found && !ambiguous {
+				return remote, true
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return remotePlayitTunnel{}, false
+		case <-ticker.C:
+		}
+	}
+}
+
+func (a *App) waitForConfiguredPlayitTunnel(ctx context.Context, secret, tunnelID string) (remotePlayitTunnel, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(400 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if data, err := a.PlayitAPI.RunData(ctx, secret); err == nil {
+			if remote, found := findPlayitTunnel(data, tunnelID); found {
 				return remote, true
 			}
 		}
@@ -547,8 +571,7 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 		} else {
 			tunnelID, err = a.PlayitAPI.CreateMinecraftTunnel(r.Context(), secret, data.AgentID, port)
 			action = "playit_tunnel_created"
-			var providerErr *playit.ProviderError
-			if err != nil && !errors.As(err, &providerErr) {
+			if err != nil {
 				if recovered, ok := a.recoverCreatedPlayitTunnel(r.Context(), secret, data, port); ok {
 					tunnelID = recovered.data.ID
 					err = nil
@@ -556,6 +579,12 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	} else if remote, found := findPlayitTunnel(data, tunnelID); found && config.LocalPort == port {
+		// The connection is already correct. Refreshing should be harmless and
+		// must not send a schema update that can fail on otherwise healthy
+		// Playit agents.
+		_, config.PublicAddress = playitTunnelDisplay(remote)
+		action = "playit_tunnel_refreshed"
 	} else {
 		err = a.PlayitAPI.UpdateTunnelPort(r.Context(), secret, tunnelID, port)
 		if playit.IsProviderError(err, "TunnelNotFound") {
@@ -565,6 +594,13 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 			}
 			tunnelID, err = a.PlayitAPI.CreateMinecraftTunnel(r.Context(), secret, data.AgentID, port)
 			action = "playit_tunnel_recreated"
+			if err != nil {
+				if recovered, ok := a.recoverCreatedPlayitTunnel(r.Context(), secret, data, port); ok {
+					tunnelID = recovered.data.ID
+					err = nil
+					action = "playit_tunnel_recovered"
+				}
+			}
 		}
 	}
 	if err != nil {
@@ -624,24 +660,56 @@ func (a *App) schedulePlayitTunnelSync() {
 	if parent == nil {
 		parent = context.Background()
 	}
+	a.playitSyncMu.Lock()
+	if a.playitSyncRunning {
+		a.playitSyncPending = true
+		a.playitSyncMu.Unlock()
+		return
+	}
+	a.playitSyncRunning = true
+	a.playitSyncMu.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(parent, 35*time.Second)
+		defer func() {
+			a.playitSyncMu.Lock()
+			pending := a.playitSyncPending
+			a.playitSyncRunning = false
+			a.playitSyncPending = false
+			a.playitSyncMu.Unlock()
+			if pending {
+				a.schedulePlayitTunnelSync()
+			}
+		}()
+		ctx, cancel := context.WithTimeout(parent, 90*time.Second)
 		defer cancel()
-		updated, err := a.syncPlayitTunnelPort(ctx)
-		if err != nil {
-			a.Logf("Playit tunnel port sync failed: %v", err)
-			return
-		}
-		if updated {
-			config, _ := a.Playit.Config()
-			a.Logf("Playit tunnel synchronized for active game-server port %d", config.LocalPort)
+		for attempt := 0; attempt < 4; attempt++ {
+			updated, err := a.syncPlayitTunnelPort(ctx)
+			if err == nil {
+				if updated {
+					config, _ := a.Playit.Config()
+					a.Logf("Playit tunnel synchronized for active game-server port %d", config.LocalPort)
+				}
+				return
+			}
+			a.Logf("Playit tunnel sync attempt %d failed: %v", attempt+1, err)
+			delay := time.Duration(1<<attempt) * time.Second
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
 		}
 	}()
 }
 
 func (a *App) syncPlayitTunnelPort(ctx context.Context) (bool, error) {
 	if status := a.waitForPlayitReady(ctx, 30*time.Second); !status.Running {
-		return false, nil
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		if status.Error != "" {
+			return false, errors.New(status.Error)
+		}
+		return false, errors.New("the Playit agent is still starting")
 	}
 	a.playitMu.Lock()
 	defer a.playitMu.Unlock()
@@ -662,19 +730,85 @@ func (a *App) syncPlayitTunnelPort(ctx context.Context) (bool, error) {
 		if runErr != nil {
 			return false, runErr
 		}
+		if data.AgentID == "" {
+			return false, errors.New("Playit did not return an agent identifier")
+		}
 		remote, found, ambiguous := discoverManagedPlayitTunnel(data, port, nil)
 		if ambiguous {
 			return false, errors.New("multiple Bonghos Playit tunnels exist; remove duplicates in Playit.gg")
 		}
-		if !found {
-			return false, nil
+		if found {
+			_, address := playitTunnelDisplay(remote)
+			if err := a.Playit.SaveTunnel(remote.data.ID, address, port); err != nil {
+				return false, err
+			}
+			a.audit(0, "system", "playit_tunnel_adopted", remote.data.ID, "discovered during automatic synchronization", "")
+			return true, nil
 		}
-		_, address := playitTunnelDisplay(remote)
-		if err := a.Playit.SaveTunnel(remote.data.ID, address, port); err != nil {
+
+		tunnelID, createErr := a.PlayitAPI.CreateMinecraftTunnel(ctx, secret, data.AgentID, port)
+		if createErr != nil {
+			if recovered, ok := a.recoverCreatedPlayitTunnel(ctx, secret, data, port); ok {
+				remote = recovered
+				tunnelID = recovered.data.ID
+				createErr = nil
+			}
+		}
+		if createErr != nil {
+			return false, createErr
+		}
+		address := ""
+		if remote.data.ID == "" {
+			if activated, ok := a.recoverCreatedPlayitTunnel(ctx, secret, data, port); ok {
+				remote = activated
+			}
+		}
+		if remote.data.ID != "" {
+			_, address = playitTunnelDisplay(remote)
+		}
+		if err := a.Playit.SaveTunnel(tunnelID, address, port); err != nil {
 			return false, err
 		}
-		a.audit(0, "system", "playit_tunnel_adopted", remote.data.ID, "discovered during automatic synchronization", "")
+		a.audit(0, "system", "playit_tunnel_created", tunnelID, "created during automatic synchronization", "")
 		return true, nil
+	}
+	if config.LocalPort == port {
+		data, runErr := a.PlayitAPI.RunData(ctx, secret)
+		if runErr != nil {
+			return false, runErr
+		}
+		remote, found := findPlayitTunnel(data, config.TunnelID)
+		if !found {
+			remote, found = a.waitForConfiguredPlayitTunnel(ctx, secret, config.TunnelID)
+		}
+		if !found {
+			if clearErr := a.Playit.ClearTunnel(); clearErr != nil {
+				return false, clearErr
+			}
+			if data.AgentID == "" {
+				return false, errors.New("Playit did not return an agent identifier")
+			}
+			tunnelID, createErr := a.PlayitAPI.CreateMinecraftTunnel(ctx, secret, data.AgentID, port)
+			if createErr != nil {
+				if recovered, ok := a.recoverCreatedPlayitTunnel(ctx, secret, data, port); ok {
+					tunnelID = recovered.data.ID
+					createErr = nil
+				}
+			}
+			if createErr != nil {
+				return false, createErr
+			}
+			if err := a.Playit.SaveTunnel(tunnelID, "", port); err != nil {
+				return false, err
+			}
+			a.audit(0, "system", "playit_tunnel_recreated", tunnelID, "recreated during automatic synchronization", "")
+			return true, nil
+		}
+		_, address := playitTunnelDisplay(remote)
+		if err := a.Playit.SaveTunnel(config.TunnelID, address, port); err != nil {
+			return false, err
+		}
+		return address != config.PublicAddress, nil
 	}
 	if err := a.PlayitAPI.UpdateTunnelPort(ctx, secret, config.TunnelID, port); err != nil {
 		if playit.IsProviderError(err, "TunnelNotFound") {

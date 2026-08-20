@@ -86,7 +86,7 @@ During guided setup, you will:
 2. Create the first Owner username and password.
 3. Scan a TOTP QR code and enter the six-digit code from your authenticator app.
 4. Save the one-time recovery codes somewhere safe.
-5. Choose Playit.gg (recommended) or direct/manual player networking; Playit can use an account or guest setup.
+5. Choose Playit.gg (recommended) or direct/manual player networking; the quick Guest setup is the default, with a permanent account available instead.
 6. Decide whether to install the recommended systemd user services.
 
 Start the Web UI service:
@@ -126,11 +126,13 @@ Open <http://127.0.0.1:8080>, sign in, then:
 
 If Playit was selected during setup, open **Settings > Playit.gg**. Install the
 official Linux agent from <https://packages.playit.gg/>, link it using the
-browser approval flow, then create the tunnel. Bonghos encrypts the agent
-credential, waits for the official agent to report that it is ready, and uses
-a separate on-demand user service. Tunnel status and the agent version are
-shown in Settings; the linked agent can be renamed and tunnels can be updated
-or deleted there. The public player address is shown on Overview. Existing installations
+browser approval flow, and Bonghos creates the tunnel automatically. Bonghos
+encrypts the agent credential, waits for the official agent to report that it
+is ready, and uses a separate on-demand user service. It automatically adopts,
+repairs, or recreates the managed tunnel for the active project's port. The
+normal Settings view shows connection status and the public address; agent and
+tunnel maintenance remains under **Advanced**. The public player address is
+also shown on Overview. Existing installations
 upgraded from a version without Playit remain on direct/manual networking until
 an Owner enables the integration.
 

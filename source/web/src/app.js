@@ -495,7 +495,7 @@ const DEMO_BOTS = [
   { id: 2, name: "Staff channel", provider: "discord", dns_server: "", destination_id: "123456789012345678", destinations: [{ id: "123456789012345678", name: "bot-spam", type: "channel", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo" }], discovered_destinations: [{ id: "223456789012345678", name: "Bonghos Community", type: "guild", guild_id: "223456789012345678", guild_name: "Bonghos Community", guild_icon: "demo", discovered_at: new Date(Date.now() - 18 * 86400000).toISOString() }, { id: "323456789012345678", name: "Creative Server", type: "guild", guild_id: "323456789012345678", guild_name: "Creative Server", discovered_at: new Date(Date.now() - 5 * 86400000).toISOString() }], enabled: false, notify_server_started: true, notify_server_stopped: true, notify_player_joined: false, notify_player_left: false, token_configured: true },
 ];
 let DEMO_PLAYIT = {
-  enabled: false, account_mode: "account", management_mode: "none",
+  enabled: false, account_mode: "guest", management_mode: "none",
   secret_configured: false, agent_id: "", agent_name: "", tunnel_id: "", public_address: "",
   local_port: 25565, claim_pending: false, claim_url: "", agent_online: false,
   account_status: "", tunnel_status: "",
@@ -7887,6 +7887,8 @@ function playitState(config) {
   if (config.management_mode === "external") return "External agent";
   if (config.claim_pending) return "Waiting for approval";
   if (config.agent_online && config.public_address) return "Online";
+  if (config.agent_online && (!config.tunnel_id || config.tunnel_status === "missing")) return "Setting up connection";
+  if (config.agent_online && config.tunnel_id) return "Activating connection";
   if (config.agent_phase === "unavailable") return "Agent unavailable";
   if (config.agent_error) return "Agent error";
   if (config.secret_configured && ["starting", "stopping", "stopped"].includes(config.agent_phase)) {
@@ -7898,11 +7900,13 @@ function playitState(config) {
 }
 
 function playitSettingsSection(initialConfig) {
-  const config = { account_mode: "account", management_mode: "none", local_port: 25565, detections: [], ...initialConfig };
+  const config = { account_mode: "guest", management_mode: "none", local_port: 25565, detections: [], ...initialConfig };
   const section = el("section", { class: "settings-page-section", "aria-labelledby": "playit-settings-title" });
   let polling = false;
   let statusPolling = false;
   let tunnelPolling = false;
+  let connectionEnsuring = false;
+  let automaticEnsureAttempted = false;
   let claimAccountMode = config.account_mode;
   let editorRoot = null;
   let editorManagementMode = config.management_mode;
@@ -7938,7 +7942,8 @@ function playitSettingsSection(initialConfig) {
         const result = await api("/playit/claim/poll", { method: "POST", json: {} });
         if (result.state === "complete") {
           replaceConfig(result.config || {}, { claim_pending: false, claim_url: "" });
-          toast("Playit.gg agent linked", "ok");
+          automaticEnsureAttempted = false;
+          toast("Playit.gg connected", "ok");
           render();
           return;
         }
@@ -7966,12 +7971,34 @@ function playitSettingsSection(initialConfig) {
     try {
       const started = await api("/playit/claim", { method: "POST", json: { account_mode: claimAccountMode } });
       replaceConfig(started);
+      automaticEnsureAttempted = false;
       render();
       return true;
     } catch (error) {
       toast(error.message, "err");
       if (button) button.disabled = false;
       return false;
+    }
+  };
+
+  const ensureConnection = async (automatic = false) => {
+    if (connectionEnsuring || !config.enabled || config.management_mode !== "bonghos" || !config.secret_configured) return;
+    connectionEnsuring = true;
+    if (automatic) automaticEnsureAttempted = true;
+    try {
+      const hadAddress = !!config.public_address;
+      replaceConfig(await api("/playit/tunnel", { method: "POST", json: {} }));
+      if (!automatic || (!hadAddress && config.public_address)) toast("Playit.gg connection ready", "ok");
+      render();
+    } catch (error) {
+      if (automatic) {
+        config.notice = error.message || "Playit.gg setup could not finish automatically";
+        render();
+      } else {
+        toast(error.message, "err");
+      }
+    } finally {
+      connectionEnsuring = false;
     }
   };
 
@@ -7983,7 +8010,11 @@ function playitSettingsSection(initialConfig) {
         const refreshed = await api("/playit/refresh", { method: "POST", json: {} });
         replaceConfig(refreshed);
         render();
-        if (config.agent_online || config.agent_error || !config.enabled || config.management_mode !== "bonghos") return;
+        if (config.agent_online) {
+          if (!config.public_address) await ensureConnection(true);
+          return;
+        }
+        if (config.agent_error || !config.enabled || config.management_mode !== "bonghos") return;
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     } catch (_) {
@@ -8078,11 +8109,12 @@ function playitSettingsSection(initialConfig) {
 
       if (managedChoice) {
         const accountButtons = el("div", { class: "segmented-choice playit-choice" },
-          el("button", { class: "btn" + (claimAccountMode === "account" ? " active" : ""), type: "button",
-            onclick: () => { claimAccountMode = "account"; render(); } }, "Playit account"),
           el("button", { class: "btn" + (claimAccountMode === "guest" ? " active" : ""), type: "button",
-            onclick: () => { claimAccountMode = "guest"; render(); } }, "Guest"));
-        const controls = el("div", { class: "playit-form" }, accountButtons);
+            onclick: () => { claimAccountMode = "guest"; render(); } }, "Guest"),
+          el("button", { class: "btn" + (claimAccountMode === "account" ? " active" : ""), type: "button",
+            onclick: () => { claimAccountMode = "account"; render(); } }, "Playit account"));
+        const controls = el("div", { class: "playit-form" },
+          ...(!config.secret_configured || config.claim_pending ? [accountButtons] : []));
         if (config.claim_pending) {
           controls.append(el("p", { class: "muted" }, "Approve the agent on Playit.gg."),
             el("div", { class: "playit-actions" },
@@ -8096,20 +8128,22 @@ function playitSettingsSection(initialConfig) {
             el("button", {
               class: "btn primary", type: "button", onclick: (event) => beginClaim(event.currentTarget),
               ...(config.daemon_available ? {} : { disabled: "disabled", title: "Install playitd first" }),
-            }, "Connect Playit.gg"));
+            }, "Set up Playit.gg"));
         } else {
           const agentName = el("input", {
             value: config.agent_name || "", maxlength: "100", placeholder: "Bonghos", spellcheck: "false",
           });
           const details = el("dl", { class: "kv compact" },
             el("dt", {}, "Account"), el("dd", {}, config.account_status || config.account_mode),
-            el("dt", {}, "Agent name"), el("dd", {}, config.agent_name || "Managed in Playit"),
-            el("dt", {}, "Agent ID"), el("dd", { class: "mono" }, config.agent_id || "Linked"),
             el("dt", {}, "Status"), el("dd", {}, String(config.agent_phase || "starting").replaceAll("_", " ")),
-            config.agent_version ? [el("dt", {}, "Version"), el("dd", { class: "mono" }, config.agent_version)] : null,
             config.tunnel_id ? [el("dt", {}, "Tunnel"), el("dd", {}, config.tunnel_status || "pending")] : null,
             config.public_address ? [el("dt", {}, "Playit IP"), el("dd", { class: "mono" }, config.public_address)] : null,
             el("dt", {}, "Local port"), el("dd", { class: "mono" }, String(config.local_port || 25565)));
+          controls.append(details);
+          if (!config.public_address) {
+            controls.append(el("p", { class: "muted playit-setup-progress" },
+              connectionEnsuring ? "Finishing the public connection…" : "Bonghos will create and maintain the connection automatically."));
+          }
           if (config.guest_login_url) {
             controls.append(el("a", { class: "btn", href: config.guest_login_url, target: "_blank", rel: "noopener noreferrer" }, "Manage guest account"));
           } else if (config.account_mode === "guest") {
@@ -8123,73 +8157,75 @@ function playitSettingsSection(initialConfig) {
               } catch (error) { toast(error.message, "err"); button.disabled = false; }
             } }, "Manage guest account"));
           }
-          controls.append(details,
-            el("div", { class: "playit-agent-name" },
-              el("label", {}, "Agent name", agentName),
-              el("button", { class: "btn playit-agent-name-save", type: "button", title: "Save agent name", "aria-label": "Save agent name", onclick: async (event) => {
-                const button = event.currentTarget;
-                button.disabled = true;
-                try {
-                  replaceConfig(await api("/playit/agent", { method: "PUT", json: { name: agentName.value.trim() } }));
-                  toast("Playit agent renamed", "ok");
-                  render();
-                } catch (error) { toast(error.message, "err"); button.disabled = false; }
-              } }, solarIcon("diskette-linear"))),
-            el("div", { class: "playit-actions playit-tunnel-actions" },
-              !config.tunnel_id || config.tunnel_status === "missing" ? el("button", { class: "btn primary", type: "button",
-                ...(!config.enabled || !config.agent_online ? {
-                  disabled: "disabled",
-                  title: config.enabled ? "The managed agent must be ready first" : "Turn on Playit.gg to manage the tunnel",
-                } : {}), onclick: async (event) => {
-                const button = event.currentTarget;
-                button.disabled = true;
-                try {
-                  const missingTunnel = config.tunnel_status === "missing";
-                  replaceConfig(await api("/playit/tunnel", { method: "POST", json: {} }));
-                  toast(missingTunnel ? "Playit tunnel recreated" : "Playit tunnel created", "ok");
-                  render();
-                } catch (error) { toast(error.message, "err"); button.disabled = false; }
-              } }, config.tunnel_status === "missing" ? "Recreate tunnel" : "Create tunnel") : null,
-            config.enabled && !config.agent_online && config.daemon_available && ["stopped", "error"].includes(config.agent_phase)
-              ? el("button", { class: "btn", type: "button", onclick: async (event) => {
-                const button = event.currentTarget;
-                button.disabled = true;
-                try {
-                  await savePreference({ enabled: true, management_mode: "bonghos" });
-                  toast("Playit agent restart requested", "ok");
-                } catch (error) { toast(error.message, "err"); button.disabled = false; }
-              } }, "Restart agent") : null,
-            el("button", { class: "btn", type: "button", onclick: async (event) => {
-              const button = event.currentTarget;
-              button.disabled = true;
-              try { replaceConfig(await api("/playit/refresh", { method: "POST", json: {} })); render(); }
-              catch (error) { toast(error.message, "err"); button.disabled = false; }
-            } }, "Refresh"),
-            config.tunnel_id ? el("button", { class: "btn danger", type: "button", onclick: () => {
-              editorRoot = null;
-              confirmModal("Delete Playit tunnel",
-                "This removes the public Playit address. It does not delete or stop the game server.",
-                "Delete tunnel", async () => {
+          const advanced = el("details", { class: "playit-advanced" },
+            el("summary", {}, "Advanced"),
+            el("div", { class: "playit-advanced-body" },
+              el("dl", { class: "kv compact" },
+                el("dt", {}, "Agent name"), el("dd", {}, config.agent_name || "Managed in Playit"),
+                el("dt", {}, "Agent ID"), el("dd", { class: "mono" }, config.agent_id || "Linked"),
+                config.agent_version ? [el("dt", {}, "Version"), el("dd", { class: "mono" }, config.agent_version)] : null),
+              el("div", { class: "playit-agent-name" },
+                el("label", {}, "Agent name", agentName),
+                el("button", { class: "btn playit-agent-name-save", type: "button", title: "Save agent name", "aria-label": "Save agent name", onclick: async (event) => {
+                  const button = event.currentTarget;
+                  button.disabled = true;
                   try {
-                    replaceConfig(await api("/playit/tunnel", { method: "DELETE" }));
-                    toast("Playit tunnel deleted", "ok");
+                    replaceConfig(await api("/playit/agent", { method: "PUT", json: { name: agentName.value.trim() } }));
+                    toast("Playit agent renamed", "ok");
                     render();
-                  } catch (error) { toast(error.message, "err"); }
-                });
-            } }, "Delete tunnel") : null,
-            el("button", { class: "btn", type: "button", onclick: () => {
-              editorRoot = null;
-              confirmModal("Relink Playit agent",
-                config.tunnel_id
-                  ? "Relinking replaces the current agent and deletes its existing Playit tunnel."
-                  : "Relinking replaces the current Bonghos-managed Playit agent.",
-                "Relink agent", async () => {
-                  if (await beginClaim(null)) openEditor();
-                }, false);
-            } }, "Relink agent")));
+                  } catch (error) { toast(error.message, "err"); button.disabled = false; }
+                } }, solarIcon("diskette-linear"))),
+              el("div", { class: "playit-actions playit-maintenance-actions" },
+                el("button", { class: "btn primary", type: "button", onclick: async (event) => {
+                  const button = event.currentTarget;
+                  button.disabled = true;
+                  try { automaticEnsureAttempted = true; await ensureConnection(false); }
+                  finally { button.disabled = false; }
+                } }, "Repair connection"),
+                config.enabled && !config.agent_online && config.daemon_available && ["stopped", "error"].includes(config.agent_phase)
+                  ? el("button", { class: "btn", type: "button", onclick: async (event) => {
+                    const button = event.currentTarget;
+                    button.disabled = true;
+                    try {
+                      automaticEnsureAttempted = false;
+                      await savePreference({ enabled: true, management_mode: "bonghos" });
+                      toast("Playit agent restart requested", "ok");
+                    } catch (error) { toast(error.message, "err"); button.disabled = false; }
+                  } }, "Restart agent") : null,
+                el("button", { class: "btn", type: "button", onclick: async (event) => {
+                  const button = event.currentTarget;
+                  button.disabled = true;
+                  try { replaceConfig(await api("/playit/refresh", { method: "POST", json: {} })); render(); }
+                  catch (error) { toast(error.message, "err"); button.disabled = false; }
+                } }, "Refresh"),
+                el("button", { class: "btn", type: "button", onclick: () => {
+                  editorRoot = null;
+                  confirmModal("Relink Playit agent",
+                    config.tunnel_id
+                      ? "Relinking replaces the current agent and deletes its existing Playit tunnel."
+                      : "Relinking replaces the current Bonghos-managed Playit agent.",
+                    "Relink agent", async () => {
+                      if (await beginClaim(null)) openEditor();
+                    }, false);
+                } }, "Relink agent"),
+                config.tunnel_id ? el("button", { class: "btn danger", type: "button", onclick: () => {
+                  editorRoot = null;
+                  confirmModal("Delete Playit tunnel",
+                    "This removes the public Playit address. Bonghos will create a new one while Playit.gg remains enabled.",
+                    "Delete tunnel", async () => {
+                      try {
+                        replaceConfig(await api("/playit/tunnel", { method: "DELETE" }));
+                        automaticEnsureAttempted = false;
+                        toast("Playit tunnel deleted", "ok");
+                        render();
+                      } catch (error) { toast(error.message, "err"); }
+                    });
+                } }, "Delete tunnel") : null)));
+          controls.append(advanced);
         }
         editorRoot.append(el("div", { class: "settings-row" },
-          el("div", {}, el("h3", {}, "Account"), el("p", { class: "muted" }, "Used when linking or relinking.")), controls));
+          el("div", {}, el("h3", {}, config.secret_configured ? "Connection" : "Account"),
+            el("p", { class: "muted" }, config.secret_configured ? "Bonghos keeps the tunnel connected to the active server." : "Used for the one-time Playit approval.")), controls));
       } else {
         const address = el("input", { value: config.public_address || "", placeholder: "example.gl.joinmc.link", spellcheck: "false" });
         const port = el("input", { type: "number", min: "1", max: "65535", value: String(config.local_port || 25565) });
@@ -8239,6 +8275,7 @@ function playitSettingsSection(initialConfig) {
       onclick: async () => {
         power.disabled = true;
         try {
+          automaticEnsureAttempted = false;
           await savePreference({
             enabled: !config.enabled,
             management_mode: config.management_mode === "none" ? "bonghos" : config.management_mode,
@@ -8261,6 +8298,10 @@ function playitSettingsSection(initialConfig) {
     if (editorRoot?.isConnected) renderEditor();
     if (config.enabled && config.management_mode === "bonghos" && config.secret_configured && !config.agent_online && !config.agent_error) {
       queueMicrotask(pollAgent);
+    }
+    if (config.enabled && config.management_mode === "bonghos" && config.secret_configured && config.agent_online
+      && !config.public_address && !automaticEnsureAttempted) {
+      queueMicrotask(() => ensureConnection(true));
     }
     if (config.enabled && config.management_mode === "bonghos" && config.agent_online
       && config.tunnel_id && !config.public_address && config.tunnel_status !== "missing") {

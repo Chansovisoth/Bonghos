@@ -219,7 +219,8 @@ Bonghos binds to `127.0.0.1` by default. It does not modify firewall rules,
 router settings, reverse proxies, Cloudflare Tunnel, Tailscale, or VPN
 configuration. Player networking may remain direct/manual or use the optional
 Playit.gg integration. Existing databases default to direct/manual; new guided
-setups offer Playit first but require explicit browser approval.
+setups offer Playit first with Guest as the default identity, but still require
+explicit browser approval.
 
 The Playit integration stores one global configuration because Bonghos runs one
 active project at a time. The agent credential is AES-256-GCM encrypted with
@@ -240,15 +241,18 @@ Playit claim and tunnel requests use fixed HTTPS API origins, bounded response
 sizes and timeouts, and `Agent-Key` authentication only after a credential has
 been encrypted. The `playit.manage` permission is Owner-only by default and
 can be delegated to Admin by an Owner. Tunnel configuration always targets
-`127.0.0.1` and the active project's Minecraft port. Agent renames are sent to
+`127.0.0.1` and the active project's Minecraft port. The managed flow is
+idempotent: after linking or startup it adopts one matching tunnel or creates
+one automatically, refreshes its public address, avoids unnecessary schema
+updates, and retries transient failures with bounded backoff. Agent renames are sent to
 Playit first and persisted locally only after Playit accepts them. Deleting or relinking a
 tunnel removes it from Playit before Bonghos clears its local record; an
 already-missing remote tunnel is treated as successful cleanup, while a missing,
 pending, disabled, or otherwise errored tunnel is no longer advertised on
 Overview. Bonghos also
 reapplies the active port after agent startup, project selection, server start,
-or a `server-port` edit. A missing tunnel association is cleared so an Owner can
-create a replacement rather than retaining a dead public address.
+or a `server-port` edit. A missing tunnel association is cleared and recreated
+automatically rather than retaining a dead public address.
 
 For remote administration, an operator can use an SSH tunnel:
 

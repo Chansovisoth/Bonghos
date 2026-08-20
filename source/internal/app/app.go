@@ -81,6 +81,9 @@ type App struct {
 	uploadMu                sync.Mutex
 	botLifecycleMu          sync.Mutex
 	playitMu                sync.Mutex
+	playitSyncMu            sync.Mutex
+	playitSyncRunning       bool
+	playitSyncPending       bool
 	playitRuntimeMu         sync.Mutex
 	playitParent            context.Context
 	playitCancel            context.CancelFunc

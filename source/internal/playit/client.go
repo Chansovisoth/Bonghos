@@ -328,21 +328,27 @@ func (c *Client) CreateMinecraftTunnel(ctx context.Context, secret, agentID stri
 	var result struct {
 		ID string `json:"id"`
 	}
+	// Use Playit's established tunnel API here. Unlike the schema-driven v1
+	// endpoint, this request describes the local agent destination directly
+	// and is compatible with both current 1.0 agents and older supported
+	// agents. RunData remains the source of truth for activation and the
+	// eventual public address.
 	request := map[string]any{
-		"ports": map[string]any{"type": "tunnel-type", "details": "minecraft-java"},
+		"name":        ManagedTunnelName,
+		"tunnel_type": "minecraft-java",
+		"port_type":   "tcp",
+		"port_count":  1,
 		"origin": map[string]any{
 			"type": "agent",
 			"data": map[string]any{
-				"agent_id": agentID,
-				"config": map[string]any{"fields": []map[string]string{
-					{"name": "local_ip", "value": "127.0.0.1"},
-					{"name": "local_port", "value": fmt.Sprint(localPort)},
-				}},
+				"agent_id":   agentID,
+				"local_ip":   "127.0.0.1",
+				"local_port": localPort,
 			},
 		},
-		"enabled": true, "alloc": nil, "name": ManagedTunnelName, "firewall_id": nil,
+		"enabled": true,
 	}
-	if err := c.post(ctx, "/v1/tunnels/create", secret, request, &result); err != nil {
+	if err := c.post(ctx, "/tunnels/create", secret, request, &result); err != nil {
 		return "", err
 	}
 	if result.ID == "" {

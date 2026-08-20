@@ -243,7 +243,7 @@ func TestPlayitTunnelExplainsIncompatibleAgentRegistration(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
 				"agent_id": "agent-id", "tunnels": []any{}, "pending": []any{}, "permissions": map[string]string{"account_status": "verified"},
 			}})
-		case "/v1/tunnels/create":
+		case "/tunnels/create":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "fail", "data": "TunnelTypeNotSupported"})
 		default:
 			http.NotFound(w, r)
@@ -342,7 +342,7 @@ func TestPlayitTunnelCreateRecoversRemoteTunnelAfterIncompatibleResponse(t *test
 				data["pending"] = []any{managedTunnelJSON("recovered-tunnel", "", 25565)}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": data})
-		case "/v1/tunnels/create":
+		case "/tunnels/create":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": "unexpected-response-shape"})
 		default:
 			http.NotFound(w, r)
@@ -547,7 +547,7 @@ func TestPlayitUpdateRecreatesMissingRemoteTunnel(t *testing.T) {
 			}})
 		case "/v1/tunnels/config":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "fail", "data": "TunnelNotFound"})
-		case "/v1/tunnels/create":
+		case "/tunnels/create":
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"id": "replacement-tunnel"}})
 		default:
 			http.NotFound(w, r)
@@ -583,14 +583,20 @@ func TestPlayitTunnelCreateAndMissingRemoteDelete(t *testing.T) {
 		return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id", Version: "1.0.10"}
 	}
 	var updateCalls atomic.Int32
+	var tunnelCreated atomic.Bool
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/agents/rundata":
+			tunnels := []any{}
+			if tunnelCreated.Load() {
+				tunnels = []any{managedTunnelJSON("tunnel-id", "public.example:25565", 25565)}
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
-				"agent_id": "agent-id", "tunnels": []any{}, "pending": []any{}, "permissions": map[string]string{"account_status": "verified"},
+				"agent_id": "agent-id", "tunnels": tunnels, "pending": []any{}, "permissions": map[string]string{"account_status": "verified"},
 			}})
-		case "/v1/tunnels/create":
+		case "/tunnels/create":
+			tunnelCreated.Store(true)
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"id": "tunnel-id"}})
 		case "/v1/tunnels/config":
 			updateCalls.Add(1)
@@ -610,7 +616,7 @@ func TestPlayitTunnelCreateAndMissingRemoteDelete(t *testing.T) {
 		t.Fatalf("create tunnel: %d %s", status, body)
 	}
 	updated, err := env.app.syncPlayitTunnelPort(context.Background())
-	if err != nil || !updated || updateCalls.Load() != 1 {
+	if err != nil || !updated || updateCalls.Load() != 0 {
 		t.Fatalf("automatic tunnel repair = %v, calls=%d, err=%v", updated, updateCalls.Load(), err)
 	}
 	payload = nil
@@ -655,6 +661,56 @@ func TestPlayitAutomaticSyncAdoptsExistingRemoteTunnel(t *testing.T) {
 	config, err := env.app.Playit.Config()
 	if err != nil || config.TunnelID != "startup-tunnel" || config.PublicAddress != "startup.example:25565" {
 		t.Fatalf("automatically adopted tunnel = %+v, %v", config, err)
+	}
+}
+
+func TestPlayitAutomaticSyncCreatesMissingTunnel(t *testing.T) {
+	env := newTestEnv(t)
+	env.newServerProject(t, "playit-auto-create")
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeGuest, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+		return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id"}
+	}
+	var createCalls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/agents/rundata":
+			pending := []any{}
+			if createCalls.Load() > 0 {
+				pending = []any{managedTunnelJSON("automatic-tunnel", "", 25565)}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
+				"agent_id": "agent-id", "tunnels": []any{}, "pending": pending,
+				"permissions": map[string]string{"account_status": "guest"},
+			}})
+		case "/tunnels/create":
+			createCalls.Add(1)
+			var request map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&request)
+			if request["tunnel_type"] != "minecraft-java" || request["port_type"] != "tcp" {
+				t.Errorf("automatic create request = %+v", request)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"id": "automatic-tunnel"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	updated, err := env.app.syncPlayitTunnelPort(context.Background())
+	if err != nil || !updated || createCalls.Load() != 1 {
+		t.Fatalf("automatic create updated=%v calls=%d err=%v", updated, createCalls.Load(), err)
+	}
+	config, err := env.app.Playit.Config()
+	if err != nil || config.TunnelID != "automatic-tunnel" || config.LocalPort != 25565 {
+		t.Fatalf("automatically created tunnel = %+v, %v", config, err)
 	}
 }
 
