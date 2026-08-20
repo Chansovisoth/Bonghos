@@ -849,7 +849,11 @@ func (a *App) handlePlayitTunnelDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.audit(actor.ID, actor.Username, "playit_tunnel_deleted", config.TunnelID, "", remoteIP(r))
-	payload, _ := a.playitPayload(r.Context(), true)
+	// Return the state committed by this request. Playit's run-data can remain
+	// stale briefly after deletion; refreshing here could immediately re-adopt
+	// the tunnel we just cleared. The normal automatic setup flow will discover
+	// or create the replacement after this response.
+	payload, _ := a.playitPayload(r.Context(), false)
 	writeJSON(w, http.StatusOK, payload)
 }
 
