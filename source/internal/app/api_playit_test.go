@@ -612,12 +612,12 @@ func TestPlayitTunnelCreateAndMissingRemoteDelete(t *testing.T) {
 
 	var payload map[string]any
 	status, body := owner.do(http.MethodPost, "/api/playit/tunnel", map[string]any{}, &payload)
-	if status != http.StatusOK || payload["tunnel_id"] != "tunnel-id" {
+	if status != http.StatusOK || payload["tunnel_id"] != "tunnel-id" || payload["public_address"] != "public.example:25565" {
 		t.Fatalf("create tunnel: %d %s", status, body)
 	}
 	updated, err := env.app.syncPlayitTunnelPort(context.Background())
-	if err != nil || !updated || updateCalls.Load() != 0 {
-		t.Fatalf("automatic tunnel repair = %v, calls=%d, err=%v", updated, updateCalls.Load(), err)
+	if err != nil || updated || updateCalls.Load() != 0 {
+		t.Fatalf("idempotent tunnel sync = %v, calls=%d, err=%v", updated, updateCalls.Load(), err)
 	}
 	payload = nil
 	status, body = owner.do(http.MethodDelete, "/api/playit/tunnel", nil, &payload)
