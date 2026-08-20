@@ -30,6 +30,95 @@ type playitPayload struct {
 	GuestLoginURL   string             `json:"guest_login_url,omitempty"`
 }
 
+type remotePlayitTunnel struct {
+	data    playit.TunnelData
+	pending bool
+}
+
+func playitTunnelConfigPort(tunnel playit.TunnelData) int {
+	for _, field := range tunnel.AgentConfig.Fields {
+		if field.Name != "local_port" {
+			continue
+		}
+		port, err := strconv.Atoi(strings.TrimSpace(field.Value))
+		if err == nil && port > 0 && port <= 65535 {
+			return port
+		}
+	}
+	return 0
+}
+
+func isManagedPlayitTunnel(tunnel playit.TunnelData, localPort int, pending bool) bool {
+	if tunnel.ID == "" || tunnel.Name != playit.ManagedTunnelName {
+		return false
+	}
+	if tunnel.TunnelType != "" && tunnel.TunnelType != "minecraft-java" {
+		return false
+	}
+	configuredPort := playitTunnelConfigPort(tunnel)
+	return pending || configuredPort == 0 || localPort == 0 || configuredPort == localPort
+}
+
+func discoverManagedPlayitTunnel(data playit.RunData, localPort int, excluded map[string]bool) (remotePlayitTunnel, bool, bool) {
+	candidates := make([]remotePlayitTunnel, 0, 2)
+	seen := make(map[string]bool)
+	consider := func(tunnel playit.TunnelData, pending bool) {
+		if seen[tunnel.ID] || excluded[tunnel.ID] || !isManagedPlayitTunnel(tunnel, localPort, pending) {
+			return
+		}
+		seen[tunnel.ID] = true
+		candidates = append(candidates, remotePlayitTunnel{data: tunnel, pending: pending})
+	}
+	for _, tunnel := range data.Tunnels {
+		consider(tunnel, false)
+	}
+	for _, tunnel := range data.Pending {
+		consider(tunnel, true)
+	}
+	if len(candidates) == 1 {
+		return candidates[0], true, false
+	}
+	return remotePlayitTunnel{}, false, len(candidates) > 1
+}
+
+func findPlayitTunnel(data playit.RunData, tunnelID string) (remotePlayitTunnel, bool) {
+	for _, tunnel := range data.Tunnels {
+		if tunnel.ID == tunnelID {
+			return remotePlayitTunnel{data: tunnel}, true
+		}
+	}
+	for _, tunnel := range data.Pending {
+		if tunnel.ID == tunnelID {
+			return remotePlayitTunnel{data: tunnel, pending: true}, true
+		}
+	}
+	return remotePlayitTunnel{}, false
+}
+
+func playitTunnelDisplay(remote remotePlayitTunnel) (string, string) {
+	if remote.pending {
+		if remote.data.StatusMessage != "" {
+			return remote.data.StatusMessage, ""
+		}
+		return "pending", ""
+	}
+	if remote.data.DisabledReason != "" {
+		return remote.data.DisabledReason, ""
+	}
+	if remote.data.StatusMessage != "" {
+		return remote.data.StatusMessage, ""
+	}
+	return "configured", remote.data.DisplayAddress
+}
+
+func (a *App) cachePlayitTunnel(payload *playitPayload, remote remotePlayitTunnel, localPort int) {
+	status, address := playitTunnelDisplay(remote)
+	payload.TunnelID = remote.data.ID
+	payload.TunnelStatus = status
+	payload.PublicAddress = address
+	_ = a.Playit.SaveTunnel(remote.data.ID, address, localPort)
+}
+
 func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, error) {
 	config, err := a.Playit.Config()
 	if err != nil {
@@ -86,45 +175,24 @@ func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, e
 		_ = a.Playit.SaveAgent(data.AgentID)
 		payload.AgentID = data.AgentID
 	}
-	if config.TunnelID != "" {
+	if config.TunnelID == "" {
+		remote, found, ambiguous := discoverManagedPlayitTunnel(data, config.LocalPort, nil)
+		if found {
+			a.cachePlayitTunnel(&payload, remote, config.LocalPort)
+			a.Logf("Playit adopted remote Bonghos tunnel %s", remote.data.ID)
+			a.audit(0, "system", "playit_tunnel_adopted", remote.data.ID, "discovered during status refresh", "")
+		} else if ambiguous {
+			payload.Notice = "Multiple Bonghos Playit tunnels were found; remove duplicates in Playit.gg before refreshing"
+		}
+		return payload, nil
+	}
+	remote, found := findPlayitTunnel(data, config.TunnelID)
+	if found {
+		a.cachePlayitTunnel(&payload, remote, config.LocalPort)
+	} else {
 		payload.TunnelStatus = "missing"
-		found := false
-		for _, tunnel := range data.Tunnels {
-			if tunnel.ID != config.TunnelID {
-				continue
-			}
-			found = true
-			payload.TunnelStatus = "configured"
-			if tunnel.DisabledReason != "" {
-				payload.TunnelStatus = tunnel.DisabledReason
-				payload.PublicAddress = ""
-			} else if tunnel.StatusMessage != "" {
-				payload.TunnelStatus = tunnel.StatusMessage
-				payload.PublicAddress = ""
-			} else {
-				payload.PublicAddress = tunnel.DisplayAddress
-			}
-			_ = a.Playit.SaveTunnel(tunnel.ID, payload.PublicAddress, config.LocalPort)
-			break
-		}
-		if !found {
-			for _, tunnel := range data.Pending {
-				if tunnel.ID == config.TunnelID {
-					found = true
-					payload.TunnelStatus = "pending"
-					payload.PublicAddress = ""
-					if tunnel.StatusMessage != "" {
-						payload.TunnelStatus = tunnel.StatusMessage
-					}
-					_ = a.Playit.SaveTunnel(tunnel.ID, "", config.LocalPort)
-					break
-				}
-			}
-		}
-		if !found {
-			payload.PublicAddress = ""
-			_ = a.Playit.SaveTunnel(config.TunnelID, "", config.LocalPort)
-		}
+		payload.PublicAddress = ""
+		_ = a.Playit.SaveTunnel(config.TunnelID, "", config.LocalPort)
 	}
 	return payload, nil
 }
@@ -163,6 +231,13 @@ func (a *App) reconcilePlayitService(config playit.Config) string {
 		return "The Playit service is unavailable, so the agent is running inside Bonghos; run bonghos service repair to restore the separate service"
 	}
 	return ""
+}
+
+func (a *App) runPlayitServiceReconcile(config playit.Config) string {
+	if a.PlayitServiceReconcile != nil {
+		return a.PlayitServiceReconcile(config)
+	}
+	return a.reconcilePlayitService(config)
 }
 
 func (a *App) handlePlayitGet(w http.ResponseWriter, r *http.Request) {
@@ -209,7 +284,7 @@ func (a *App) handlePlayitUpdate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	notice := a.reconcilePlayitService(config)
+	notice := a.runPlayitServiceReconcile(config)
 	a.audit(actor.ID, actor.Username, "playit_settings_updated", "networking",
 		enabledDetail(config.Enabled), remoteIP(r))
 	payload, payloadErr := a.playitPayload(r.Context(), false)
@@ -323,7 +398,7 @@ func (a *App) handlePlayitClaimPoll(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, errors.New("could not save the Playit agent"))
 		return
 	}
-	notice := a.reconcilePlayitService(config)
+	notice := a.runPlayitServiceReconcile(config)
 	guestLoginURL := ""
 	if accountMode == playit.AccountModeGuest {
 		guestLoginURL, _ = a.PlayitAPI.GuestLogin(r.Context(), secret)
@@ -364,6 +439,38 @@ func (a *App) activeMinecraftPort() (int, error) {
 		}
 	}
 	return port, nil
+}
+
+func playitTunnelIDs(data playit.RunData) map[string]bool {
+	ids := make(map[string]bool, len(data.Tunnels)+len(data.Pending))
+	for _, tunnel := range data.Tunnels {
+		ids[tunnel.ID] = true
+	}
+	for _, tunnel := range data.Pending {
+		ids[tunnel.ID] = true
+	}
+	return ids
+}
+
+func (a *App) recoverCreatedPlayitTunnel(ctx context.Context, secret string, before playit.RunData, localPort int) (remotePlayitTunnel, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	excluded := playitTunnelIDs(before)
+	ticker := time.NewTicker(400 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		data, err := a.PlayitAPI.RunData(ctx, secret)
+		if err == nil {
+			if remote, found, ambiguous := discoverManagedPlayitTunnel(data, localPort, excluded); found && !ambiguous {
+				return remote, true
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return remotePlayitTunnel{}, false
+		case <-ticker.C:
+		}
+	}
 }
 
 func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
@@ -412,8 +519,26 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 	tunnelID := config.TunnelID
 	action := "playit_tunnel_updated"
 	if tunnelID == "" {
-		tunnelID, err = a.PlayitAPI.CreateMinecraftTunnel(r.Context(), secret, data.AgentID, port)
-		action = "playit_tunnel_created"
+		remote, found, ambiguous := discoverManagedPlayitTunnel(data, port, nil)
+		if ambiguous {
+			writeErr(w, http.StatusConflict, errors.New("multiple Bonghos Playit tunnels already exist; remove duplicates in Playit.gg, then refresh"))
+			return
+		}
+		if found {
+			tunnelID = remote.data.ID
+			action = "playit_tunnel_adopted"
+		} else {
+			tunnelID, err = a.PlayitAPI.CreateMinecraftTunnel(r.Context(), secret, data.AgentID, port)
+			action = "playit_tunnel_created"
+			var providerErr *playit.ProviderError
+			if err != nil && !errors.As(err, &providerErr) {
+				if recovered, ok := a.recoverCreatedPlayitTunnel(r.Context(), secret, data, port); ok {
+					tunnelID = recovered.data.ID
+					err = nil
+					action = "playit_tunnel_recovered"
+				}
+			}
+		}
 	} else {
 		err = a.PlayitAPI.UpdateTunnelPort(r.Context(), secret, tunnelID, port)
 		if playit.IsProviderError(err, "TunnelNotFound") {
@@ -435,7 +560,7 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	publicAddress := config.PublicAddress
-	if action == "playit_tunnel_created" || action == "playit_tunnel_recreated" {
+	if action == "playit_tunnel_created" || action == "playit_tunnel_recreated" || action == "playit_tunnel_adopted" || action == "playit_tunnel_recovered" {
 		publicAddress = ""
 	}
 	if err := a.Playit.SaveTunnel(tunnelID, publicAddress, port); err != nil {
@@ -472,7 +597,7 @@ func (a *App) waitForPlayitReady(ctx context.Context, timeout time.Duration) pla
 // Playit outage must never prevent project selection or Minecraft startup.
 func (a *App) schedulePlayitTunnelSync() {
 	config, err := a.Playit.Config()
-	if err != nil || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || config.TunnelID == "" {
+	if err != nil || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || !config.SecretConfigured {
 		return
 	}
 	a.playitRuntimeMu.Lock()
@@ -491,7 +616,7 @@ func (a *App) schedulePlayitTunnelSync() {
 		}
 		if updated {
 			config, _ := a.Playit.Config()
-			a.Logf("Playit tunnel updated for active Minecraft port %d", config.LocalPort)
+			a.Logf("Playit tunnel synchronized for active game-server port %d", config.LocalPort)
 		}
 	}()
 }
@@ -503,7 +628,7 @@ func (a *App) syncPlayitTunnelPort(ctx context.Context) (bool, error) {
 	a.playitMu.Lock()
 	defer a.playitMu.Unlock()
 	config, err := a.Playit.Config()
-	if err != nil || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || config.TunnelID == "" {
+	if err != nil || !config.Enabled || config.ManagementMode != playit.ManagementBonghos || !config.SecretConfigured {
 		return false, err
 	}
 	port, err := a.activeMinecraftPort()
@@ -513,6 +638,25 @@ func (a *App) syncPlayitTunnelPort(ctx context.Context) (bool, error) {
 	secret, err := a.Playit.Secret()
 	if err != nil {
 		return false, err
+	}
+	if config.TunnelID == "" {
+		data, runErr := a.PlayitAPI.RunData(ctx, secret)
+		if runErr != nil {
+			return false, runErr
+		}
+		remote, found, ambiguous := discoverManagedPlayitTunnel(data, port, nil)
+		if ambiguous {
+			return false, errors.New("multiple Bonghos Playit tunnels exist; remove duplicates in Playit.gg")
+		}
+		if !found {
+			return false, nil
+		}
+		_, address := playitTunnelDisplay(remote)
+		if err := a.Playit.SaveTunnel(remote.data.ID, address, port); err != nil {
+			return false, err
+		}
+		a.audit(0, "system", "playit_tunnel_adopted", remote.data.ID, "discovered during automatic synchronization", "")
+		return true, nil
 	}
 	if err := a.PlayitAPI.UpdateTunnelPort(ctx, secret, config.TunnelID, port); err != nil {
 		if playit.IsProviderError(err, "TunnelNotFound") {

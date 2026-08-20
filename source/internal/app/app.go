@@ -28,7 +28,6 @@ import (
 	"github.com/Chansovisoth/Bonghos/internal/monitoring"
 	"github.com/Chansovisoth/Bonghos/internal/operations"
 	"github.com/Chansovisoth/Bonghos/internal/playit"
-	"github.com/Chansovisoth/Bonghos/internal/runtime/systemd"
 	"github.com/Chansovisoth/Bonghos/internal/scheduler"
 	"github.com/Chansovisoth/Bonghos/internal/security"
 	"github.com/Chansovisoth/Bonghos/internal/supervisor"
@@ -59,10 +58,14 @@ type App struct {
 	// PlayitDaemonAvailable is injectable so tests never depend on or control
 	// Playit software installed on the host running the suite.
 	PlayitDaemonAvailable func() bool
-	BotNotify             *bot.Dispatcher
-	Sched                 *scheduler.Scheduler
-	Hub                   *websocket.Hub
-	Runner                *Runner
+	// PlayitServiceReconcile and PlayitBootRetryInterval keep startup service
+	// behavior testable without touching the host's service manager.
+	PlayitServiceReconcile  func(playit.Config) string
+	PlayitBootRetryInterval time.Duration
+	BotNotify               *bot.Dispatcher
+	Sched                   *scheduler.Scheduler
+	Hub                     *websocket.Hub
+	Runner                  *Runner
 
 	// Startup phases already reported for the current server run.
 	phaseMu                 sync.Mutex
@@ -257,36 +260,48 @@ func (a *App) Serve(ctx context.Context) error {
 }
 
 func (a *App) bootPlayit(ctx context.Context) {
-	settings, err := a.Playit.Config()
-	if err != nil {
-		a.Logf("Playit settings could not be loaded: %v", err)
-		return
+	retryInterval := a.PlayitBootRetryInterval
+	if retryInterval <= 0 {
+		retryInterval = 30 * time.Second
 	}
-	if !settings.Enabled || settings.ManagementMode != playit.ManagementBonghos || !settings.SecretConfigured {
-		a.stopForegroundPlayit()
-		if systemd.Available() && systemd.IsActive(systemd.ServicePlayit) {
-			if stopErr := systemd.Stop(systemd.ServicePlayit); stopErr != nil {
-				a.Logf("Playit agent could not be stopped while disabled: %v", stopErr)
+	missingLogged := false
+	for {
+		settings, err := a.Playit.Config()
+		if err != nil {
+			a.Logf("Playit settings could not be loaded: %v", err)
+			return
+		}
+		shouldRun := settings.Enabled && settings.ManagementMode == playit.ManagementBonghos && settings.SecretConfigured
+		if !shouldRun {
+			if notice := a.runPlayitServiceReconcile(settings); notice != "" {
+				a.Logf("Playit startup reconciliation: %s", notice)
 			}
+			return
 		}
-		playit.CleanupRuntime(a.Home)
-		return
-	}
-	if !a.hasPlayitDaemon() {
-		a.Logf("Playit agent not started: official playitd executable not found")
-		return
-	}
-	if systemd.Available() {
-		if err := systemd.Start(systemd.ServicePlayit); err != nil {
-			a.Logf("Playit agent service unavailable; using the foreground fallback: %v", err)
-			_ = systemd.Stop(systemd.ServicePlayit)
-			a.startForegroundPlayit(ctx)
+		if a.hasPlayitDaemon() {
+			if missingLogged {
+				a.Logf("Playit agent executable is now available; retrying startup")
+			}
+			if notice := a.runPlayitServiceReconcile(settings); notice != "" {
+				a.Logf("Playit startup reconciliation: %s", notice)
+			}
+			a.schedulePlayitTunnelSync()
+			return
 		}
-		a.schedulePlayitTunnelSync()
-		return
+		if !missingLogged {
+			a.Logf("Playit agent not started: official playitd executable not found; retrying in %s", retryInterval)
+			missingLogged = true
+		}
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return
+		case <-timer.C:
+		}
 	}
-	a.startForegroundPlayit(ctx)
-	a.schedulePlayitTunnelSync()
 }
 
 func (a *App) startForegroundPlayit(parent context.Context) {

@@ -32,7 +32,10 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 				t.Errorf("Authorization = %q", got)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
-				"agent_id": "agent-id", "tunnels": []any{}, "pending": []any{},
+				"agent_id": "agent-id", "tunnels": []any{map[string]any{
+					"id": "remote-tunnel", "name": ManagedTunnelName, "tunnel_type": "minecraft-java",
+					"agent_config": map[string]any{"fields": []map[string]string{{"name": "local_port", "value": "25565"}}},
+				}}, "pending": []any{},
 				"permissions": map[string]string{"account_status": "verified"},
 			}})
 		case "/login/guest":
@@ -53,6 +56,9 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 			origin, _ := request["origin"].(map[string]any)
 			if origin["type"] != "agent" {
 				t.Errorf("create origin = %+v", origin)
+			}
+			if request["name"] != ManagedTunnelName {
+				t.Errorf("create name = %+v", request["name"])
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]string{"id": "tunnel-id"}})
 		case "/v1/tunnels/config":
@@ -85,7 +91,9 @@ func TestClientClaimAndAuthenticatedRunData(t *testing.T) {
 		t.Fatalf("ClaimExchange = %q, %v", secret, err)
 	}
 	runData, err := client.RunData(context.Background(), secret)
-	if err != nil || runData.AgentID != "agent-id" || runData.Permissions.AccountStatus != "verified" {
+	if err != nil || runData.AgentID != "agent-id" || runData.Permissions.AccountStatus != "verified" ||
+		len(runData.Tunnels) != 1 || runData.Tunnels[0].Name != ManagedTunnelName ||
+		runData.Tunnels[0].TunnelType != "minecraft-java" || len(runData.Tunnels[0].AgentConfig.Fields) != 1 {
 		t.Fatalf("RunData = %+v, %v", runData, err)
 	}
 	guestURL, err := client.GuestLogin(context.Background(), secret)

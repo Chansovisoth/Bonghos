@@ -14,6 +14,8 @@ import (
 
 const defaultAPIBase = "https://api.playit.gg"
 
+const ManagedTunnelName = "Bonghos Minecraft"
+
 type HTTPDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
@@ -286,9 +288,16 @@ type RunData struct {
 type TunnelData struct {
 	ID             string `json:"id"`
 	Name           string `json:"name"`
+	TunnelType     string `json:"tunnel_type"`
 	DisplayAddress string `json:"display_address"`
 	StatusMessage  string `json:"status_msg"`
 	DisabledReason string `json:"disabled_reason"`
+	AgentConfig    struct {
+		Fields []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"fields"`
+	} `json:"agent_config"`
 }
 
 func (c *Client) RunData(ctx context.Context, secret string) (RunData, error) {
@@ -331,7 +340,7 @@ func (c *Client) CreateMinecraftTunnel(ctx context.Context, secret, agentID stri
 				}},
 			},
 		},
-		"enabled": true, "alloc": nil, "name": "Bonghos Minecraft", "firewall_id": nil,
+		"enabled": true, "alloc": nil, "name": ManagedTunnelName, "firewall_id": nil,
 	}
 	if err := c.post(ctx, "/v1/tunnels/create", secret, request, &result); err != nil {
 		return "", err

@@ -7,13 +7,65 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Chansovisoth/Bonghos/internal/authorization"
 	"github.com/Chansovisoth/Bonghos/internal/playit"
 )
+
+func managedTunnelJSON(id, address string, port int) map[string]any {
+	return map[string]any{
+		"id": id, "name": playit.ManagedTunnelName, "tunnel_type": "minecraft-java", "display_address": address,
+		"agent_config": map[string]any{"fields": []map[string]string{
+			{"name": "local_ip", "value": "127.0.0.1"},
+			{"name": "local_port", "value": strconv.Itoa(port)},
+		}},
+	}
+}
+
+func TestPlayitBootRetriesUntilDaemonIsAvailable(t *testing.T) {
+	env := newTestEnv(t)
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	var available atomic.Bool
+	env.app.PlayitDaemonAvailable = available.Load
+	env.app.PlayitBootRetryInterval = 5 * time.Millisecond
+	reconciled := make(chan playit.Config, 1)
+	env.app.PlayitServiceReconcile = func(config playit.Config) string {
+		reconciled <- config
+		return ""
+	}
+	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+		return playit.AgentStatus{Phase: "stopped", Error: "test stop"}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	env.app.playitParent = ctx
+	defer cancel()
+	go env.app.bootPlayit(ctx)
+
+	select {
+	case <-reconciled:
+		t.Fatal("Playit service was reconciled before playitd became available")
+	case <-time.After(20 * time.Millisecond):
+	}
+	available.Store(true)
+	select {
+	case config := <-reconciled:
+		if !config.Enabled || config.ManagementMode != playit.ManagementBonghos {
+			t.Fatalf("startup reconciliation config = %+v", config)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Playit startup did not retry after playitd became available")
+	}
+}
 
 func TestPlayitSettingsAreOwnerOnlyAndExistingInstallsDefaultToManual(t *testing.T) {
 	env := newTestEnv(t)
@@ -203,6 +255,122 @@ func TestPlayitTunnelExplainsIncompatibleAgentRegistration(t *testing.T) {
 	status, body := owner.do(http.MethodPost, "/api/playit/tunnel", map[string]any{}, nil)
 	if status != http.StatusConflict || !strings.Contains(body, "relink the agent") {
 		t.Fatalf("incompatible tunnel registration: %d %s", status, body)
+	}
+}
+
+func TestPlayitRefreshAdoptsManagedRemoteTunnelAndTracksPendingActivation(t *testing.T) {
+	env := newTestEnv(t)
+	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner := env.newClient()
+	owner.mustLogin("owner", "correct horse battery", ownerSecret)
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+		return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id"}
+	}
+	var calls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		data := map[string]any{
+			"agent_id": "agent-id", "tunnels": []any{},
+			"pending":     []any{managedTunnelJSON("remote-tunnel", "", 25565)},
+			"permissions": map[string]string{"account_status": "verified"},
+		}
+		if calls.Add(1) > 1 {
+			data["tunnels"] = []any{managedTunnelJSON("remote-tunnel", "public.example:25565", 25565)}
+			data["pending"] = []any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": data})
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	var payload map[string]any
+	status, body := owner.do(http.MethodGet, "/api/playit", nil, &payload)
+	if status != http.StatusOK || payload["tunnel_id"] != "remote-tunnel" || payload["public_address"] != nil {
+		t.Fatalf("adopt pending remote tunnel: %d %s", status, body)
+	}
+	config, err := env.app.Playit.Config()
+	if err != nil || config.TunnelID != "remote-tunnel" || config.PublicAddress != "" {
+		t.Fatalf("pending tunnel cache = %+v, %v", config, err)
+	}
+
+	payload = nil
+	status, body = owner.do(http.MethodPost, "/api/playit/refresh", map[string]any{}, &payload)
+	if status != http.StatusOK || payload["public_address"] != "public.example:25565" {
+		t.Fatalf("activate pending remote tunnel: %d %s", status, body)
+	}
+	config, err = env.app.Playit.Config()
+	if err != nil || config.PublicAddress != "public.example:25565" {
+		t.Fatalf("active tunnel cache = %+v, %v", config, err)
+	}
+}
+
+func TestPlayitTunnelCreateRecoversRemoteTunnelAfterIncompatibleResponse(t *testing.T) {
+	env := newTestEnv(t)
+	env.newServerProject(t, "playit-create-recovery")
+	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner := env.newClient()
+	owner.mustLogin("owner", "correct horse battery", ownerSecret)
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+		return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id"}
+	}
+	var runDataCalls atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/agents/rundata":
+			data := map[string]any{
+				"agent_id": "agent-id", "tunnels": []any{}, "pending": []any{},
+				"permissions": map[string]string{"account_status": "verified"},
+			}
+			if runDataCalls.Add(1) > 1 {
+				data["pending"] = []any{managedTunnelJSON("recovered-tunnel", "", 25565)}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": data})
+		case "/v1/tunnels/create":
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": "unexpected-response-shape"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	var payload map[string]any
+	status, body := owner.do(http.MethodPost, "/api/playit/tunnel", map[string]any{}, &payload)
+	if status != http.StatusOK || payload["tunnel_id"] != "recovered-tunnel" {
+		t.Fatalf("recover created tunnel: %d %s", status, body)
+	}
+	config, err := env.app.Playit.Config()
+	if err != nil || config.TunnelID != "recovered-tunnel" {
+		t.Fatalf("recovered tunnel cache = %+v, %v", config, err)
+	}
+}
+
+func TestDiscoverManagedPlayitTunnelIsConservative(t *testing.T) {
+	matching := playit.TunnelData{ID: "matching", Name: playit.ManagedTunnelName, TunnelType: "minecraft-java"}
+	unrelated := playit.TunnelData{ID: "unrelated", Name: "Another app", TunnelType: "minecraft-java"}
+	if remote, found, ambiguous := discoverManagedPlayitTunnel(playit.RunData{Tunnels: []playit.TunnelData{unrelated, matching}}, 25565, nil); !found || ambiguous || remote.data.ID != "matching" {
+		t.Fatalf("unique tunnel discovery = %+v, found=%v ambiguous=%v", remote, found, ambiguous)
+	}
+	second := matching
+	second.ID = "second"
+	if _, found, ambiguous := discoverManagedPlayitTunnel(playit.RunData{Tunnels: []playit.TunnelData{matching, second}}, 25565, nil); found || !ambiguous {
+		t.Fatalf("duplicate tunnel discovery found=%v ambiguous=%v", found, ambiguous)
+	}
+	if _, found, ambiguous := discoverManagedPlayitTunnel(playit.RunData{Tunnels: []playit.TunnelData{unrelated}}, 25565, nil); found || ambiguous {
+		t.Fatalf("unrelated tunnel discovery found=%v ambiguous=%v", found, ambiguous)
 	}
 }
 
@@ -413,6 +581,39 @@ func TestPlayitTunnelCreateAndMissingRemoteDelete(t *testing.T) {
 	config, err := env.app.Playit.Config()
 	if err != nil || config.TunnelID != "" || config.PublicAddress != "" {
 		t.Fatalf("local tunnel state was not cleared: %+v, %v", config, err)
+	}
+}
+
+func TestPlayitAutomaticSyncAdoptsExistingRemoteTunnel(t *testing.T) {
+	env := newTestEnv(t)
+	env.newServerProject(t, "playit-auto-adopt")
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := env.app.Playit.SetPreference(true, playit.AccountModeAccount, playit.ManagementBonghos, 0); err != nil {
+		t.Fatal(err)
+	}
+	env.app.PlayitStatus = func(context.Context) playit.AgentStatus {
+		return playit.AgentStatus{Phase: "running", Running: true, AgentID: "agent-id"}
+	}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{
+			"agent_id": "agent-id",
+			"tunnels":  []any{managedTunnelJSON("startup-tunnel", "startup.example:25565", 25565)},
+			"pending":  []any{}, "permissions": map[string]string{"account_status": "verified"},
+		}})
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	updated, err := env.app.syncPlayitTunnelPort(context.Background())
+	if err != nil || !updated {
+		t.Fatalf("automatic adoption updated=%v err=%v", updated, err)
+	}
+	config, err := env.app.Playit.Config()
+	if err != nil || config.TunnelID != "startup-tunnel" || config.PublicAddress != "startup.example:25565" {
+		t.Fatalf("automatically adopted tunnel = %+v, %v", config, err)
 	}
 }
 

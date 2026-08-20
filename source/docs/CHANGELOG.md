@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Managed Playit startup now retries when the official agent is installed
+  after Bonghos starts, using the same service reconciliation path as the
+  Settings switch instead of requiring an off/on toggle.
+- Bonghos now conservatively adopts its single matching remote Playit tunnel
+  when the local tunnel ID is missing, including during startup and after an
+  incompatible create response. Pending tunnels are refreshed until their
+  public address becomes available; unrelated or duplicate tunnels are never
+  adopted automatically.
 - Playit API failures now preserve the provider's structured error category
   even when Playit responds with a non-success HTTP status, so expired links,
   account restrictions, unsupported operations, and provider failures produce

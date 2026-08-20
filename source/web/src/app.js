@@ -7902,6 +7902,7 @@ function playitSettingsSection(initialConfig) {
   const section = el("section", { class: "settings-page-section", "aria-labelledby": "playit-settings-title" });
   let polling = false;
   let statusPolling = false;
+  let tunnelPolling = false;
   let claimAccountMode = config.account_mode;
   let editorRoot = null;
   let editorManagementMode = config.management_mode;
@@ -7989,6 +7990,27 @@ function playitSettingsSection(initialConfig) {
       // Manual Refresh remains available if a transient status request fails.
     } finally {
       statusPolling = false;
+    }
+  };
+
+  const pollTunnel = async () => {
+    if (tunnelPolling || !config.enabled || config.management_mode !== "bonghos"
+      || !config.agent_online || !config.tunnel_id || config.public_address
+      || config.tunnel_status === "missing") return;
+    tunnelPolling = true;
+    try {
+      for (let attempt = 0; attempt < 30 && document.body.contains(section); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        const refreshed = await api("/playit/refresh", { method: "POST", json: {} });
+        replaceConfig(refreshed);
+        render();
+        if (config.public_address || !config.tunnel_id || config.tunnel_status === "missing"
+          || !config.enabled || config.management_mode !== "bonghos") return;
+      }
+    } catch (_) {
+      // Manual Refresh remains available if the provider is temporarily unavailable.
+    } finally {
+      tunnelPolling = false;
     }
   };
 
@@ -8239,6 +8261,10 @@ function playitSettingsSection(initialConfig) {
     if (editorRoot?.isConnected) renderEditor();
     if (config.enabled && config.management_mode === "bonghos" && config.secret_configured && !config.agent_online && !config.agent_error) {
       queueMicrotask(pollAgent);
+    }
+    if (config.enabled && config.management_mode === "bonghos" && config.agent_online
+      && config.tunnel_id && !config.public_address && config.tunnel_status !== "missing") {
+      queueMicrotask(pollTunnel);
     }
   };
 
