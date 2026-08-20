@@ -462,7 +462,7 @@ const DEMO_PERMISSION_CATALOG = [
   ["activity.view", "People and integrations", "View activity", "Review account and server administration history.", [], DEMO_VIEW_ASSIGNABLE_ROLES],
   ["users.manage", "People and integrations", "Manage users", "Invite users and manage lower-role accounts and sessions.", [], ["admin", "member"]],
   ["roles.manage", "People and integrations", "Manage role permissions", "Configure permissions for lower roles.", [], ["admin"]],
-  ["playit.manage", "People and integrations", "Manage Playit.gg", "Configure the public Minecraft tunnel and Playit agent.", ["server.view"], ["admin"]],
+  ["playit.manage", "People and integrations", "Manage Playit.gg", "Configure the public game-server tunnel and Playit agent.", ["server.view"], ["admin"]],
   ["bots.manage", "People and integrations", "Manage notification bots", "Configure Discord and Telegram bots.", ["server.view"], DEMO_ACTION_ASSIGNABLE_ROLES],
   ["host.view", "System", "View host", "See Bonghos installation, listener, and service details.", [], DEMO_VIEW_ASSIGNABLE_ROLES],
 ].map(([id, group, label, description, requires, assignable_roles]) => ({ id, group, label, description, requires, assignable_roles }));
@@ -496,7 +496,9 @@ let DEMO_PLAYIT = {
   enabled: false, account_mode: "account", management_mode: "none",
   secret_configured: false, agent_id: "", agent_name: "", tunnel_id: "", public_address: "",
   local_port: 25565, claim_pending: false, claim_url: "", agent_online: false,
-  account_status: "", tunnel_status: "", detections: [], daemon_available: true, managed_state: "inactive", notice: "",
+  account_status: "", tunnel_status: "",
+  detections: [{ kind: "docker", name: "playit", state: "running", externally_managed: true }],
+  daemon_available: false, managed_state: "inactive", notice: "",
 };
 const DEMO_TELEGRAM_GROUPS = [
   { id: "-1001234567890", name: "Server staff", type: "supergroup", photo_url: "/demo-server-bio1.png", forum: true, topics: [{ id: 23, name: "Server alerts" }, { id: 91, name: "Admin chat" }] },
@@ -4201,10 +4203,15 @@ async function pageConfiguration(main) {
 async function pageBackups(main) {
   const [list, storage] = await Promise.all([api("/backups"), api("/backups/storage")]);
   main.innerHTML = "";
-  const integrityLabel = (status) => {
-    if (status === "verified") return "Checked";
-    if (status === "failed") return "Error";
-    return "-";
+  const integrityIcon = (status) => {
+    if (status !== "verified" && status !== "failed") return null;
+    const failed = status === "failed";
+    const label = failed ? "Integrity check failed" : "Integrity checked";
+    return el("span", {
+      class: `backup-integrity-icon${failed ? " is-error" : ""}`,
+      title: label,
+      "aria-label": label,
+    }, solarIcon(failed ? "danger-triangle-linear" : "check-circle-linear"));
   };
   const createBackup = async (type, label) => {
     try { await api("/backups", { method: "POST", json: { type } }); toast(label + " backup started", "ok"); }
@@ -4227,12 +4234,13 @@ async function pageBackups(main) {
   } }, label);
   const backupRow = (b) => el("tr", {},
     el("td", { class: "mono" },
-      el("span", {}, b.backup_id),
+      el("span", { class: "backup-id-line" },
+        el("span", {}, b.backup_id),
+        integrityIcon(b.verification_status)),
       el("span", { class: "mobile-only mobile-row-detail" }, `${b.backup_type.replace(/_/g, " ")} · ${fmtBytes(b.compressed_size)}`)),
     el("td", {}, b.backup_type.replace(/_/g, " ")),
     el("td", { class: "mobile-hide" }, b.consistency_mode + " / " + b.trigger_type),
     el("td", {}, fmtBytes(b.compressed_size)),
-    el("td", { class: "mobile-hide" }, integrityLabel(b.verification_status)),
     el("td", { class: "mobile-hide" }, fmtTime(b.created_at)),
     el("td", { class: "table-actions" }, backupActions(b)));
   const tbody = el("tbody");
@@ -4253,7 +4261,7 @@ async function pageBackups(main) {
     });
     tbody.replaceChildren(...(visible.length
       ? visible.map(backupRow)
-      : [el("tr", {}, el("td", { colspan: "7", class: "muted" }, (list || []).length ? "No matching backups." : "No backups yet."))]));
+      : [el("tr", {}, el("td", { colspan: "6", class: "muted" }, (list || []).length ? "No matching backups." : "No backups yet."))]));
   };
   const search = pageSearchInput("backups", draw);
   const filter = pageFilterMenu("Filter backups", [
@@ -4281,7 +4289,7 @@ async function pageBackups(main) {
     el("div", { class: "progress hidden", id: "backup-progress" }, el("div", { style: "width:0%" })),
     el("div", { class: "table-wrap backups-table" },
       el("table", {},
-        el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", { class: "mobile-hide" }, "Mode"), el("th", {}, "Size"), el("th", { class: "mobile-hide" }, "Integrity"), el("th", { class: "mobile-hide" }, "Created"), el("th", {}, ""))),
+        el("thead", {}, el("tr", {}, el("th", {}, "ID"), el("th", {}, "Type"), el("th", { class: "mobile-hide" }, "Mode"), el("th", {}, "Size"), el("th", { class: "mobile-hide" }, "Created"), el("th", {}, ""))),
         tbody)),
     el("div", { class: "backup-action-help", "aria-label": "Backup actions explained" },
       el("div", { class: "backup-action-help-item" },
@@ -4289,7 +4297,7 @@ async function pageBackups(main) {
         el("p", { class: "muted" }, "Replaces the selected server data. The server must be stopped; Bonghos first makes an emergency backup.")),
       el("div", { class: "backup-action-help-item" },
         el("strong", {}, "Check"),
-        el("p", { class: "muted" }, "Verifies that the archive is readable and unchanged.")),
+        el("p", { class: "muted" }, "Check integrity of this backup to ensure it is readable and unchanged.")),
       el("div", { class: "backup-action-help-item" },
         el("strong", {}, "Protect"),
         el("p", { class: "muted" }, "Blocks manual deletion and automatic cleanup. Restoring still works.")),
@@ -4315,21 +4323,21 @@ function backupActionIcon(name) {
 function backupActions(backup) {
   const actions = [];
   if (can("server.backups.restore")) actions.push({
-    label: "Restore", icon: "archive-down-minimlistic-linear", run: () => restoreBackup(backup),
+    slot: "restore", label: "Restore", icon: "archive-down-minimlistic-linear", run: () => restoreBackup(backup),
   });
   if (can("server.backups.create")) actions.push(
-    { label: "Check", title: "Check whether this backup is readable and unchanged", icon: "file-magnifying-glass", run: async () => {
+    { slot: "check", label: "Check", title: "Check integrity of this backup to ensure it is readable and unchanged", icon: "file-magnifying-glass", run: async () => {
       try {
         await api(`/backups/${backup.backup_id}/verify`, { method: "POST", json: {} });
         toast("Backup integrity check passed", "ok");
         renderPage();
       } catch (error) { toast(`Backup integrity check failed: ${error.message}`, "err"); }
     } },
-    { label: backup.protected ? "Unprotect" : "Protect", icon: backup.protected ? "shield-cross-linear" : "shield-check-linear", run: async () => {
+    { slot: "protect", label: backup.protected ? "Unprotect" : "Protect", icon: backup.protected ? "shield-cross-linear" : "shield-check-linear", run: async () => {
       try { await api(`/backups/${backup.backup_id}/protect`, { method: "POST", json: { protected: !backup.protected } }); renderPage(); }
       catch (error) { toast(error.message, "err"); }
     } },
-    { label: "Delete", icon: "trash-bin-trash-linear", danger: true, run: () =>
+    { slot: "delete", label: "Delete", icon: "trash-bin-trash-linear", danger: true, run: () =>
       confirmModal("Delete backup", `Delete backup ${backup.backup_id}?` + (backup.protected ? " It is PROTECTED." : ""), "Delete", async () => {
         try { await api(`/backups/${backup.backup_id}`, { method: "DELETE" }); renderPage(); }
         catch (error) { toast(error.message, "err"); }
@@ -4337,9 +4345,9 @@ function backupActions(backup) {
 
   if (!actions.length) return el("span", { class: "muted" }, "View only");
 
-  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+  const desktop = el("div", { class: "desktop-row-actions backup-action-grid" },
     ...actions.map((action) => el("button", {
-      class: "btn " + (action.danger ? "danger" : "ghost"),
+      class: `btn ${action.danger ? "danger" : "ghost"} backup-action-${action.slot}`,
       title: action.title,
       onclick: action.run,
     }, backupActionIcon(action.icon), action.label)));
@@ -4467,13 +4475,14 @@ function scheduleActions(schedule) {
       catch (error) { toast(error.message, "err"); }
     } },
     { label: "Edit", icon: "pen-new-square-linear", run: () => scheduleForm(schedule) },
+    { label: "Duplicate", icon: "copy-linear", run: () => scheduleForm(schedule, true) },
     { label: "Delete", icon: "trash-bin-trash-linear", danger: true, run: () =>
       confirmModal("Delete schedule", `Delete schedule "${schedule.name}"?`, "Delete", async () => {
         try { await api(`/schedules/${schedule.id}`, { method: "DELETE" }); renderPage(); }
         catch (error) { toast(error.message, "err"); }
       }) },
   ];
-  const desktop = el("div", { class: "row-actions desktop-row-actions schedule-row-actions" },
+  const desktop = el("div", { class: "desktop-row-actions schedule-row-actions schedule-action-grid" },
     ...actions.map((action) => el("button", {
       class: "btn " + (action.danger ? "danger" : "ghost"), onclick: action.run,
     }, action.label)));
@@ -4516,7 +4525,8 @@ function timezoneSelect(selected) {
     ...records.map((record) => el("option", { value: record.zone, selected: record.zone === selected ? "" : null }, record.label)));
 }
 
-function scheduleForm(s) {
+function scheduleForm(s, duplicate = false) {
+  const editing = !!s && !duplicate;
   const typeAliases = { interval: "fixed_interval", cron: "advanced_cron" };
   const offlineAliases = { skip: "skip_when_offline", start_first: "start_then_execute", run_anyway: "skip_when_offline" };
   const missedAliases = { skip: "skip_missed_run", run_once_on_boot: "run_once_after_startup" };
@@ -4529,7 +4539,8 @@ function scheduleForm(s) {
     try { initialPayload = JSON.parse(initialPayload); } catch { initialPayload = {}; }
   }
 
-  const name = el("input", { value: s ? s.name : "", required: "", maxlength: "120" });
+  const duplicateName = `${String(s?.name || "Schedule").slice(0, 115).trimEnd()} copy`;
+  const name = el("input", { value: duplicate ? duplicateName : (s?.name || ""), required: "", maxlength: "120" });
   const description = el("input", { value: s?.description || "", maxlength: "240", placeholder: "Optional" });
   const type = el("select", {},
     ...[["once", "Once"], ["hourly", "Hourly"], ["daily", "Daily"], ["weekly", "Weekly"],
@@ -4630,7 +4641,7 @@ function scheduleForm(s) {
   enabled.checked = s ? !!s.enabled : true;
   renderActionDetail();
 
-  modal(s ? "Edit schedule" : "New schedule", [
+  modal(editing ? "Edit schedule" : (duplicate ? "Duplicate schedule" : "New schedule"), [
     el("h3", {}, "Schedule"),
     el("div", { class: "field-row" }, el("label", {}, "Name", name)),
     el("div", { class: "field-row" }, el("label", {}, "Description", description)),
@@ -4664,7 +4675,7 @@ function scheduleForm(s) {
         offline_policy: offline.value, missed_run_policy: missed.value, conflict_policy: conflict.value,
       };
       try {
-        if (s) await api(`/schedules/${s.id}`, { method: "PATCH", json: body });
+        if (editing) await api(`/schedules/${s.id}`, { method: "PATCH", json: body });
         else await api("/schedules", { method: "POST", json: body });
         close(); renderPage();
       } catch (error) { toast(error.message, "err"); }
@@ -6808,7 +6819,7 @@ function userActions(user) {
     { label: "Revoke sessions", icon: "logout-2-linear", run: revokeSessions },
     { label: "Delete", icon: "trash-bin-trash-linear", danger: true, run: deleteUser },
   ];
-  const desktop = el("div", { class: "row-actions desktop-row-actions" },
+  const desktop = el("div", { class: "desktop-row-actions user-action-grid" },
     ...actions.map((action) => el("button", { class: "btn " + (action.danger ? "danger" : "ghost"), onclick: action.run }, action.label)));
   const mobile = overflowActionsMenu(`Actions for ${user.Username}`,
     actions.map((action) => el("button", {
@@ -7890,6 +7901,7 @@ function playitSettingsSection(initialConfig) {
   let editorRoot = null;
   let editorManagementMode = config.management_mode;
   let saveEditorChanges = null;
+  let externalNoticeDismissed = false;
 
   const replaceConfig = (next = {}, overrides = {}) => {
     ["agent_id", "agent_name", "tunnel_id", "public_address", "claim_url", "notice", "agent_error",
@@ -7976,13 +7988,23 @@ function playitSettingsSection(initialConfig) {
   };
 
   const editorNotice = () => {
+    const externalDetected = Array.isArray(config.detections)
+      ? config.detections.find((item) => item.externally_managed && ["active", "running"].includes(item.state))
+      : null;
+    if (!config.daemon_available && externalDetected && !externalNoticeDismissed) {
+      return el("div", { class: "notice playit-inline-notice playit-dismissible-notice" },
+        el("span", { class: "playit-notice-copy" },
+          `An external Playit${externalDetected.kind === "docker" ? " Docker" : ""} agent is running. Choose External agent to display its public address, or install playitd for Bonghos-managed tunnels. `,
+          el("a", { href: "https://packages.playit.gg/", target: "_blank", rel: "noopener noreferrer" }, "Installation guide")),
+        el("button", { class: "playit-notice-dismiss", type: "button", title: "Dismiss", "aria-label": "Dismiss notice", onclick: (event) => {
+          externalNoticeDismissed = true;
+          event.currentTarget.closest(".playit-dismissible-notice")?.remove();
+        } }, solarIcon("close-linear")));
+    }
     if (editorManagementMode === "external") return null;
     if (!config.daemon_available) {
-      const externalDetected = config.detections.find((item) => item.externally_managed && ["active", "running"].includes(item.state));
       return el("div", { class: "notice playit-inline-notice" },
-        el("span", {}, externalDetected
-          ? `An external Playit${externalDetected.kind === "docker" ? " Docker" : ""} agent is running. Choose External agent to display its public Minecraft address, or install playitd for Bonghos-managed tunnels. `
-          : "Bonghos cannot create this tunnel because playitd is not installed on the host. "),
+        el("span", {}, "Bonghos cannot create this tunnel because playitd is not installed on the host. "),
         el("a", { href: "https://packages.playit.gg/", target: "_blank", rel: "noopener noreferrer" }, "Installation guide"));
     }
     if (config.agent_error) return el("div", { class: "notice playit-inline-notice" }, config.agent_error);
@@ -7997,9 +8019,6 @@ function playitSettingsSection(initialConfig) {
     if (!editorRoot) return;
     saveEditorChanges = null;
     editorRoot.innerHTML = "";
-    if (!config.enabled) {
-      editorRoot.append(el("div", { class: "notice playit-inline-notice" }, "Playit.gg is off. Changes are saved without starting the agent."));
-    }
     const notice = editorNotice();
     if (notice) editorRoot.append(notice);
     const managedChoice = editorManagementMode !== "external";
@@ -8117,7 +8136,7 @@ function playitSettingsSection(initialConfig) {
             config.tunnel_id ? el("button", { class: "btn danger", type: "button", onclick: () => {
               editorRoot = null;
               confirmModal("Delete Playit tunnel",
-                "This removes the public Playit address. It does not delete or stop the Minecraft server.",
+                "This removes the public Playit address. It does not delete or stop the game server.",
                 "Delete tunnel", async () => {
                   try {
                     replaceConfig(await api("/playit/tunnel", { method: "DELETE" }));
@@ -8150,7 +8169,7 @@ function playitSettingsSection(initialConfig) {
           editorManagementMode = "external";
           return true;
         };
-        editorRoot.append(el("div", { class: "settings-row" },
+        editorRoot.append(el("div", { class: "settings-row playit-external-config" },
           el("div", {}, el("h3", {}, "External agent"),
             el("p", { class: "muted" }, "Enter its public IP or address. Bonghos only displays it and cannot directly manage the agent.")),
           el("div", { class: "playit-form" },
@@ -8167,6 +8186,7 @@ function playitSettingsSection(initialConfig) {
 
   const openEditor = () => {
     editorManagementMode = config.management_mode;
+    externalNoticeDismissed = false;
     editorRoot = el("div", { class: "playit-editor" });
     renderEditor();
     modal("Playit.gg", [editorRoot], [["Done", "primary", async (close) => {
@@ -8198,7 +8218,7 @@ function playitSettingsSection(initialConfig) {
     el("span", { class: "bot-power-label" }, config.enabled ? "On" : "Off"));
 
     section.append(settingsSectionHeading(
-      "playit-settings-title", "Playit.gg", "Public Minecraft access without router port forwarding."),
+      "playit-settings-title", "Playit.gg", "Public game-server access without router port forwarding."),
     el("div", { class: "card connection-settings-card" },
       el("div", { class: "settings-row" },
         el("div", {}, el("h3", {}, "Connection"), el("p", { class: "muted" }, playitState(config))),

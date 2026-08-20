@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Schedules can be duplicated into a prefilled new-schedule form without
+  changing the original schedule.
 - Once, hourly, daily, weekly, and monthly schedules now accept seconds while
   remaining compatible with existing minute-only schedules.
 - Truncated player names now scroll into view while hovered or focused, and
@@ -22,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Backup integrity is shown beside the backup ID instead of consuming a
+  separate table column.
 - Playit now cancels abandoned managed claims when switching to an external
   deployment, preserves disabled configuration consistently in demo mode,
   keeps relink approval visible, stops stale managed services on disabled
@@ -33,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bot-card Remove actions now match the height of the other card actions.
 - Player action buttons use stable desktop slots, so state-dependent labels and
   offline rows no longer shift the action columns.
+- User, backup, and schedule actions now use stable desktop button columns.
 
 ## [0.3.0-rc.1] - 2026-08-19
 
