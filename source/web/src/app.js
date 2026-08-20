@@ -7908,6 +7908,7 @@ function playitSettingsSection(initialConfig) {
   let connectionEnsuring = false;
   let automaticEnsureAttempted = false;
   let claimAccountMode = config.account_mode;
+  let choosingRelinkMode = false;
   let editorRoot = null;
   let editorManagementMode = config.management_mode;
   let saveEditorChanges = null;
@@ -7942,6 +7943,8 @@ function playitSettingsSection(initialConfig) {
         const result = await api("/playit/claim/poll", { method: "POST", json: {} });
         if (result.state === "complete") {
           replaceConfig(result.config || {}, { claim_pending: false, claim_url: "" });
+          claimAccountMode = config.account_mode;
+          choosingRelinkMode = false;
           automaticEnsureAttempted = false;
           toast("Playit.gg connected", "ok");
           render();
@@ -8110,25 +8113,35 @@ function playitSettingsSection(initialConfig) {
       if (managedChoice) {
         const accountButtons = el("div", { class: "segmented-choice playit-choice" },
           el("button", { class: "btn" + (claimAccountMode === "guest" ? " active" : ""), type: "button",
-            onclick: () => { claimAccountMode = "guest"; render(); } }, "Guest"),
+            ...(config.claim_pending ? { disabled: "disabled" } : {}),
+            onclick: () => { claimAccountMode = "guest"; renderEditor(); } }, "Guest"),
           el("button", { class: "btn" + (claimAccountMode === "account" ? " active" : ""), type: "button",
-            onclick: () => { claimAccountMode = "account"; render(); } }, "Playit account"));
+            ...(config.claim_pending ? { disabled: "disabled" } : {}),
+            onclick: () => { claimAccountMode = "account"; renderEditor(); } }, "Playit account"));
         const controls = el("div", { class: "playit-form" },
-          ...(!config.secret_configured || config.claim_pending ? [accountButtons] : []));
+          ...(!config.secret_configured || config.claim_pending || choosingRelinkMode ? [accountButtons] : []));
         if (config.claim_pending) {
           controls.append(el("p", { class: "muted" }, "Approve the agent on Playit.gg."),
             el("div", { class: "playit-actions" },
               el("a", { class: "btn primary", href: config.claim_url, target: "_blank", rel: "noopener noreferrer" }, "Open Playit.gg"),
               el("button", { class: "btn", type: "button", onclick: () => pollClaim(false) }, "Check status")));
           queueMicrotask(() => pollClaim(true));
-        } else if (!config.secret_configured) {
+        } else if (!config.secret_configured || choosingRelinkMode) {
           controls.append(el("p", { class: "muted" }, claimAccountMode === "guest"
             ? "Quick setup without a permanent account."
             : "Your Playit password never passes through Bonghos."),
-            el("button", {
-              class: "btn primary", type: "button", onclick: (event) => beginClaim(event.currentTarget),
-              ...(config.daemon_available ? {} : { disabled: "disabled", title: "Install playitd first" }),
-            }, "Set up Playit.gg"));
+            el("div", { class: "playit-actions" },
+              el("button", {
+                class: "btn primary", type: "button", onclick: (event) => beginClaim(event.currentTarget),
+                ...(config.daemon_available ? {} : { disabled: "disabled", title: "Install playitd first" }),
+              }, choosingRelinkMode
+                ? (claimAccountMode === "guest" ? "Relink as Guest" : "Relink account")
+                : "Set up Playit.gg"),
+              choosingRelinkMode ? el("button", { class: "btn", type: "button", onclick: () => {
+                choosingRelinkMode = false;
+                claimAccountMode = config.account_mode;
+                renderEditor();
+              } }, "Cancel") : null));
         } else {
           const agentName = el("input", {
             value: config.agent_name || "", maxlength: "100", placeholder: "Bonghos", spellcheck: "false",
@@ -8199,14 +8212,9 @@ function playitSettingsSection(initialConfig) {
                   catch (error) { toast(error.message, "err"); button.disabled = false; }
                 } }, "Refresh"),
                 el("button", { class: "btn", type: "button", onclick: () => {
-                  editorRoot = null;
-                  confirmModal("Relink Playit agent",
-                    config.tunnel_id
-                      ? "Relinking replaces the current agent and deletes its existing Playit tunnel."
-                      : "Relinking replaces the current Bonghos-managed Playit agent.",
-                    "Relink agent", async () => {
-                      if (await beginClaim(null)) openEditor();
-                    }, false);
+                  choosingRelinkMode = true;
+                  claimAccountMode = config.account_mode === "guest" ? "guest" : "account";
+                  renderEditor();
                 } }, "Relink agent"),
                 config.tunnel_id ? el("button", { class: "btn danger", type: "button", onclick: () => {
                   editorRoot = null;
@@ -8224,8 +8232,10 @@ function playitSettingsSection(initialConfig) {
           controls.append(advanced);
         }
         editorRoot.append(el("div", { class: "settings-row" },
-          el("div", {}, el("h3", {}, config.secret_configured ? "Connection" : "Account"),
-            el("p", { class: "muted" }, config.secret_configured ? "Bonghos keeps the tunnel connected to the active server." : "Used for the one-time Playit approval.")), controls));
+          el("div", {}, el("h3", {}, config.secret_configured && !config.claim_pending && !choosingRelinkMode ? "Connection" : "Account"),
+            el("p", { class: "muted" }, config.secret_configured && !config.claim_pending && !choosingRelinkMode
+              ? "Bonghos keeps the tunnel connected to the active server."
+              : "Choose Guest or a Playit account.")), controls));
       } else {
         const address = el("input", { value: config.public_address || "", placeholder: "example.gl.joinmc.link", spellcheck: "false" });
         const port = el("input", { type: "number", min: "1", max: "65535", value: String(config.local_port || 25565) });
