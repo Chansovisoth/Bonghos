@@ -258,7 +258,7 @@ func TestPlayitTunnelExplainsIncompatibleAgentRegistration(t *testing.T) {
 	}
 }
 
-func TestPlayitRefreshAdoptsManagedRemoteTunnelAndTracksPendingActivation(t *testing.T) {
+func TestPlayitRefreshAdoptsUniqueRemoteTunnelAndTracksPendingActivation(t *testing.T) {
 	env := newTestEnv(t)
 	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
 	owner := env.newClient()
@@ -275,13 +275,17 @@ func TestPlayitRefreshAdoptsManagedRemoteTunnelAndTracksPendingActivation(t *tes
 	var calls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		pendingTunnel := managedTunnelJSON("remote-tunnel", "", 25565)
+		pendingTunnel["name"] = "Created in Playit"
 		data := map[string]any{
 			"agent_id": "agent-id", "tunnels": []any{},
-			"pending":     []any{managedTunnelJSON("remote-tunnel", "", 25565)},
+			"pending":     []any{pendingTunnel},
 			"permissions": map[string]string{"account_status": "verified"},
 		}
 		if calls.Add(1) > 1 {
-			data["tunnels"] = []any{managedTunnelJSON("remote-tunnel", "public.example:25565", 25565)}
+			activeTunnel := managedTunnelJSON("remote-tunnel", "public.example:25565", 25565)
+			activeTunnel["name"] = "Created in Playit"
+			data["tunnels"] = []any{activeTunnel}
 			data["pending"] = []any{}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": data})
@@ -372,6 +376,19 @@ func TestDiscoverManagedPlayitTunnelIsConservative(t *testing.T) {
 	if _, found, ambiguous := discoverManagedPlayitTunnel(playit.RunData{Tunnels: []playit.TunnelData{unrelated}}, 25565, nil); found || ambiguous {
 		t.Fatalf("unrelated tunnel discovery found=%v ambiguous=%v", found, ambiguous)
 	}
+	var manual playit.TunnelData
+	raw, err := json.Marshal(managedTunnelJSON("manual", "manual.example:25565", 25565))
+	if err != nil || json.Unmarshal(raw, &manual) != nil {
+		t.Fatal("could not prepare manual Playit tunnel fixture")
+	}
+	manual.Name = "My manually created server"
+	if remote, found, ambiguous := discoverManagedPlayitTunnel(playit.RunData{Tunnels: []playit.TunnelData{manual}}, 25565, nil); !found || ambiguous || remote.data.ID != "manual" {
+		t.Fatalf("manual matching tunnel discovery = %+v, found=%v ambiguous=%v", remote, found, ambiguous)
+	}
+	manual.AgentConfig.Fields[1].Value = "25566"
+	if _, found, ambiguous := discoverManagedPlayitTunnel(playit.RunData{Tunnels: []playit.TunnelData{manual}}, 25565, nil); found || ambiguous {
+		t.Fatalf("wrong-port tunnel discovery found=%v ambiguous=%v", found, ambiguous)
+	}
 }
 
 func TestPlayitAgentCanBeRenamedWhileDisabled(t *testing.T) {
@@ -414,6 +431,30 @@ func TestPlayitAgentCanBeRenamedWhileDisabled(t *testing.T) {
 	status, body = owner.do(http.MethodPut, "/api/playit/agent", map[string]string{"name": "  "}, nil)
 	if status != http.StatusBadRequest || renameCalls.Load() != 1 {
 		t.Fatalf("invalid rename reached Playit: %d calls=%d %s", status, renameCalls.Load(), body)
+	}
+}
+
+func TestPlayitAgentRenameProviderFailureIsConflict(t *testing.T) {
+	env := newTestEnv(t)
+	ownerSecret := env.createUser("owner", "correct horse battery", authorization.RoleOwner)
+	owner := env.newClient()
+	owner.mustLogin("owner", "correct horse battery", ownerSecret)
+	if _, err := env.app.Playit.CompleteClaim("agent-secret", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.app.Playit.SaveAgent("missing-agent"); err != nil {
+		t.Fatal(err)
+	}
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "fail", "data": "AgentNotFound"})
+	}))
+	defer provider.Close()
+	env.app.PlayitAPI = &playit.Client{BaseURL: provider.URL, HTTP: provider.Client()}
+
+	status, body := owner.do(http.MethodPut, "/api/playit/agent", map[string]string{"name": "Bonghos home"}, nil)
+	if status != http.StatusConflict || !strings.Contains(body, "could not be found") {
+		t.Fatalf("rename missing agent: %d %s", status, body)
 	}
 }
 

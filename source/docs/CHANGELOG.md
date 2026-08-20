@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   incompatible create response. Pending tunnels are refreshed until their
   public address becomes available; unrelated or duplicate tunnels are never
   adopted automatically.
+- A uniquely matching Playit tunnel created manually can now be adopted by
+  linked agent, tunnel type, and active local port without requiring Bonghos's
+  generated tunnel name. Provider failures during tunnel and agent operations
+  are logged safely, and rename rejections are returned as conflicts instead
+  of generic gateway failures.
 - Playit API failures now preserve the provider's structured error category
   even when Playit responds with a non-success HTTP status, so expired links,
   account restrictions, unsupported operations, and provider failures produce

@@ -49,14 +49,27 @@ func playitTunnelConfigPort(tunnel playit.TunnelData) int {
 }
 
 func isManagedPlayitTunnel(tunnel playit.TunnelData, localPort int, pending bool) bool {
-	if tunnel.ID == "" || tunnel.Name != playit.ManagedTunnelName {
+	if tunnel.ID == "" {
 		return false
+	}
+	managedName := strings.EqualFold(strings.TrimSpace(tunnel.Name), playit.ManagedTunnelName)
+	if pending {
+		// Pending run data does not expose the local agent configuration. A
+		// unique Minecraft tunnel on this linked agent is still safe to adopt;
+		// an untyped pending tunnel must retain Bonghos's generated name.
+		return tunnel.TunnelType == "minecraft-java" || (tunnel.TunnelType == "" && managedName)
 	}
 	if tunnel.TunnelType != "" && tunnel.TunnelType != "minecraft-java" {
 		return false
 	}
 	configuredPort := playitTunnelConfigPort(tunnel)
-	return pending || configuredPort == 0 || localPort == 0 || configuredPort == localPort
+	if configuredPort == 0 {
+		return managedName
+	}
+	if localPort > 0 && configuredPort != localPort {
+		return false
+	}
+	return tunnel.TunnelType == "minecraft-java" || managedName
 }
 
 func discoverManagedPlayitTunnel(data playit.RunData, localPort int, excluded map[string]bool) (remotePlayitTunnel, bool, bool) {
@@ -167,6 +180,7 @@ func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, e
 	}
 	data, err := a.PlayitAPI.RunData(ctx, secret)
 	if err != nil {
+		a.Logf("Playit status refresh failed: %v", err)
 		payload.Notice = "Playit account status is temporarily unavailable"
 		return payload, nil
 	}
@@ -182,7 +196,9 @@ func (a *App) playitPayload(ctx context.Context, refresh bool) (playitPayload, e
 			a.Logf("Playit adopted remote Bonghos tunnel %s", remote.data.ID)
 			a.audit(0, "system", "playit_tunnel_adopted", remote.data.ID, "discovered during status refresh", "")
 		} else if ambiguous {
-			payload.Notice = "Multiple Bonghos Playit tunnels were found; remove duplicates in Playit.gg before refreshing"
+			payload.Notice = "Multiple Playit tunnels match the active server port; remove duplicates before refreshing"
+		} else if len(data.Tunnels)+len(data.Pending) > 0 {
+			payload.Notice = "Playit has tunnels, but none match the active server port"
 		}
 		return payload, nil
 	}
@@ -503,6 +519,7 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := a.PlayitAPI.RunData(r.Context(), secret)
 	if err != nil {
+		a.Logf("Playit tunnel status request failed: %v", err)
 		status := http.StatusBadGateway
 		var providerErr *playit.ProviderError
 		if errors.As(err, &providerErr) {
@@ -551,6 +568,7 @@ func (a *App) handlePlayitTunnel(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
+		a.Logf("Playit tunnel %s failed: %v", action, err)
 		status := http.StatusBadGateway
 		var providerErr *playit.ProviderError
 		if errors.As(err, &providerErr) {
@@ -763,6 +781,7 @@ func (a *App) handlePlayitAgentRename(w http.ResponseWriter, r *http.Request) {
 	if agentID == "" {
 		data, runErr := a.PlayitAPI.RunData(r.Context(), secret)
 		if runErr != nil {
+			a.Logf("Playit agent lookup before rename failed: %v", runErr)
 			writeErr(w, http.StatusBadGateway, runErr)
 			return
 		}
@@ -777,7 +796,13 @@ func (a *App) handlePlayitAgentRename(w http.ResponseWriter, r *http.Request) {
 		status := http.StatusBadGateway
 		if playit.IsProviderError(err, "InvalidName") {
 			status = http.StatusBadRequest
+		} else {
+			var providerErr *playit.ProviderError
+			if errors.As(err, &providerErr) {
+				status = http.StatusConflict
+			}
 		}
+		a.Logf("Playit agent rename failed: %v", err)
 		writeErr(w, status, err)
 		return
 	}
