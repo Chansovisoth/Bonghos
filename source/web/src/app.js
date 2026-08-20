@@ -8108,6 +8108,7 @@ function playitSettingsSection(initialConfig) {
             el("dt", {}, "Status"), el("dd", {}, String(config.agent_phase || "starting").replaceAll("_", " ")),
             config.agent_version ? [el("dt", {}, "Version"), el("dd", { class: "mono" }, config.agent_version)] : null,
             config.tunnel_id ? [el("dt", {}, "Tunnel"), el("dd", {}, config.tunnel_status || "pending")] : null,
+            config.public_address ? [el("dt", {}, "Playit IP"), el("dd", { class: "mono" }, config.public_address)] : null,
             el("dt", {}, "Local port"), el("dd", { class: "mono" }, String(config.local_port || 25565)));
           if (config.guest_login_url) {
             controls.append(el("a", { class: "btn", href: config.guest_login_url, target: "_blank", rel: "noopener noreferrer" }, "Manage guest account"));
@@ -8135,21 +8136,20 @@ function playitSettingsSection(initialConfig) {
                 } catch (error) { toast(error.message, "err"); button.disabled = false; }
               } }, solarIcon("diskette-linear"))),
             el("div", { class: "playit-actions playit-tunnel-actions" },
-            el("button", { class: "btn primary", type: "button",
-              ...(!config.enabled || !config.agent_online ? {
-                disabled: "disabled",
-                title: config.enabled ? "The managed agent must be ready first" : "Turn on Playit.gg to manage the tunnel",
-            } : {}), onclick: async (event) => {
-              const button = event.currentTarget;
-              button.disabled = true;
-              try {
-                const hadTunnel = !!config.tunnel_id;
-                const missingTunnel = hadTunnel && config.tunnel_status === "missing";
-                replaceConfig(await api("/playit/tunnel", { method: "POST", json: {} }));
-                toast(missingTunnel ? "Playit tunnel recreated" : hadTunnel ? "Playit tunnel updated" : "Playit tunnel created", "ok");
-                render();
-              } catch (error) { toast(error.message, "err"); button.disabled = false; }
-            } }, config.tunnel_status === "missing" ? "Recreate tunnel" : config.tunnel_id ? "Update tunnel" : "Create tunnel"),
+              !config.tunnel_id || config.tunnel_status === "missing" ? el("button", { class: "btn primary", type: "button",
+                ...(!config.enabled || !config.agent_online ? {
+                  disabled: "disabled",
+                  title: config.enabled ? "The managed agent must be ready first" : "Turn on Playit.gg to manage the tunnel",
+                } : {}), onclick: async (event) => {
+                const button = event.currentTarget;
+                button.disabled = true;
+                try {
+                  const missingTunnel = config.tunnel_status === "missing";
+                  replaceConfig(await api("/playit/tunnel", { method: "POST", json: {} }));
+                  toast(missingTunnel ? "Playit tunnel recreated" : "Playit tunnel created", "ok");
+                  render();
+                } catch (error) { toast(error.message, "err"); button.disabled = false; }
+              } }, config.tunnel_status === "missing" ? "Recreate tunnel" : "Create tunnel") : null,
             config.enabled && !config.agent_online && config.daemon_available && ["stopped", "error"].includes(config.agent_phase)
               ? el("button", { class: "btn", type: "button", onclick: async (event) => {
                 const button = event.currentTarget;

@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated tunnel name. Provider failures during tunnel and agent operations
   are logged safely, and rename rejections are returned as conflicts instead
   of generic gateway failures.
+- The managed Playit account details now show the configured public address in
+  addition to the existing Overview display.
 - Playit API failures now preserve the provider's structured error category
   even when Playit responds with a non-success HTTP status, so expired links,
   account restrictions, unsupported operations, and provider failures produce
