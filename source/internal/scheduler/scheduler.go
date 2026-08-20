@@ -77,72 +77,78 @@ func NextRun(s *Schedule, after time.Time) (time.Time, error) {
 	expr := strings.TrimSpace(s.ScheduleExpression)
 	switch s.ScheduleType {
 	case "once":
-		t, err := time.ParseInLocation("2006-01-02 15:04", expr, loc)
+		var t time.Time
+		for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02 15:04"} {
+			t, err = time.ParseInLocation(layout, expr, loc)
+			if err == nil {
+				break
+			}
+		}
 		if err != nil {
-			return time.Time{}, fmt.Errorf("once expression must be 'YYYY-MM-DD HH:MM': %w", err)
+			return time.Time{}, errors.New("once expression must be 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD HH:MM:SS'")
 		}
 		if t.After(a) {
 			return t, nil
 		}
 		return time.Time{}, nil // no more runs
 	case "hourly":
-		// expr: "MM" minute of every hour
-		m, err := strconv.Atoi(expr)
-		if err != nil || m < 0 || m > 59 {
-			return time.Time{}, errors.New("hourly expression must be the minute (0-59)")
+		// Legacy expr: "MM". Second-aware expr: "MM:SS".
+		m, sec, err := parseHourly(expr)
+		if err != nil {
+			return time.Time{}, err
 		}
-		t := time.Date(a.Year(), a.Month(), a.Day(), a.Hour(), m, 0, 0, loc)
+		t := time.Date(a.Year(), a.Month(), a.Day(), a.Hour(), m, sec, 0, loc)
 		for !t.After(a) {
 			t = t.Add(time.Hour)
 		}
 		return t, nil
 	case "daily":
-		// expr: "HH:MM"
-		hh, mm, err := parseHM(expr)
+		// expr: "HH:MM" or "HH:MM:SS"
+		hh, mm, sec, err := parseHMS(expr)
 		if err != nil {
 			return time.Time{}, err
 		}
-		t := time.Date(a.Year(), a.Month(), a.Day(), hh, mm, 0, 0, loc)
+		t := time.Date(a.Year(), a.Month(), a.Day(), hh, mm, sec, 0, loc)
 		for !t.After(a) {
 			t = t.AddDate(0, 0, 1)
 		}
 		return t, nil
 	case "weekly":
-		// expr: "MON 04:00" (3-letter weekday)
+		// expr: "MON 04:00" or "MON 04:00:30" (3-letter weekday)
 		parts := strings.Fields(expr)
 		if len(parts) != 2 {
-			return time.Time{}, errors.New("weekly expression must be 'DAY HH:MM'")
+			return time.Time{}, errors.New("weekly expression must be 'DAY HH:MM' or 'DAY HH:MM:SS'")
 		}
 		wd, ok := weekdays[strings.ToUpper(parts[0])]
 		if !ok {
 			return time.Time{}, errors.New("unknown weekday")
 		}
-		hh, mm, err := parseHM(parts[1])
+		hh, mm, sec, err := parseHMS(parts[1])
 		if err != nil {
 			return time.Time{}, err
 		}
-		t := time.Date(a.Year(), a.Month(), a.Day(), hh, mm, 0, 0, loc)
+		t := time.Date(a.Year(), a.Month(), a.Day(), hh, mm, sec, 0, loc)
 		for t.Weekday() != wd || !t.After(a) {
 			t = t.AddDate(0, 0, 1)
 		}
 		return t, nil
 	case "monthly":
-		// expr: "DD HH:MM"
+		// expr: "DD HH:MM" or "DD HH:MM:SS"
 		parts := strings.Fields(expr)
 		if len(parts) != 2 {
-			return time.Time{}, errors.New("monthly expression must be 'DD HH:MM'")
+			return time.Time{}, errors.New("monthly expression must be 'DD HH:MM' or 'DD HH:MM:SS'")
 		}
 		dd, err := strconv.Atoi(parts[0])
 		if err != nil || dd < 1 || dd > 31 {
 			return time.Time{}, errors.New("day of month must be 1-31")
 		}
-		hh, mm, err := parseHM(parts[1])
+		hh, mm, sec, err := parseHMS(parts[1])
 		if err != nil {
 			return time.Time{}, err
 		}
-		t := time.Date(a.Year(), a.Month(), dd, hh, mm, 0, 0, loc)
+		t := time.Date(a.Year(), a.Month(), dd, hh, mm, sec, 0, loc)
 		for !t.After(a) || t.Day() != dd {
-			t = time.Date(t.Year(), t.Month()+1, dd, hh, mm, 0, 0, loc)
+			t = time.Date(t.Year(), t.Month()+1, dd, hh, mm, sec, 0, loc)
 		}
 		return t, nil
 	case "fixed_interval":
@@ -163,13 +169,43 @@ var weekdays = map[string]time.Weekday{
 	"THU": time.Thursday, "FRI": time.Friday, "SAT": time.Saturday,
 }
 
-func parseHM(s string) (int, int, error) {
-	var hh, mm int
-	if _, err := fmt.Sscanf(s, "%d:%d", &hh, &mm); err != nil ||
-		hh < 0 || hh > 23 || mm < 0 || mm > 59 {
-		return 0, 0, errors.New("time must be HH:MM")
+func parseHMS(value string) (int, int, int, error) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 2 && len(parts) != 3 {
+		return 0, 0, 0, errors.New("time must be HH:MM or HH:MM:SS")
 	}
-	return hh, mm, nil
+	hh, hourErr := strconv.Atoi(parts[0])
+	mm, minuteErr := strconv.Atoi(parts[1])
+	sec := 0
+	var secondErr error
+	if len(parts) == 3 {
+		sec, secondErr = strconv.Atoi(parts[2])
+	}
+	if hourErr != nil || minuteErr != nil || secondErr != nil ||
+		hh < 0 || hh > 23 || mm < 0 || mm > 59 || sec < 0 || sec > 59 {
+		return 0, 0, 0, errors.New("time must be HH:MM or HH:MM:SS")
+	}
+	return hh, mm, sec, nil
+}
+
+func parseHourly(value string) (int, int, error) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) == 1 {
+		minute, err := strconv.Atoi(parts[0])
+		if err != nil || minute < 0 || minute > 59 {
+			return 0, 0, errors.New("hourly expression must be MM or MM:SS")
+		}
+		return minute, 0, nil
+	}
+	if len(parts) != 2 {
+		return 0, 0, errors.New("hourly expression must be MM or MM:SS")
+	}
+	minute, minuteErr := strconv.Atoi(parts[0])
+	second, secondErr := strconv.Atoi(parts[1])
+	if minuteErr != nil || secondErr != nil || minute < 0 || minute > 59 || second < 0 || second > 59 {
+		return 0, 0, errors.New("hourly expression must be MM or MM:SS")
+	}
+	return minute, second, nil
 }
 
 // nextCron supports the classic 5-field cron subset:
@@ -365,7 +401,7 @@ func (sc *Scheduler) List(instanceID int64) ([]*Schedule, error) {
 // connections are irrelevant: this runs inside the control plane.
 func (sc *Scheduler) Run(ctx context.Context) {
 	sc.handleMissed()
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {

@@ -28,6 +28,39 @@ func TestNextRunDaily(t *testing.T) {
 	}
 }
 
+func TestNextRunDailyWithSeconds(t *testing.T) {
+	after := time.Date(2026, 8, 3, 4, 0, 29, 0, time.UTC)
+	got, err := NextRun(mk("daily", "04:00:30", "UTC"), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 8, 3, 4, 0, 30, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("daily seconds NextRun = %v, want %v", got, want)
+	}
+}
+
+func TestNextRunHourlyWithSeconds(t *testing.T) {
+	after := time.Date(2026, 8, 3, 10, 15, 44, 0, time.UTC)
+	got, err := NextRun(mk("hourly", "15:45", "UTC"), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 8, 3, 10, 15, 45, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("hourly seconds NextRun = %v, want %v", got, want)
+	}
+
+	legacy, err := NextRun(mk("hourly", "15", "UTC"), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyWant := time.Date(2026, 8, 3, 11, 15, 0, 0, time.UTC)
+	if !legacy.Equal(legacyWant) {
+		t.Errorf("legacy hourly NextRun = %v, want %v", legacy, legacyWant)
+	}
+}
+
 func TestNextRunWeekly(t *testing.T) {
 	loc := time.UTC
 	// 2026-08-03 is a Monday.
@@ -38,6 +71,27 @@ func TestNextRunWeekly(t *testing.T) {
 	}
 	if got.Weekday() != time.Sunday || got.Hour() != 5 || got.Minute() != 30 || !got.After(after) {
 		t.Errorf("weekly NextRun = %v", got)
+	}
+}
+
+func TestNextRunWeeklyAndMonthlyWithSeconds(t *testing.T) {
+	after := time.Date(2026, 8, 3, 4, 0, 29, 0, time.UTC) // Monday.
+	weekly, err := NextRun(mk("weekly", "MON 04:00:30", "UTC"), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	weeklyWant := time.Date(2026, 8, 3, 4, 0, 30, 0, time.UTC)
+	if !weekly.Equal(weeklyWant) {
+		t.Errorf("weekly seconds NextRun = %v, want %v", weekly, weeklyWant)
+	}
+
+	monthly, err := NextRun(mk("monthly", "3 04:00:30", "UTC"), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	monthlyWant := time.Date(2026, 8, 3, 4, 0, 30, 0, time.UTC)
+	if !monthly.Equal(monthlyWant) {
+		t.Errorf("monthly seconds NextRun = %v, want %v", monthly, monthlyWant)
 	}
 }
 
@@ -104,9 +158,24 @@ func TestNextRunOnce(t *testing.T) {
 	}
 }
 
+func TestNextRunOnceWithSeconds(t *testing.T) {
+	after := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
+	got, err := NextRun(mk("once", "2026-09-01 04:00:45", "UTC"), after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 9, 1, 4, 0, 45, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Errorf("once seconds NextRun = %v, want %v", got, want)
+	}
+}
+
 func TestNextRunInvalid(t *testing.T) {
 	if _, err := NextRun(mk("daily", "25:99", "UTC"), time.Now()); err == nil {
 		t.Error("invalid time accepted")
+	}
+	if _, err := NextRun(mk("daily", "04:00:60", "UTC"), time.Now()); err == nil {
+		t.Error("invalid seconds accepted")
 	}
 	if _, err := NextRun(mk("advanced_cron", "bad cron", "UTC"), time.Now()); err == nil {
 		t.Error("invalid cron accepted")

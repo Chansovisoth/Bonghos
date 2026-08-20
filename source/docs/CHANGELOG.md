@@ -9,8 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Once, hourly, daily, weekly, and monthly schedules now accept seconds while
+  remaining compatible with existing minute-only schedules.
+- Truncated player names now scroll into view while hovered or focused, and
+  mobile users can toggle the ticker by tapping the player row.
 - Owners and delegated Admins can rename a Bonghos-linked Playit agent from
   the Settings editor, including while the integration is switched off.
+- Player managers can whitelist or unwhitelist observed players directly from
+  the Players page, with current whitelist state shown in each player row.
+  Operator and ban actions also switch between Op/Deop and Ban/Unban according
+  to the player's current state.
 
 ### Fixed
 
@@ -22,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of leaving Bonghos permanently attached to the missing tunnel identifier.
 - The in-process Playit fallback now restarts an unexpectedly exited agent after
   five seconds when a managed systemd user service is unavailable.
+- Bot-card Remove actions now match the height of the other card actions.
+- Player action buttons use stable desktop slots, so state-dependent labels and
+  offline rows no longer shift the action columns.
 
 ## [0.3.0-rc.1] - 2026-08-19
 

@@ -86,8 +86,11 @@ const BUTTON_ICONS = {
   "Sign in with a passkey": "key-linear",
   "Start": "play-linear",
   "Stop": "stop-linear",
+  "Unban": "check-circle-linear",
   "Use crop": "gallery-linear",
   "Verify": "shield-check-linear",
+  "Whitelist": "shield-check-linear",
+  "Unwhitelist": "shield-keyhole-linear",
   "list": "users-group-rounded-linear",
   "save-all": "diskette-linear",
 };
@@ -844,7 +847,7 @@ async function demoApi(path, opts = {}) {
       };
     }
     case "/players": return { players: [
-      { username: "iKlaude", uuid: "03c69a88-5438-4b03-952a-17efcbcfe6f7", online: true, op: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
+      { username: "iKlaude", uuid: "03c69a88-5438-4b03-952a-17efcbcfe6f7", online: true, op: true, whitelisted: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 7342 },
       { username: "Alex", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 3922 },
       { username: "Long_Name_With_Underscores", online: true, last_seen_at: new Date().toISOString(), observed_playtime_seconds: 18422 },
       { username: "OfflineMiner", online: false, banned: true, last_seen_at: new Date(Date.now() - 86400000).toISOString(), observed_playtime_seconds: 7521 },
@@ -2593,6 +2596,7 @@ async function pagePlayers(main) {
     if (filterMode === "offline-only") visible = visible.filter((p) => !p.online);
     if (filterMode === "op-only") visible = visible.filter((p) => p.op);
     if (filterMode === "banned-only") visible = visible.filter((p) => p.banned);
+    if (filterMode === "whitelisted-only") visible = visible.filter((p) => p.whitelisted);
     visible.sort((a, b) => {
       if (filterMode === "name-desc") return -byName(a, b);
       if (filterMode === "online-first") return Number(b.online) - Number(a.online) || byName(a, b);
@@ -2604,7 +2608,7 @@ async function pagePlayers(main) {
       return byName(a, b);
     });
     tbody.innerHTML = "";
-    tbody.append(...(visible.length ? visible.map(playerRow) : [el("tr", {}, el("td", { colspan: "5", class: "muted" }, players.length ? "No matching players." : "No players seen yet."))]));
+    tbody.append(...(visible.length ? visible.map((player) => playerRow(player, draw)) : [el("tr", {}, el("td", { colspan: "5", class: "muted" }, players.length ? "No matching players." : "No players seen yet."))]));
   };
   const filterModes = [
     ["name-asc", "Name: A-Z"],
@@ -2618,6 +2622,7 @@ async function pagePlayers(main) {
     ["online-only", "Online only"],
     ["offline-only", "Offline only"],
     ["op-only", "OP only"],
+    ["whitelisted-only", "Whitelisted only"],
     ["banned-only", "BANNED only"],
   ];
   const filterControl = pageFilterMenu("Filter players", filterModes, (value) => {
@@ -2627,7 +2632,7 @@ async function pagePlayers(main) {
   search.addEventListener("input", draw);
   main.innerHTML = "";
   main.append(
-    pageHeader("Players", "Observed online and recent players. Whitelist, operator, ban, and IP-ban lists are not exposed as separate read APIs yet.", [
+    pageHeader("Players", "Observed online and recent players with their server access state.", [
       el("div", { class: "page-search-filter-controls players-search-controls" }, search, filterControl),
     ], overviewBackButton()),
     el("div", { class: "toolbar" },
@@ -2637,12 +2642,12 @@ async function pagePlayers(main) {
       el("table", {},
         el("thead", {}, el("tr", {},
           el("th", {}, "Player"), el("th", {}, "Status"), el("th", { class: "mobile-hide" }, "Last seen"),
-          el("th", { class: "mobile-hide player-observed-playtime" }, "Observed playtime"), el("th", {}, ""))),
+          el("th", { class: "mobile-hide player-observed-playtime" }, "Playtime"), el("th", {}, ""))),
         tbody)));
   draw();
 }
 
-function playerRow(p) {
+function playerRow(p, onUpdated) {
   const fallback = el("span", { class: "player-avatar player-avatar-fallback", "aria-hidden": "true" },
     String(p.username || "?").charAt(0).toUpperCase());
   const avatar = el("img", {
@@ -2667,19 +2672,72 @@ function playerRow(p) {
       "aria-label": `View ${p.username} on NameMC`,
     }, avatar)
     : avatar;
-  return el("tr", {},
+  const username = String(p.username || "Unknown");
+  const usernameTicker = el("span", {
+    class: "player-name-ticker",
+    "aria-label": username,
+    onpointerenter: () => updatePlayerNameTicker(usernameTicker),
+    onfocus: () => updatePlayerNameTicker(usernameTicker),
+  },
+    el("span", { class: "player-name-ticker-track" },
+      el("strong", { class: "player-name-ticker-text" }, username),
+      el("strong", { class: "player-name-ticker-text player-name-ticker-clone", "aria-hidden": "true" }, username)));
+  const row = el("tr", {
+    onclick: (event) => {
+      if (!window.matchMedia("(max-width: 820px)").matches || event.target.closest("a, button, input, select, textarea, [role='menuitem']")) return;
+      updatePlayerNameTicker(usernameTicker);
+      if (!usernameTicker.classList.contains("is-overflowing")) return;
+      const activate = !usernameTicker.classList.contains("is-ticker-active");
+      $$(".player-name-ticker.is-ticker-active").forEach((ticker) => ticker.classList.remove("is-ticker-active"));
+      usernameTicker.classList.toggle("is-ticker-active", activate);
+    },
+  },
     el("td", {}, el("div", { class: "player-identity" }, playerSkin,
       el("span", { class: "player-name-block" },
         el("span", { class: "player-name-line" },
-          el("strong", {}, p.username),
+          usernameTicker,
           p.op ? el("span", { class: "player-tag" }, "OP") : null,
+          p.whitelisted ? el("span", { class: "player-tag", title: "Whitelisted", "aria-label": "Whitelisted" }, "WL") : null,
           p.banned ? el("span", { class: "player-tag" }, "BANNED") : null),
         el("span", { class: "mobile-only mobile-row-detail player-status" + (p.online ? "" : " is-offline") }, p.online ? "Online" : "Offline")))),
     el("td", {}, el("span", { class: "player-status" + (p.online ? "" : " is-offline") }, p.online ? "Online" : "Offline")),
     el("td", { class: "mobile-hide" }, fmtTime(p.last_seen_at)),
     el("td", { class: "mobile-hide player-observed-playtime" }, fmtDur(p.observed_playtime_seconds)),
-    el("td", { class: "table-actions" }, can("server.players.manage") ? playerActions(p) : ""));
+    el("td", { class: "table-actions" }, can("server.players.manage") ? playerActions(p, onUpdated) : ""));
+  requestAnimationFrame(() => updatePlayerNameTicker(usernameTicker));
+  document.fonts?.ready.then(() => updatePlayerNameTicker(usernameTicker));
+  return row;
 }
+
+function updatePlayerNameTicker(ticker) {
+  if (!ticker?.isConnected) return;
+  const text = ticker.querySelector(".player-name-ticker-text:not(.player-name-ticker-clone)");
+  if (!text) return;
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const textWidth = Math.max(text.scrollWidth, range.getBoundingClientRect().width);
+  range.detach?.();
+  const overflowing = ticker.clientWidth > 0 && textWidth > ticker.clientWidth + 1;
+  ticker.classList.toggle("is-overflowing", overflowing);
+  if (overflowing) {
+    ticker.style.setProperty("--player-ticker-duration", `${Math.max(6, (textWidth + 24) / 24).toFixed(2)}s`);
+    ticker.tabIndex = 0;
+  } else {
+    ticker.classList.remove("is-ticker-active");
+    ticker.style.removeProperty("--player-ticker-duration");
+    ticker.removeAttribute("tabindex");
+  }
+}
+
+let playerNameTickerResizeFrame = 0;
+window.addEventListener("resize", () => {
+  cancelAnimationFrame(playerNameTickerResizeFrame);
+  playerNameTickerResizeFrame = requestAnimationFrame(() => {
+    playerNameTickerResizeFrame = requestAnimationFrame(() => {
+      $$(".player-name-ticker").forEach(updatePlayerNameTicker);
+    });
+  });
+});
 
 function playerNameMCProfileURL(uuid, username = "") {
   const value = String(uuid || "").trim();
@@ -2725,30 +2783,60 @@ function handlePlayerFaceError(image, fallback, username, size = 64) {
   image.replaceWith(fallback);
 }
 
-function playerActions(p) {
-  const act = (action, needsReason) => () => {
+function playerActions(p, onUpdated) {
+  const act = (label, apiAction, needsReason, onSuccess = null, buttonStyle = "danger") => () => {
     const reason = el("input", { placeholder: "Reason (optional)" });
-    modal(`${action} ${p.username}`,
-      needsReason ? [el("div", { class: "field-row" }, reason)] : [el("p", {}, `Confirm ${action} for ${p.username}?`)],
+    modal(`${label} ${p.username}`,
+      needsReason ? [el("div", { class: "field-row" }, reason)] : [el("p", {}, `Confirm ${label.toLowerCase()} for ${p.username}?`)],
       [["Cancel", "ghost", (c) => c()],
-       [action, "danger", async (c) => {
+       [label, buttonStyle, async (c) => {
          c();
          try {
-           await api("/players/action", { method: "POST", json: { action: action.toLowerCase(), username: p.username, reason: reason.value || "" } });
-           toast(`${action} sent for ${p.username}`, "ok");
+           await api("/players/action", { method: "POST", json: { action: apiAction, username: p.username, reason: reason.value || "" } });
+           if (onSuccess) onSuccess();
+           toast(`${label} sent for ${p.username}`, "ok");
          } catch (e) { toast(e.message, "err"); }
        }]]);
   };
-  const actions = [];
-  if (p.online) actions.push({ label: "Kick", icon: "close-circle-linear", danger: true, run: act("Kick", true) });
-  actions.push(
-    { label: "Ban", icon: "lock-keyhole-linear", danger: true, run: act("Ban", true) },
-    { label: "Op", icon: "key-linear", run: act("Op", false) },
-    { label: "Deop", icon: "key-linear", run: act("Deop", false) });
-  const desktop = el("div", { class: "row-actions desktop-row-actions" },
-    ...actions.map((action) => el("button", { class: "btn ghost", onclick: action.run }, action.label)));
+  const actions = [
+    p.online ? { slot: "kick", label: "Kick", icon: "close-circle-linear", danger: true, run: act("Kick", "kick", true) } : null,
+    {
+      slot: "ban",
+      label: p.banned ? "Unban" : "Ban",
+      icon: p.banned ? "check-circle-linear" : "lock-keyhole-linear",
+      danger: !p.banned,
+      run: act(p.banned ? "Unban" : "Ban", p.banned ? "pardon" : "ban", !p.banned, () => {
+        p.banned = !p.banned;
+        if (onUpdated) onUpdated();
+      }, p.banned ? "primary" : "danger"),
+    },
+    {
+      slot: "whitelist",
+      label: p.whitelisted ? "Unwhitelist" : "Whitelist",
+      icon: p.whitelisted ? "shield-keyhole-linear" : "shield-check-linear",
+      run: act(p.whitelisted ? "Unwhitelist" : "Whitelist", p.whitelisted ? "whitelist_remove" : "whitelist_add", false, () => {
+        p.whitelisted = !p.whitelisted;
+        if (onUpdated) onUpdated();
+      }, "primary"),
+    },
+    {
+      slot: "op",
+      label: p.op ? "Deop" : "Op",
+      icon: "key-linear",
+      danger: p.op,
+      run: act(p.op ? "Deop" : "Op", p.op ? "deop" : "op", false, () => {
+        p.op = !p.op;
+        if (onUpdated) onUpdated();
+      }, p.op ? "danger" : "primary"),
+    },
+  ];
+  const desktop = el("div", { class: "desktop-row-actions player-action-grid" },
+    ...actions.map((action) => action
+      ? el("button", { class: `btn ghost player-action-${action.slot}`, onclick: action.run },
+        action.slot === "whitelist" ? solarIcon(action.icon) : null, action.label)
+      : el("span", { class: "player-action-placeholder", "aria-hidden": "true" })));
   const mobile = overflowActionsMenu(`Actions for ${p.username}`,
-    actions.map((action) => el("button", {
+    actions.filter(Boolean).map((action) => el("button", {
       class: "action-menu-item" + (action.danger ? " danger" : ""),
       type: "button", role: "menuitem", onclick: action.run,
     }, solarIcon(action.icon), action.label)), "mobile-row-actions");
@@ -4456,28 +4544,31 @@ function scheduleForm(s) {
     expressionHost.innerHTML = "";
     const saved = expressionCache[scheduleType] || "";
     if (scheduleType === "once") {
-      const input = el("input", { type: "datetime-local", value: saved.replace(" ", "T") });
+      const input = el("input", { type: "datetime-local", step: "1", value: saved.replace(" ", "T") });
       expressionHost.append(el("label", {}, "Date and time", input));
       readExpression = () => input.value.replace("T", " ");
     } else if (scheduleType === "hourly") {
-      const input = el("input", { type: "number", min: "0", max: "59", step: "1", value: saved || "0" });
-      expressionHost.append(el("label", {}, "Minute of each hour", input));
-      readExpression = () => input.value;
+      const [savedMinute = "0", savedSecond = "0"] = saved.split(":");
+      const minute = el("input", { type: "number", min: "0", max: "59", step: "1", value: savedMinute || "0" });
+      const second = el("input", { type: "number", min: "0", max: "59", step: "1", value: savedSecond || "0" });
+      expressionHost.append(el("div", { class: "grid cols-2" },
+        el("label", {}, "Minute of each hour", minute), el("label", {}, "Second", second)));
+      readExpression = () => `${minute.value}:${String(Number(second.value) || 0).padStart(2, "0")}`;
     } else if (scheduleType === "daily") {
-      const input = el("input", { type: "time", value: saved || "04:00" });
+      const input = el("input", { type: "time", step: "1", value: saved || "04:00" });
       expressionHost.append(el("label", {}, "Time", input));
       readExpression = () => input.value;
     } else if (scheduleType === "weekly") {
       const [savedDay = "MON", savedTime = "04:00"] = saved.toUpperCase().split(/\s+/);
       const day = el("select", {}, ...[["MON", "Monday"], ["TUE", "Tuesday"], ["WED", "Wednesday"], ["THU", "Thursday"], ["FRI", "Friday"], ["SAT", "Saturday"], ["SUN", "Sunday"]]
         .map(([value, label]) => el("option", { value, selected: savedDay === value ? "" : null }, label)));
-      const time = el("input", { type: "time", value: savedTime || "04:00" });
+      const time = el("input", { type: "time", step: "1", value: savedTime || "04:00" });
       expressionHost.append(el("div", { class: "grid cols-2" }, el("label", {}, "Day", day), el("label", {}, "Time", time)));
       readExpression = () => `${day.value} ${time.value}`;
     } else if (scheduleType === "monthly") {
       const [savedDay = "1", savedTime = "04:00"] = saved.split(/\s+/);
       const day = el("input", { type: "number", min: "1", max: "31", step: "1", value: savedDay || "1" });
-      const time = el("input", { type: "time", value: savedTime || "04:00" });
+      const time = el("input", { type: "time", step: "1", value: savedTime || "04:00" });
       expressionHost.append(el("div", { class: "grid cols-2" }, el("label", {}, "Day of month", day), el("label", {}, "Time", time)));
       readExpression = () => `${day.value} ${time.value}`;
     } else if (scheduleType === "fixed_interval") {
@@ -7510,7 +7601,7 @@ function botCard(bot) {
       } }, "Send test"),
       botInviteControls(bot),
       el("div", { class: "spacer" }),
-      DEMO_DEBUG_BOTS ? null : el("button", { class: "btn danger small", onclick: () => removeBot(bot) }, "Remove")));
+      DEMO_DEBUG_BOTS ? null : el("button", { class: "btn danger small bot-card-primary-action", onclick: () => removeBot(bot) }, "Remove")));
 }
 
 function botEditor(existing = null, currentBots = []) {
@@ -7798,6 +7889,7 @@ function playitSettingsSection(initialConfig) {
   let claimAccountMode = config.account_mode;
   let editorRoot = null;
   let editorManagementMode = config.management_mode;
+  let saveEditorChanges = null;
 
   const replaceConfig = (next = {}, overrides = {}) => {
     ["agent_id", "agent_name", "tunnel_id", "public_address", "claim_url", "notice", "agent_error",
@@ -7886,10 +7978,10 @@ function playitSettingsSection(initialConfig) {
   const editorNotice = () => {
     if (editorManagementMode === "external") return null;
     if (!config.daemon_available) {
-      const externalDetected = config.detections.some((item) => item.externally_managed && ["active", "running"].includes(item.state));
+      const externalDetected = config.detections.find((item) => item.externally_managed && ["active", "running"].includes(item.state));
       return el("div", { class: "notice playit-inline-notice" },
         el("span", {}, externalDetected
-          ? "Bonghos cannot create this tunnel because playitd is not installed on the host. An external agent is running; choose Use existing agent, or install playitd for Bonghos-managed tunnels. "
+          ? `An external Playit${externalDetected.kind === "docker" ? " Docker" : ""} agent is running. Choose External agent to display its public Minecraft address, or install playitd for Bonghos-managed tunnels. `
           : "Bonghos cannot create this tunnel because playitd is not installed on the host. "),
         el("a", { href: "https://packages.playit.gg/", target: "_blank", rel: "noopener noreferrer" }, "Installation guide"));
     }
@@ -7903,6 +7995,7 @@ function playitSettingsSection(initialConfig) {
 
   const renderEditor = () => {
     if (!editorRoot) return;
+    saveEditorChanges = null;
     editorRoot.innerHTML = "";
     if (!config.enabled) {
       editorRoot.append(el("div", { class: "notice playit-inline-notice" }, "Playit.gg is off. Changes are saved without starting the agent."));
@@ -7910,6 +8003,9 @@ function playitSettingsSection(initialConfig) {
     const notice = editorNotice();
     if (notice) editorRoot.append(notice);
     const managedChoice = editorManagementMode !== "external";
+      const runningExternalAgent = Array.isArray(config.detections)
+        ? config.detections.find((item) => item.externally_managed && ["active", "running"].includes(item.state))
+        : null;
       const methodButtons = el("div", { class: "segmented-choice playit-choice" },
         el("button", { class: "btn" + (managedChoice ? " active" : ""), type: "button", onclick: async () => {
           if (config.management_mode === "bonghos") {
@@ -7924,10 +8020,12 @@ function playitSettingsSection(initialConfig) {
             toast("Bonghos-managed Playit agent selected", "ok");
           } catch (error) { toast(error.message, "err"); }
         } }, "Set up with Bonghos"),
-        el("button", { class: "btn" + (!managedChoice ? " active" : ""), type: "button", onclick: () => {
+        el("button", { class: "btn playit-external-agent-tab" + (!managedChoice ? " active" : ""), type: "button", onclick: () => {
           editorManagementMode = "external";
           renderEditor();
-        } }, "Use existing agent"));
+        } }, "External agent", runningExternalAgent
+          ? el("span", { class: "playit-external-running", title: "External Playit service running", "aria-label": "External Playit service running" })
+          : null));
       editorRoot.append(el("div", { class: "settings-row" },
         el("div", {}, el("h3", {}, "Agent"), el("p", { class: "muted" }, "Choose who runs the Playit agent.")),
         el("div", { class: "playit-form" }, methodButtons)));
@@ -7980,15 +8078,15 @@ function playitSettingsSection(initialConfig) {
           controls.append(details,
             el("div", { class: "playit-agent-name" },
               el("label", {}, "Agent name", agentName),
-              el("button", { class: "btn", type: "button", onclick: async (event) => {
+              el("button", { class: "btn playit-agent-name-save", type: "button", title: "Save agent name", "aria-label": "Save agent name", onclick: async (event) => {
                 event.currentTarget.disabled = true;
                 try {
                   replaceConfig(await api("/playit/agent", { method: "PUT", json: { name: agentName.value.trim() } }));
                   toast("Playit agent renamed", "ok");
                   render();
                 } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
-              } }, "Rename")),
-            el("div", { class: "playit-actions" },
+              } }, solarIcon("diskette-linear"))),
+            el("div", { class: "playit-actions playit-tunnel-actions" },
             el("button", { class: "btn primary", type: "button",
               ...(!config.enabled || !config.agent_online ? {
                 disabled: "disabled",
@@ -8044,34 +8142,40 @@ function playitSettingsSection(initialConfig) {
       } else {
         const address = el("input", { value: config.public_address || "", placeholder: "example.gl.joinmc.link", spellcheck: "false" });
         const port = el("input", { type: "number", min: "1", max: "65535", value: String(config.local_port || 25565) });
+        saveEditorChanges = async () => {
+          const publicAddress = address.value.trim();
+          const localPort = Number(port.value);
+          if (config.management_mode === "external" && publicAddress === (config.public_address || "") && localPort === Number(config.local_port || 25565)) return false;
+          await savePreference({ enabled: config.enabled, management_mode: "external", public_address: publicAddress, local_port: localPort });
+          editorManagementMode = "external";
+          return true;
+        };
         editorRoot.append(el("div", { class: "settings-row" },
-          el("div", {}, el("h3", {}, "Existing agent"), el("p", { class: "muted" }, "Manage its tunnel in Playit.")),
+          el("div", {}, el("h3", {}, "External agent"),
+            el("p", { class: "muted" }, "Enter its public IP or address. Bonghos only displays it and cannot directly manage the agent.")),
           el("div", { class: "playit-form" },
-            el("label", {}, "Public address", address), el("label", {}, "Port", port),
-            el("div", { class: "playit-actions" }, el("button", { class: "btn primary", type: "button", onclick: async (event) => {
-              event.currentTarget.disabled = true;
-              try {
-                await savePreference({ enabled: config.enabled, management_mode: "external", public_address: address.value.trim(), local_port: Number(port.value) });
-                editorManagementMode = "external";
-                toast("External Playit agent saved", "ok");
-              } catch (error) { toast(error.message, "err"); event.currentTarget.disabled = false; }
-            } }, "Save")))));
+            el("label", {}, "Public address", address), el("label", {}, "Port", port))));
+        if (Array.isArray(config.detections) && config.detections.length) {
+          editorRoot.append(el("div", { class: "settings-row playit-detected-agents" },
+            el("div", {}, el("h3", {}, "Detected agents"), el("p", { class: "muted" }, "Read-only.")),
+            el("div", { class: "settings-services" }, ...config.detections.map((item) =>
+              settingsServiceCard(item.name, item.kind,
+                item.externally_managed ? "Managed outside Bonghos." : "Managed by Bonghos.", item.state, true)))));
+        }
       }
-
-    if (Array.isArray(config.detections) && config.detections.length) {
-      editorRoot.append(el("div", { class: "settings-row" },
-        el("div", {}, el("h3", {}, "Detected agents"), el("p", { class: "muted" }, "Read-only.")),
-        el("div", { class: "settings-services" }, ...config.detections.map((item) =>
-          settingsServiceCard(item.name, item.kind,
-            item.externally_managed ? "Managed outside Bonghos." : "Managed by Bonghos.", item.state, true)))));
-    }
   };
 
   const openEditor = () => {
     editorManagementMode = config.management_mode;
     editorRoot = el("div", { class: "playit-editor" });
     renderEditor();
-    modal("Playit.gg", [editorRoot], [["Done", "primary", (close) => close()]], () => { editorRoot = null; }, "playit-editor-modal");
+    modal("Playit.gg", [editorRoot], [["Done", "primary", async (close) => {
+      try {
+        const saved = saveEditorChanges ? await saveEditorChanges() : false;
+        if (saved) toast("External Playit agent saved", "ok");
+        close();
+      } catch (error) { toast(error.message, "err"); }
+    }]], () => { editorRoot = null; saveEditorChanges = null; }, "playit-editor-modal");
   };
 
   const render = () => {

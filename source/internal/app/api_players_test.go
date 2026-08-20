@@ -27,6 +27,10 @@ func TestPlayerListIncludesAdminState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inst.AbsoluteDir(env.app.Home), "banned-players.json"), []byte(bans), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	whitelist := `[{"uuid":"11111111-2222-3333-4444-555555555555","name":"iKlaude"}]`
+	if err := os.WriteFile(filepath.Join(inst.AbsoluteDir(env.app.Home), "whitelist.json"), []byte(whitelist), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, player := range []struct {
 		name string
 		uuid string
@@ -45,9 +49,10 @@ func TestPlayerListIncludesAdminState(t *testing.T) {
 	c.mustLogin("owner", "correct horse battery", secret)
 	var response struct {
 		Players []struct {
-			Username string `json:"username"`
-			OP       bool   `json:"op"`
-			Banned   bool   `json:"banned"`
+			Username    string `json:"username"`
+			OP          bool   `json:"op"`
+			Banned      bool   `json:"banned"`
+			Whitelisted bool   `json:"whitelisted"`
 		} `json:"players"`
 	}
 	if status, body := c.do(http.MethodGet, "/api/players", nil, &response); status != http.StatusOK {
@@ -55,12 +60,13 @@ func TestPlayerListIncludesAdminState(t *testing.T) {
 	}
 
 	type adminState struct {
-		op     bool
-		banned bool
+		op          bool
+		banned      bool
+		whitelisted bool
 	}
 	got := map[string]adminState{}
 	for _, player := range response.Players {
-		got[player.Username] = adminState{op: player.OP, banned: player.Banned}
+		got[player.Username] = adminState{op: player.OP, banned: player.Banned, whitelisted: player.Whitelisted}
 	}
 	if !got["iKlaude"].op {
 		t.Error("iKlaude should be marked as an operator")
@@ -73,6 +79,12 @@ func TestPlayerListIncludesAdminState(t *testing.T) {
 	}
 	if !got["Alex"].banned {
 		t.Error("Alex should be marked as banned")
+	}
+	if !got["iKlaude"].whitelisted {
+		t.Error("iKlaude should be marked as whitelisted")
+	}
+	if got["Alex"].whitelisted {
+		t.Error("Alex should not be marked as whitelisted")
 	}
 }
 

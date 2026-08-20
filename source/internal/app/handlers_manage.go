@@ -991,6 +991,16 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 			bannedUUIDs[uuid] = true
 		}
 	}
+	whitelistedNames := make(map[string]bool, len(admin.Whitelist))
+	whitelistedUUIDs := make(map[string]bool, len(admin.Whitelist))
+	for _, entry := range admin.Whitelist {
+		if name := strings.ToLower(strings.TrimSpace(entry.Name)); name != "" {
+			whitelistedNames[name] = true
+		}
+		if uuid := normalizeUUID(entry.UUID); uuid != "" {
+			whitelistedUUIDs[uuid] = true
+		}
+	}
 	rows, err := a.DB.Query(`SELECT username, uuid, is_online, first_seen_at, last_seen_at,
 		last_joined_at, last_left_at, observed_playtime_seconds, current_session_started_at
 		FROM players WHERE instance_id=? ORDER BY is_online DESC, last_seen_at DESC`, inst.ID)
@@ -1005,6 +1015,7 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 		Online           bool   `json:"online"`
 		OP               bool   `json:"op"`
 		Banned           bool   `json:"banned"`
+		Whitelisted      bool   `json:"whitelisted"`
 		FirstSeenAt      string `json:"first_seen_at"`
 		LastSeenAt       string `json:"last_seen_at"`
 		LastJoinedAt     string `json:"last_joined_at,omitempty"`
@@ -1031,6 +1042,8 @@ func (a *App) handlePlayerList(w http.ResponseWriter, r *http.Request) {
 			(uuidKey != "" && opUUIDs[uuidKey])
 		p.Banned = (usernameKey != "" && bannedNames[usernameKey]) ||
 			(uuidKey != "" && bannedUUIDs[uuidKey])
+		p.Whitelisted = (usernameKey != "" && whitelistedNames[usernameKey]) ||
+			(uuidKey != "" && whitelistedUUIDs[uuidKey])
 		if joined != nil {
 			p.LastJoinedAt = *joined
 		}
